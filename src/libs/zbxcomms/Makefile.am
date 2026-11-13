@@ -5,6 +5,20 @@ noinst_LIBRARIES = libzbxcomms.a
 libzbxcomms_a_SOURCES = \
 	comms.h \
 	comms.c \
-	telnet.c
+	telnet.c \
+	tls.h \
+	tls_version.c \
+	tls_validate.c
 
-libzbxcomms_a_CFLAGS = $(LIBXML2_CFLAGS)
+libzbxcomms_a_CFLAGS = \
+		$(LIBXML2_CFLAGS) \
+		$(TLS_CFLAGS) \
+		$(ARES_CFLAGS)
+
+if HAVE_OPENSSL
+libzbxcomms_a_SOURCES += tls.c tls_openssl.c
+else
+if HAVE_GNUTLS
+libzbxcomms_a_SOURCES += tls.c tls_gnutls.c
+endif
+endif

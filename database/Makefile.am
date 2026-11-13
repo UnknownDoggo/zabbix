@@ -2,9 +2,9 @@
 
 SUBDIRS = \
 	mysql \
-	oracle \
 	postgresql \
 	sqlite3
 
 EXTRA_DIST = \
-	elasticsearch
+	elasticsearch \
+	clickhouse

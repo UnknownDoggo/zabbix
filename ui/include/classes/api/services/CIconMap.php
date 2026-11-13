@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -55,8 +50,9 @@ class CIconMap extends CApiService {
 
 		$sqlParts = [
 			'select'	=> ['icon_map' => 'im.iconmapid'],
-			'from'		=> ['icon_map' => 'icon_map im'],
+			'from'		=> 'icon_map im',
 			'where'		=> [],
+			'group'		=> [],
 			'order'		=> [],
 			'limit'		=> null
 		];
@@ -100,9 +96,8 @@ class CIconMap extends CApiService {
 		if (!is_null($options['sysmapids'])) {
 			zbx_value2array($options['sysmapids']);
 
-			$sqlParts['from']['sysmaps'] = 'sysmaps s';
+			$sqlParts['join']['s'] = ['table' => 'sysmaps', 'using' => 'iconmapid'];
 			$sqlParts['where'][] = dbConditionInt('s.sysmapid', $options['sysmapids']);
-			$sqlParts['where']['ims'] = 'im.iconmapid=s.iconmapid';
 		}
 
 		// filter
@@ -137,12 +132,12 @@ class CIconMap extends CApiService {
 
 		if ($result) {
 			$result = $this->addRelatedObjects($options, $result);
+
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
-		// removing keys (hash -> array)
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
-		}
 		return $result;
 	}
 
@@ -182,8 +177,6 @@ class CIconMap extends CApiService {
 	}
 
 	/**
-	 * @static
-	 *
 	 * @param array $iconmaps
 	 *
 	 * @throws APIException if the input is invalid.
@@ -247,13 +240,11 @@ class CIconMap extends CApiService {
 	}
 
 	/**
-	 * @static
-	 *
 	 * @param array $iconmaps
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	private static function validateUpdate(array &$iconmaps, array &$db_iconmaps = null) {
+	private static function validateUpdate(array &$iconmaps, ?array &$db_iconmaps = null) {
 		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['iconmapid'], ['name']], 'fields' => [
 			'iconmapid' =>		['type' => API_ID, 'flags' => API_REQUIRED],
 			'name' =>			['type' => API_STRING_UTF8, 'flags' => API_NOT_EMPTY, 'length' => DB::getFieldLength('icon_map', 'name')],
@@ -289,14 +280,12 @@ class CIconMap extends CApiService {
 	/**
 	 * Check for duplicated icon maps.
 	 *
-	 * @static
-	 *
 	 * @param array      $iconmaps
 	 * @param array|null $db_iconmaps
 	 *
 	 * @throws APIException  if user already exists.
 	 */
-	private static function checkDuplicates(array $iconmaps, array $db_iconmaps = null) {
+	private static function checkDuplicates(array $iconmaps, ?array $db_iconmaps = null) {
 		$names = [];
 
 		foreach ($iconmaps as $iconmap) {
@@ -326,8 +315,6 @@ class CIconMap extends CApiService {
 
 	/**
 	 * Check icon mappings.
-	 *
-	 * @static
 	 *
 	 * @param array $iconmaps
 	 *
@@ -373,8 +360,6 @@ class CIconMap extends CApiService {
 	/**
 	 * Check icons.
 	 *
-	 * @static
-	 *
 	 * @param array $iconmaps
 	 *
 	 * @throws APIException
@@ -415,13 +400,11 @@ class CIconMap extends CApiService {
 	/**
 	 * Update table "icon_mapping".
 	 *
-	 * @static
-	 *
 	 * @param array      $iconmaps
 	 * @param string     $method
 	 * @param array|null $db_iconmaps
 	 */
-	private static function updateMappings(array &$iconmaps, string $method, array $db_iconmaps = null): void {
+	private static function updateMappings(array &$iconmaps, string $method, ?array $db_iconmaps = null): void {
 		$ins_mappings = [];
 		$upd_mappings = [];
 		$del_mappingids = [];
@@ -508,7 +491,6 @@ class CIconMap extends CApiService {
 
 		self::validateDelete($iconmapids, $db_iconmaps);
 
-		DB::delete('icon_mapping', ['iconmapid' => $iconmapids]);
 		DB::delete('icon_map', ['iconmapid' => $iconmapids]);
 
 		self::addAuditLog(CAudit::ACTION_DELETE, CAudit::RESOURCE_ICON_MAP, $db_iconmaps);
@@ -517,14 +499,12 @@ class CIconMap extends CApiService {
 	}
 
 	/**
-	 * @static
-	 *
 	 * @param array      $iconmapids
 	 * @param array|null $db_iconmaps
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	private static function validateDelete(array &$iconmapids, array &$db_iconmaps = null) {
+	private static function validateDelete(array &$iconmapids, ?array &$db_iconmaps = null) {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 
 		if (!CApiInputValidator::validate($api_input_rules, $iconmapids, '/', $error)) {
@@ -545,8 +525,6 @@ class CIconMap extends CApiService {
 	}
 
 	/**
-	 * @static
-	 *
 	 * @param array      $iconmapids
 	 * @param array|null $db_iconmaps
 	 *
@@ -573,13 +551,17 @@ class CIconMap extends CApiService {
 
 		if ($options['selectMappings'] !== null && $options['selectMappings'] != API_OUTPUT_COUNT) {
 			$mappings = API::getApiService()->select('icon_mapping', [
-				'output' => $this->outputExtend($options['selectMappings'], ['iconmapid', 'iconmappingid']),
+				'output' => $this->outputExtend($options['selectMappings'], ['iconmapid', 'iconmappingid', 'sortorder']),
 				'filter' => ['iconmapid' => $iconMapIds],
 				'preservekeys' => true
 			]);
+			CArrayHelper::sort($mappings, [['field' => 'sortorder', 'order' => ZBX_SORT_UP]]);
+
 			$relationMap = $this->createRelationMap($mappings, 'iconmapid', 'iconmappingid');
 
-			$mappings = $this->unsetExtraFields($mappings, ['iconmapid', 'iconmappingid'], $options['selectMappings']);
+			$mappings = $this->unsetExtraFields($mappings, ['iconmapid', 'iconmappingid', 'sortorder'],
+				$options['selectMappings']
+			);
 			$result = $relationMap->mapMany($result, $mappings, 'mappings');
 		}
 
@@ -588,8 +570,6 @@ class CIconMap extends CApiService {
 
 	/**
 	 * Add the existing mappings to $db_iconmaps whether these are affected by the update.
-	 *
-	 * @static
 	 *
 	 * @param array $iconmaps
 	 * @param array $db_iconmaps

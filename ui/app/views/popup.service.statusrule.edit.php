@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -32,7 +27,7 @@ $form = (new CForm())
 	->addItem(getMessages());
 
 // Enable form submitting on Enter.
-$form->addItem((new CInput('submit', null))->addStyle('display: none;'));
+$form->addItem((new CSubmitButton())->addClass(ZBX_STYLE_FORM_SUBMIT_HIDDEN));
 
 $form_grid = (new CFormGrid())
 	->addItem([
@@ -59,17 +54,22 @@ $form_grid = (new CFormGrid())
 	])
 	->addItem([
 		(new CLabel('N', 'service-status-rule-limit-value'))->setId('service-status-rule-limit-value-label'),
-		new CFormField(
+		new CFormField([
 			new CHorList([
-				(new CTextBox('limit_value', $data['form']['limit_value'], false, 7))
+				(new CNumericBox('limit_value', $data['form']['limit_value'], 7, allow_negative: false))
+					->setDefaultValue(1)
 					->setId('service-status-rule-limit-value')
 					->setWidth(ZBX_TEXTAREA_TINY_WIDTH)
-					->setAriaRequired(),
+					->setAriaRequired()
+					->setErrorContainer('limit_value_error_container'),
 				(new CSpan('%'))
 					->setId('service-status-rule-limit-value-unit')
 					->addStyle('display: none;')
-			])
-		)
+			]),
+			(new CDiv())
+				->addClass(ZBX_STYLE_ERROR_CONTAINER)
+				->setId('limit_value_error_container')
+		])
 	])
 	->addItem([
 		new CLabel(_('Status'), 'service-status-rule-limit-status-focusable'),
@@ -83,12 +83,7 @@ $form_grid = (new CFormGrid())
 	]);
 
 $form
-	->addItem($form_grid)
-	->addItem(
-		(new CScriptTag('
-			service_status_rule_edit_popup.init();
-		'))->setOnDocumentReady()
-	);
+	->addItem($form_grid);
 
 $output = [
 	'header' => $data['is_edit'] ? _('Additional rule') : _('New additional rule'),
@@ -96,13 +91,16 @@ $output = [
 	'buttons' => [
 		[
 			'title' => $data['is_edit'] ? _('Update') : _('Add'),
+			'class' => 'js-submit',
 			'keepOpen' => true,
-			'isSubmit' => true,
-			'action' => 'service_status_rule_edit_popup.submit();'
+			'isSubmit' => true
 		]
 	],
 	'script_inline' => getPagePostJs().
-		$this->readJsFile('popup.service.statusrule.edit.js.php')
+		$this->readJsFile('popup.service.statusrule.edit.js.php').
+		'service_status_rule_edit_popup.init('.json_encode([
+			'rules' => $data['js_validation_rules']
+		]).');'
 ];
 
 if ($data['user']['debug_mode'] == GROUP_DEBUG_MODE_ENABLED) {

@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -40,7 +35,7 @@ class API {
 	 *
 	 * @param CApiWrapper|null $wrapper
 	 */
-	public static function setWrapper(CApiWrapper $wrapper = null) {
+	public static function setWrapper(?CApiWrapper $wrapper = null) {
 		self::$wrapper = $wrapper;
 	}
 
@@ -116,6 +111,34 @@ class API {
 	}
 
 	/**
+	 * @return CApmTrace
+	 */
+	public static function ApmTrace() {
+		return self::getApi('apmtrace');
+	}
+
+	/**
+	 * @return CApmSpan
+	 */
+	public static function ApmSpan() {
+		return self::getApi('apmspan');
+	}
+
+	/**
+	 * @return CApmLog
+	 */
+	public static function ApmLog() {
+		return self::getApi('apmlog');
+	}
+
+	/**
+	 * @return CApmMetric
+	 */
+	public static function ApmMetric() {
+		return self::getApi('apmmetric');
+	}
+
+	/**
 	 * @return CAuditLog
 	 */
 	public static function AuditLog() {
@@ -137,10 +160,24 @@ class API {
 	}
 
 	/**
+	 * @return CCepRule
+	 */
+	public static function CepRule() {
+		return self::getApi('ceprule');
+	}
+
+	/**
 	 * @return CConfiguration
 	 */
 	public static function Configuration() {
 		return self::getApi('configuration');
+	}
+
+	/**
+	 * @return CConnector
+	 */
+	public static function Connector() {
+		return self::getApi('connector');
 	}
 
 	/**
@@ -165,6 +202,13 @@ class API {
 	}
 
 	/**
+	 * @return CDevice
+	 */
+	public static function Device() {
+		return self::getApi('device');
+	}
+
+	/**
 	 * @return CDHost
 	 */
 	public static function DHost() {
@@ -176,6 +220,13 @@ class API {
 	 */
 	public static function DiscoveryRule() {
 		return self::getApi('discoveryrule');
+	}
+
+	/**
+	 * @return CDiscoveryRulePrototype
+	 */
+	public static function DiscoveryRulePrototype() {
+		return self::getApi('discoveryruleprototype');
 	}
 
 	/**
@@ -239,6 +290,13 @@ class API {
 	 */
 	public static function Host() {
 		return self::getApi('host');
+	}
+
+	/**
+	 * @return CHostDashboard
+	 */
+	public static function HostDashboard() {
+		return self::getApi('hostdashboard');
 	}
 
 	/**
@@ -326,6 +384,13 @@ class API {
 	}
 
 	/**
+	 * @return CMfa
+	 */
+	public static function Mfa() {
+		return self::getApi('mfa');
+	}
+
+	/**
 	 * @return CProblem
 	 */
 	public static function Problem() {
@@ -337,6 +402,13 @@ class API {
 	 */
 	public static function Proxy() {
 		return self::getApi('proxy');
+	}
+
+	/**
+	 * @return CProxyGroup
+	 */
+	public static function ProxyGroup() {
+		return self::getApi('proxygroup');
 	}
 
 	/**
@@ -407,6 +479,13 @@ class API {
 	 */
 	public static function TemplateDashboard() {
 		return self::getApi('templatedashboard');
+	}
+
+	/**
+	 * @return CTemplateGroup
+	 */
+	public static function TemplateGroup() {
+		return self::getApi('templategroup');
 	}
 
 	/**

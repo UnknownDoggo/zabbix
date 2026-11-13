@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -29,13 +24,7 @@ abstract class CControllerPopupItemTest extends CController {
 	const ZBX_TEST_TYPE_ITEM = 0;
 	const ZBX_TEST_TYPE_ITEM_PROTOTYPE = 1;
 	const ZBX_TEST_TYPE_LLD = 2;
-
-	/**
-	 * Max-length of input fields that can contain resolved macro values. Used in views for input fields.
-	 *
-	 * @var int
-	 */
-	public const INPUT_MAX_LENGTH = 2048;
+	const ZBX_TEST_TYPE_LLD_PROTOTYPE = 3;
 
 	/**
 	 * Define a set of item types allowed to test and item properties needed to collect for each item type.
@@ -44,13 +33,16 @@ abstract class CControllerPopupItemTest extends CController {
 	 */
 	private static $testable_item_types = [ITEM_TYPE_ZABBIX, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL, ITEM_TYPE_EXTERNAL,
 		ITEM_TYPE_DB_MONITOR, ITEM_TYPE_HTTPAGENT, ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_JMX,
-		ITEM_TYPE_CALCULATED, ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT
+		ITEM_TYPE_CALCULATED, ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER, ITEM_TYPE_TELEMETRY_QUERY
 	];
 
 	/**
 	 * Item value type used if user has not specified one.
 	 */
 	const ZBX_DEFAULT_VALUE_TYPE = ITEM_VALUE_TYPE_TEXT;
+
+	public const TEST_WITH_SERVER = 0;
+	public const TEST_WITH_PROXY = 1;
 
 	/**
 	 * Item types requiring interface.
@@ -91,17 +83,22 @@ abstract class CControllerPopupItemTest extends CController {
 	 */
 	protected $items_support_proxy = [ITEM_TYPE_ZABBIX, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL, ITEM_TYPE_EXTERNAL,
 		ITEM_TYPE_DB_MONITOR, ITEM_TYPE_HTTPAGENT, ITEM_TYPE_IPMI, ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_JMX,
-		ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT
+		ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER, ITEM_TYPE_TELEMETRY_QUERY
 	];
 
 	/**
 	 * Item types with mandatory item key.
-	 *
-	 * @var array
 	 */
-	protected $item_types_has_key_mandatory = [ITEM_TYPE_ZABBIX, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL,
+	public static array $item_types_has_key_mandatory = [ITEM_TYPE_ZABBIX, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL,
 		ITEM_TYPE_EXTERNAL, ITEM_TYPE_DB_MONITOR, ITEM_TYPE_HTTPAGENT, ITEM_TYPE_IPMI,
 		ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_JMX, ITEM_TYPE_CALCULATED
+	];
+
+	/**
+	 * Item form fields that must be valid before the item test can be opened, per item type.
+	 */
+	public static array $item_types_test_fields = [
+		ITEM_TYPE_TELEMETRY_QUERY => ['columns', 'aggregated_columns', 'conditions']
 	];
 
 	/**
@@ -111,87 +108,111 @@ abstract class CControllerPopupItemTest extends CController {
 	 */
 	protected $macros_by_item_props = [
 		'key' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'params_es' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'params_ap' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'jmx_endpoint' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'url' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'posts' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'http_proxy' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'ssl_cert_file' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'ssl_key_file' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'query_fields' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'headers' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'parameters' => [
-			'host' => ['{HOSTNAME}', '{HOST.HOST}', '{HOST.NAME}'],
-			'interface' => ['{HOST.IP}', '{IPADDRESS}', '{HOST.DNS}', '{HOST.CONN}'],
+			'host' => ['{HOST.HOST}', '{HOST.NAME}'],
+			'interface' => ['{HOST.IP}', '{HOST.DNS}', '{HOST.CONN}', '{HOST.PORT}'],
+			'inventory' => ['{INVENTORY.ALIAS}', '{INVENTORY.ASSET.TAG}', '{INVENTORY.CHASSIS}', '{INVENTORY.CONTACT}',
+				'{INVENTORY.CONTRACT.NUMBER}', '{INVENTORY.DEPLOYMENT.STATUS}', '{INVENTORY.HARDWARE}',
+				'{INVENTORY.HARDWARE.FULL}', '{INVENTORY.HOST.NETMASK}', '{INVENTORY.HOST.NETWORKS}',
+				'{INVENTORY.HOST.ROUTER}', '{INVENTORY.HW.ARCH}', '{INVENTORY.HW.DATE.DECOMM}',
+				'{INVENTORY.HW.DATE.EXPIRY}', '{INVENTORY.HW.DATE.INSTALL}', '{INVENTORY.HW.DATE.PURCHASE}',
+				'{INVENTORY.INSTALLER.NAME}', '{INVENTORY.LOCATION}', '{INVENTORY.LOCATION.LAT}',
+				'{INVENTORY.LOCATION.LON}', '{INVENTORY.MACADDRESS.A}', '{INVENTORY.MACADDRESS.B}', '{INVENTORY.MODEL}',
+				'{INVENTORY.NAME}', '{INVENTORY.NOTES}', '{INVENTORY.OOB.IP}', '{INVENTORY.OOB.NETMASK}',
+				'{INVENTORY.OOB.ROUTER}', '{INVENTORY.OS}', '{INVENTORY.OS.FULL}', '{INVENTORY.OS.SHORT}',
+				'{INVENTORY.POC.PRIMARY.CELL}', '{INVENTORY.POC.PRIMARY.EMAIL}', '{INVENTORY.POC.PRIMARY.NAME}',
+				'{INVENTORY.POC.PRIMARY.NOTES}', '{INVENTORY.POC.PRIMARY.PHONE.A}', '{INVENTORY.POC.PRIMARY.PHONE.B}',
+				'{INVENTORY.POC.PRIMARY.SCREEN}', '{INVENTORY.POC.SECONDARY.CELL}', '{INVENTORY.POC.SECONDARY.EMAIL}',
+				'{INVENTORY.POC.SECONDARY.NAME}', '{INVENTORY.POC.SECONDARY.NOTES}',
+				'{INVENTORY.POC.SECONDARY.PHONE.A}', '{INVENTORY.POC.SECONDARY.PHONE.B}',
+				'{INVENTORY.POC.SECONDARY.SCREEN}', '{INVENTORY.SERIALNO.A}', '{INVENTORY.SERIALNO.B}',
+				'{INVENTORY.SITE.ADDRESS.A}', '{INVENTORY.SITE.ADDRESS.B}', '{INVENTORY.SITE.ADDRESS.C}',
+				'{INVENTORY.SITE.CITY}', '{INVENTORY.SITE.COUNTRY}', '{INVENTORY.SITE.NOTES}', '{INVENTORY.SITE.RACK}',
+				'{INVENTORY.SITE.STATE}', '{INVENTORY.SITE.ZIP}', '{INVENTORY.SOFTWARE}', '{INVENTORY.SOFTWARE.APP.A}',
+				'{INVENTORY.SOFTWARE.APP.B}', '{INVENTORY.SOFTWARE.APP.C}', '{INVENTORY.SOFTWARE.APP.D}',
+				'{INVENTORY.SOFTWARE.APP.E}', '{INVENTORY.SOFTWARE.FULL}', '{INVENTORY.TAG}', '{INVENTORY.TYPE}',
+				'{INVENTORY.TYPE.FULL}', '{INVENTORY.URL.A}', '{INVENTORY.URL.B}', '{INVENTORY.URL.C}',
+				'{INVENTORY.VENDOR}'],
 			'item' => ['{ITEM.ID}', '{ITEM.KEY.ORIG}', '{ITEM.KEY}'],
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
 		'params_f' => [],
 		'script' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'browser_script' => [
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
@@ -204,6 +225,10 @@ abstract class CControllerPopupItemTest extends CController {
 			'support_lld_macros' => true
 		],
 		'snmp_oid' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'status_codes' => [
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		],
@@ -220,6 +245,22 @@ abstract class CControllerPopupItemTest extends CController {
 			'support_lld_macros' => true
 		],
 		'http_password' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'time_shift' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'lookback_limit' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'granularity' => [
+			'support_user_macros' => true,
+			'support_lld_macros' => true
+		],
+		'query' => [
 			'support_user_macros' => true,
 			'support_lld_macros' => true
 		]
@@ -247,9 +288,9 @@ abstract class CControllerPopupItemTest extends CController {
 	protected $is_item_testable;
 
 	/**
-	 * @var object
+	 * @var string
 	 */
-	protected $preproc_item;
+	protected $test_type;
 
 	/**
 	 * @var array
@@ -305,20 +346,37 @@ abstract class CControllerPopupItemTest extends CController {
 
 		if ($ret && $hostid != 0) {
 			$hosts = API::Host()->get([
-				'output' => ['hostid', 'host', 'name', 'status', 'proxy_hostid', 'tls_subject', 'maintenance_status',
-					'maintenance_type', 'ipmi_authtype', 'ipmi_privilege', 'ipmi_username', 'ipmi_password',
-					'tls_issuer', 'tls_connect'
+				'output' => ['hostid', 'host', 'name', 'monitored_by', 'proxyid', 'assigned_proxyid', 'proxy_groupid',
+					'status', 'maintenance_status', 'maintenance_type', 'ipmi_authtype', 'ipmi_privilege',
+					'ipmi_username', 'ipmi_password', 'tls_subject', 'tls_issuer', 'tls_connect'
 				],
+				'selectInventory' => in_array($this->item_type, [ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER])
+					? array_column(getHostInventories(), 'db_field')
+					: null,
 				'hostids' => [$hostid],
 				'editable' => true
 			]);
 
-			if (!$hosts) {
+			if ($hosts) {
+				if ($hosts[0]['monitored_by'] == ZBX_MONITORED_BY_PROXY_GROUP) {
+					$hosts[0]['proxyid'] = $hosts[0]['assigned_proxyid'];
+				}
+				else {
+					$hosts[0]['proxy_groupid'] = 0;
+				}
+
+				unset($hosts[0]['assigned_proxyid']);
+			}
+			else {
 				$hosts = API::Template()->get([
 					'output' => ['templateid', 'host', 'name', 'status'],
 					'templateids' => [$hostid],
 					'editable' => true
 				]);
+
+				if (!$hosts) {
+					return false;
+				}
 
 				$hosts[0] = CArrayHelper::renameKeys($hosts[0], ['templateid' => 'hostid']);
 			}
@@ -332,47 +390,6 @@ abstract class CControllerPopupItemTest extends CController {
 	}
 
 	/**
-	 * Function returns instance of item, item prototype or discovery rule class.
-	 *
-	 * @param int $test_type
-	 *
-	 * @return CItem|CItemPrototype|CDiscoveryRule
-	 */
-	protected static function getPreprocessingItemClassInstance($test_type) {
-		switch ($test_type) {
-			case self::ZBX_TEST_TYPE_ITEM:
-				return new CItem;
-
-			case self::ZBX_TEST_TYPE_ITEM_PROTOTYPE:
-				return new CItemPrototype;
-
-			case self::ZBX_TEST_TYPE_LLD:
-				return new CDiscoveryRule;
-		}
-	}
-
-	/**
-	 * Function returns list of proxies.
-	 *
-	 * @return array
-	 */
-	protected function getHostProxies() {
-		$proxies = API::Proxy()->get([
-			'output' => ['host'],
-			'preservekeys' => true
-		]);
-
-		CArrayHelper::sort($proxies, [['field' => 'host', 'order' => ZBX_SORT_UP]]);
-
-		foreach ($proxies as &$proxy) {
-			$proxy = $proxy['host'];
-		}
-		unset($proxy);
-
-		return $proxies;
-	}
-
-	/**
 	 * Function returns array of item specific properties used for item testing.
 	 *
 	 * @param array $input       Stored user input used to overwrite values retrieved from database.
@@ -381,89 +398,46 @@ abstract class CControllerPopupItemTest extends CController {
 	 *
 	 * @return array
 	 */
-	protected function getItemTestProperties(array $input, bool $for_server = false) {
-		$data = [
-			'value_type' => $input['value_type']
+	protected function getItemTestProperties(array $input, bool $for_server = false): array {
+		if ($for_server && in_array($this->item_type, $this->items_support_proxy)
+				&& (!array_key_exists('timeout', $input) || $input['timeout'] === '')
+				&& $this->getInput('test_with', self::TEST_WITH_SERVER) == self::TEST_WITH_PROXY) {
+			$global_timeouts = getInheritedTimeouts('0');
+
+			if (array_key_exists($this->item_type, $global_timeouts['timeouts'])) {
+				$input['timeout'] = $global_timeouts['timeouts'][$this->item_type];
+			}
+		}
+
+		$data_host = [];
+
+		if ($this->host && $this->host['status'] != HOST_STATUS_TEMPLATE) {
+			$data_host['hostid'] = $this->host['hostid'];
+		}
+
+		$data_item = [
+			'value_type' => (int) $input['value_type']
 		];
 
 		if (!$this->is_item_testable) {
-			return $data;
+			return ['item' => $data_item, 'host' => []];
 		}
 
-		$data['type'] = $this->item_type;
+		$data_item['type'] = $this->item_type;
 
 		if (array_key_exists('itemid', $input)) {
-			$data['itemid'] = $input['itemid'];
-		}
-
-		if (array_key_exists('interface', $input) && array_key_exists('interfaceid', $input['interface'])) {
-			$interface_input['interfaceid'] = $input['interface']['interfaceid'];
-		}
-		elseif (array_key_exists('interfaceid', $input)) {
-			$interface_input['interfaceid'] = $input['interfaceid'];
-		}
-		else {
-			$interface_input['interfaceid'] = 0;
-		}
-
-		if (array_key_exists('interface', $input) && array_key_exists('useip', $input['interface'])) {
-			$interface_input['useip'] = $input['interface']['useip'];
-		}
-
-		if (array_key_exists('data', $input) && array_key_exists('port', $input['data'])) {
-			$interface_input['port'] = $input['data']['port'];
-		}
-		elseif (array_key_exists('interface', $input) && array_key_exists('port', $input['interface'])) {
-			$interface_input['port'] = $input['interface']['port'];
-		}
-
-		if (array_key_exists('data', $input) && array_key_exists('address', $input['data'])) {
-			$interface_input['address'] = $input['data']['address'];
-		}
-		elseif (array_key_exists('interface', $input) && array_key_exists('address', $input['interface'])) {
-			$interface_input['address'] = $input['interface']['address'];
-		}
-		elseif (array_key_exists('address', $input)) {
-			$interface_input['address'] = $input['address'];
-		}
-
-		if (array_key_exists('data', $input) && array_key_exists('interface_details', $input['data'])
-				&& is_array($input['data']['interface_details'])) {
-			$interface_input['details'] = $input['data']['interface_details'];
-		}
-		elseif (array_key_exists('interface', $input) && array_key_exists('details', $input['interface'])) {
-			$interface_input['details'] = $input['interface']['details'];
-		}
-
-		// Set proxy.
-		if (in_array($this->item_type, $this->items_support_proxy)) {
-			if (array_key_exists('data', $input) && array_key_exists('proxy_hostid', $input['data'])) {
-				$data['proxy_hostid'] = $input['data']['proxy_hostid'];
-			}
-			elseif (array_key_exists('proxy_hostid', $input)) {
-				$data['proxy_hostid'] = $input['proxy_hostid'];
-			}
-			elseif (array_key_exists('proxy_hostid', $this->host)) {
-				$data['proxy_hostid'] = $this->host['proxy_hostid'];
-			}
-			else {
-				$data['proxy_hostid'] = 0;
-			}
+			$data_item['itemid'] = $input['itemid'];
 		}
 
 		switch ($this->item_type) {
 			case ITEM_TYPE_ZABBIX:
-				$data += [
-					'key' => array_key_exists('key', $input) ? $input['key'] : null,
-					'interface' => $this->getHostInterface($interface_input)
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'timeout']);
+				$data_host += $this->getInterface($input, ['useip', 'interfaceid', 'ip', 'dns']);
 
 				if ($this->host['status'] != HOST_STATUS_TEMPLATE) {
-					$data['host'] = [
-						'tls_issuer' => $this->host['tls_issuer'],
-						'tls_connect' => $this->host['tls_connect'],
-						'tls_subject' => $this->host['tls_subject']
-					];
+					$data_host += CArrayHelper::getByKeysStrict($this->host,
+						['tls_issuer', 'tls_connect', 'tls_subject']
+					);
 
 					if ($for_server && $this->host['tls_connect'] == HOST_ENCRYPTION_PSK) {
 						$hosts = API::Host()->get([
@@ -471,21 +445,21 @@ abstract class CControllerPopupItemTest extends CController {
 							'hostids' => $this->host['hostid'],
 							'editable' => true
 						]);
-						$host = reset($hosts);
 
-						$data['host']['tls_psk_identity'] = $host['tls_psk_identity'];
-						$data['host']['tls_psk'] = $host['tls_psk'];
+						if ($hosts) {
+							$data_host['tls_psk_identity'] = $hosts[0]['tls_psk_identity'];
+							$data_host['tls_psk'] = $hosts[0]['tls_psk'];
+						}
 					}
 				}
-
-				unset($data['interface']['useip'], $data['interface']['interfaceid'], $data['interface']['ip'],
-					$data['interface']['dns']
-				);
 				break;
 
 			case ITEM_TYPE_SNMP:
-				if (!array_key_exists('flags', $input)) {
-					$items = (array_key_exists('itemid', $input))
+				if (array_key_exists('flags', $input)) {
+					$item_flag = $input['flags'];
+				}
+				else {
+					$items = array_key_exists('itemid', $input)
 						? API::Item()->get([
 							'output' => ['flags'],
 							'itemids' => $input['itemid']
@@ -496,202 +470,168 @@ abstract class CControllerPopupItemTest extends CController {
 						$item_flag = $items[0]['flags'];
 					}
 					else {
-						switch ($this->getInput('test_type')) {
-							case self::ZBX_TEST_TYPE_LLD:
-								$item_flag = ZBX_FLAG_DISCOVERY_RULE;
-								break;
-
-							case self::ZBX_TEST_TYPE_ITEM_PROTOTYPE;
-								$item_flag = ZBX_FLAG_DISCOVERY_PROTOTYPE;
-								break;
-
-							default:
-								$item_flag = ZBX_FLAG_DISCOVERY_NORMAL;
-								break;
-						}
+						$item_flags = [
+							self::ZBX_TEST_TYPE_ITEM => ZBX_FLAG_DISCOVERY_NORMAL,
+							self::ZBX_TEST_TYPE_ITEM_PROTOTYPE => ZBX_FLAG_DISCOVERY_PROTOTYPE,
+							self::ZBX_TEST_TYPE_LLD => ZBX_FLAG_DISCOVERY_RULE,
+							self::ZBX_TEST_TYPE_LLD_PROTOTYPE => ZBX_FLAG_DISCOVERY_RULE_PROTOTYPE
+						];
+						$item_flag = $item_flags[$this->getInput('test_type')];
 					}
 				}
-				else {
-					$item_flag = $input['flags'];
-				}
 
-				$data += [
-					'snmp_oid' => array_key_exists('snmp_oid', $input) ? $input['snmp_oid'] : null,
-					'flags' => $item_flag,
-					'host' => [
-						'host' => $this->host['host']
-					],
-					'interface' => $this->getHostInterface($interface_input)
-				];
-
-				unset($data['interface']['ip'], $data['interface']['dns']);
+				$data_item += ['flags' => $item_flag] + CArrayHelper::getByKeys($input, ['snmp_oid', 'timeout']);
+				$data_host += $this->getInterface($input, ['ip', 'dns']);
+				$data_host['host'] = $this->host['host'];
 				break;
 
 			case ITEM_TYPE_INTERNAL:
-				$data += [
-					'key' => $input['key'],
-					'host' => [
-						'hostid' => $this->host['hostid']
-					]
-				];
+				$data_item += ['key' => $input['key']];
 
 				if ($this->host['status'] != HOST_STATUS_TEMPLATE) {
-					$data['host'] += [
-						'maintenance_status' => $this->host['maintenance_status'],
-						'maintenance_type' => $this->host['maintenance_type']
-					];
+					$data_host += CArrayHelper::getByKeysStrict($this->host,
+						['maintenance_status', 'maintenance_type']
+					);
 				}
 				break;
 
 			case ITEM_TYPE_EXTERNAL:
-				$data += [
-					'key' => $input['key']
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'timeout']);
 				break;
 
 			case ITEM_TYPE_DB_MONITOR:
-				$data += [
-					'key' => $input['key'],
-					'params_ap' => array_key_exists('params_ap', $input) ? $input['params_ap'] : null,
-					'username' => array_key_exists('username', $input) ? $input['username'] : null,
-					'password' => array_key_exists('password', $input) ? $input['password'] : null
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'params_ap', 'username', 'password', 'timeout']);
 				break;
 
 			case ITEM_TYPE_HTTPAGENT:
-				$data += [
-					'key' => $input['key'],
-					'http_authtype' => array_key_exists('http_authtype', $input)
-						? $input['http_authtype']
-						: HTTPTEST_AUTH_NONE,
-					'follow_redirects' => array_key_exists('follow_redirects', $input) ? $input['follow_redirects'] : 0,
-					'headers' => array_key_exists('headers', $input) ? $input['headers'] : [],
-					'http_proxy' => array_key_exists('http_proxy', $input) ? $input['http_proxy'] : null,
-					'output_format' => array_key_exists('output_format', $input) ? $input['output_format'] : 0,
-					'posts' => array_key_exists('posts', $input) ? $input['posts'] : null,
-					'post_type' => array_key_exists('post_type', $input) ? $input['post_type'] : ZBX_POSTTYPE_RAW,
-					'query_fields' => array_key_exists('query_fields', $input) ? $input['query_fields'] : [],
-					'request_method' => array_key_exists('request_method', $input)
-						? $input['request_method']
-						: HTTPCHECK_REQUEST_GET,
-					'retrieve_mode' => array_key_exists('retrieve_mode', $input)
-						? $input['retrieve_mode']
-						: HTTPTEST_STEP_RETRIEVE_MODE_CONTENT,
-					'ssl_cert_file' => array_key_exists('ssl_cert_file', $input) ? $input['ssl_cert_file'] : null,
-					'ssl_key_file' => array_key_exists('ssl_key_file', $input) ? $input['ssl_key_file'] : null,
-					'ssl_key_password' => array_key_exists('ssl_key_password', $input)
-						? $input['ssl_key_password']
-						: null,
-					'status_codes' => array_key_exists('status_codes', $input) ? $input['status_codes'] : null,
-					'timeout' => array_key_exists('timeout', $input) ? $input['timeout'] : null,
-					'url' => array_key_exists('url', $input) ? $input['url'] : null,
-					'verify_host' => array_key_exists('verify_host', $input) ? $input['verify_host'] : 0,
-					'verify_peer' => array_key_exists('verify_peer', $input) ? $input['verify_peer'] : 0
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'http_authtype', 'follow_redirects', 'headers',
+					'http_proxy', 'output_format', 'posts', 'post_type', 'query_fields', 'request_method',
+					'retrieve_mode', 'ssl_cert_file', 'ssl_key_file', 'ssl_key_password', 'status_codes', 'timeout',
+					'url', 'verify_host', 'verify_peer'
+				]) + [
+					'http_authtype' => ZBX_HTTP_AUTH_NONE,
+					'follow_redirects' => HTTPTEST_STEP_FOLLOW_REDIRECTS_OFF,
+					'output_format' => HTTPCHECK_STORE_RAW,
+					'post_type' => ZBX_POSTTYPE_RAW,
+					'request_method' => HTTPCHECK_REQUEST_GET,
+					'retrieve_mode' => HTTPTEST_STEP_RETRIEVE_MODE_CONTENT,
+					'verify_host' => ZBX_HTTP_VERIFY_HOST_OFF,
+					'verify_peer' => ZBX_HTTP_VERIFY_PEER_OFF
 				];
 
-				if ($data['http_authtype'] != HTTPTEST_AUTH_NONE) {
-					$data += [
-						'http_username' => array_key_exists('http_username', $input) ? $input['http_username'] : null,
-						'http_password' => array_key_exists('http_password', $input) ? $input['http_password'] : null
-					];
+				if ($data_item['http_authtype'] != ZBX_HTTP_AUTH_NONE) {
+					$data_item += CArrayHelper::getByKeys($input, ['http_username', 'http_password']);
 				}
 				break;
 
 			case ITEM_TYPE_IPMI:
-				$data += [
-					'key' => $input['key'],
-					'ipmi_sensor' => array_key_exists('ipmi_sensor', $input) ? $input['ipmi_sensor'] : null,
-					'interface' => $this->getHostInterface($interface_input),
-					'host' => [
-						'hostid' => $this->host['hostid']
-					]
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'ipmi_sensor']);
+				$data_host += $this->getInterface($input, ['useip', 'interfaceid', 'ip', 'dns']);
 
 				if ($this->host['status'] != HOST_STATUS_TEMPLATE) {
-					$data['host'] += [
-						'ipmi_authtype' => $this->host['ipmi_authtype'],
-						'ipmi_privilege' => $this->host['ipmi_privilege'],
-						'ipmi_username' => $this->host['ipmi_username'],
-						'ipmi_password' => $this->host['ipmi_password']
-					];
+					$data_host += CArrayHelper::getByKeysStrict($this->host, ['ipmi_authtype', 'ipmi_privilege',
+						'ipmi_username', 'ipmi_password'
+					]);
 				}
-
-				unset($data['interface']['useip'], $data['interface']['interfaceid'], $data['interface']['ip'],
-					$data['interface']['dns']
-				);
 				break;
 
 			case ITEM_TYPE_SSH:
-				$data += [
-					'key' => $input['key'],
-					'authtype' => array_key_exists('authtype', $input) ? $input['authtype'] : ITEM_AUTHTYPE_PASSWORD,
-					'params_es' => array_key_exists('params_es', $input) ? $input['params_es'] : ITEM_AUTHTYPE_PASSWORD,
-					'username' => array_key_exists('username', $input) ? $input['username'] : null,
-					'password' => array_key_exists('password', $input) ? $input['password'] : null,
-					'interface' => $this->getHostInterface($interface_input)
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'authtype', 'params_es', 'username', 'password',
+					'timeout'
+				]) + [
+					'authtype' => ITEM_AUTHTYPE_PASSWORD,
+					'params_es' => ITEM_AUTHTYPE_PASSWORD
 				];
+				$data_host += $this->getInterface($input);
 
-				if ($data['authtype'] == ITEM_AUTHTYPE_PUBLICKEY) {
-					$data += [
-						'publickey' => array_key_exists('publickey', $input) ? $input['publickey'] : null,
-						'privatekey' => array_key_exists('privatekey', $input) ? $input['privatekey'] : null
-					];
+				if ($data_item['authtype'] == ITEM_AUTHTYPE_PUBLICKEY) {
+					$data_item += CArrayHelper::getByKeys($input, ['publickey', 'privatekey']);
 				}
 				break;
 
 			case ITEM_TYPE_TELNET:
-				$data += [
-					'key' => $input['key'],
-					'params_es' => array_key_exists('params_es', $input) ? $input['params_es'] : null,
-					'username' => array_key_exists('username', $input) ? $input['username'] : null,
-					'password' => array_key_exists('password', $input) ? $input['password'] : null,
-					'interface' => $this->getHostInterface($interface_input)
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'params_es', 'username', 'password', 'timeout']);
+				$data_host += $this->getInterface($input);
 				break;
 
 			case ITEM_TYPE_JMX:
-				$data += [
-					'key' => $input['key'],
-					'jmx_endpoint' => array_key_exists('jmx_endpoint', $input) ? $input['jmx_endpoint'] : null,
-					'username' => array_key_exists('username', $input) ? $input['username'] : null,
-					'password' => array_key_exists('password', $input) ? $input['password'] : null
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'jmx_endpoint', 'username', 'password']);
 				break;
 
 			case ITEM_TYPE_CALCULATED:
-				$data += [
-					'key' => $input['key'],
-					'params_f' => array_key_exists('params_f', $input) ? $input['params_f'] : null,
-					'host' => [
-						'host' => $this->host['host']
-					]
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'params_f']);
+				$data_host['host'] = $this->host['host'];
 				break;
 
 			case ITEM_TYPE_SIMPLE:
-				$data += [
-					'key' => $input['key'],
-					'interface' => $this->getHostInterface($interface_input),
-					'username' => array_key_exists('username', $input) ? $input['username'] : null,
-					'password' => array_key_exists('password', $input) ? $input['password'] : null
-				];
-
-				unset($data['interface']['useip'], $data['interface']['interfaceid'], $data['interface']['ip'],
-					$data['interface']['dns'],  $data['interface']['port']
-				);
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'username', 'password', 'timeout']);
+				$data_host += $this->getInterface($input, ['useip', 'interfaceid', 'ip', 'dns', 'port']);
 				break;
 
 			case ITEM_TYPE_SCRIPT:
-				$data += [
-					'key' => $input['key'],
-					'parameters' => array_key_exists('parameters', $input) ? $input['parameters'] : [],
-					'script' => array_key_exists('script', $input) ? $input['script'] : null,
-					'timeout' => array_key_exists('timeout', $input) ? $input['timeout'] : null
-				];
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'parameters', 'script', 'timeout']);
+				break;
+
+			case ITEM_TYPE_BROWSER:
+				$data_item += CArrayHelper::getByKeys($input, ['key', 'parameters', 'browser_script', 'timeout']);
+				break;
+
+			case ITEM_TYPE_TELEMETRY_QUERY:
+				$data_item += CArrayHelper::getByKeys($input,
+					['key', 'timeout', 'time_shift', 'lookback_limit', 'granularity']
+				);
+				$data_item['query'] = array_key_exists('query', $input)
+					? $input['query']
+					: json_encode(CItemGeneralHelper::composeTelemetryQuery($input, true));
 				break;
 		}
 
-		return $data;
+		if (in_array($this->item_type, $this->items_support_proxy)) {
+			if (array_key_exists('data', $input) && array_key_exists('test_with', $input['data'])) {
+				$test_with = $input['data']['test_with'];
+			}
+			elseif (array_key_exists('test_with', $input)) {
+				$test_with = $input['test_with'];
+			}
+			else {
+				$test_with = self::TEST_WITH_SERVER;
+			}
+
+			$data_host['proxyid'] = 0;
+
+			if ($test_with == self::TEST_WITH_PROXY) {
+				if (array_key_exists('data', $input) && array_key_exists('proxyid', $input['data'])) {
+					$data_host['proxyid'] = $input['data']['proxyid'];
+				}
+				elseif (array_key_exists('proxyid', $input)) {
+					$data_host['proxyid'] = $input['proxyid'];
+				}
+				elseif ($this->host['status'] != HOST_STATUS_TEMPLATE) {
+					$data_host['proxyid'] = $this->host['proxyid'];
+				}
+			}
+		}
+
+		return ['item' => $data_item, 'host' => $data_host];
+	}
+
+	private function getInterface(array $input, array $exclude_keys = []): array {
+		$interface_input = [];
+
+		if (array_key_exists('data', $input)) {
+			$input['data'] = CArrayHelper::renameKeys($input['data'], ['interface_details' => 'details']);
+			$interface_input += CArrayHelper::getByKeys($input['data'], ['port', 'address', 'details']);
+		}
+
+		if (array_key_exists('interface', $input)) {
+			$interface_input += CArrayHelper::getByKeys($input['interface'],
+				['interfaceid', 'useip', 'port', 'address', 'details']
+			);
+		}
+
+		$interface_input += CArrayHelper::getByKeys($input, ['interfaceid', 'address']) + ['interfaceid' => 0];
+
+		return ['interface' => array_diff_key($this->getHostInterface($interface_input), array_flip($exclude_keys))];
 	}
 
 	/**
@@ -719,7 +659,9 @@ abstract class CControllerPopupItemTest extends CController {
 				'privpassphrase' => '',
 				'authprotocol' => ITEM_SNMPV3_AUTHPROTOCOL_MD5,
 				'privprotocol' => ITEM_SNMPV3_PRIVPROTOCOL_DES,
-				'contextname' => ''
+				'contextname' => '',
+				'max_repetitions' => '10',
+				'retries' => '5'
 			]
 		];
 
@@ -786,7 +728,7 @@ abstract class CControllerPopupItemTest extends CController {
 			}
 		}
 
-		if ($this->item_type == ITEM_TYPE_SCRIPT) {
+		if (in_array($this->item_type, [ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER, ITEM_TYPE_TELEMETRY_QUERY])) {
 			return $interface_data;
 		}
 
@@ -837,7 +779,7 @@ abstract class CControllerPopupItemTest extends CController {
 	 */
 	protected function unsetEmptyValues(array $data) {
 		foreach ($data as $key => $value) {
-			if ($key === 'host' && is_array($value)) {
+			if (in_array($key, ['host', 'item', 'options']) && is_array($value)) {
 				$data[$key] = $this->unsetEmptyValues($value);
 
 				if (!$data[$key]) {
@@ -846,40 +788,29 @@ abstract class CControllerPopupItemTest extends CController {
 			}
 			elseif ($key === 'interface' && $this->item_type == ITEM_TYPE_SNMP) {
 				if ($data['interface']['details']['version'] == SNMP_V3) {
-					unset($data['interface']['details']['community']);
+					$unrelated_details = [];
 
 					if ($data['interface']['details']['securitylevel'] == ITEM_SNMPV3_SECURITYLEVEL_NOAUTHNOPRIV) {
-						unset($data['interface']['details']['authprotocol'],
-							$data['interface']['details']['authpassphrase'],
-							$data['interface']['details']['privprotocol'],
-							$data['interface']['details']['privpassphrase']
-						);
+						$unrelated_details = ['authprotocol', 'authpassphrase', 'privprotocol', 'privpassphrase'];
 					}
 					elseif ($data['interface']['details']['securitylevel'] == ITEM_SNMPV3_SECURITYLEVEL_AUTHNOPRIV) {
-						unset($data['interface']['details']['privprotocol'],
-							$data['interface']['details']['privpassphrase']
-						);
+						$unrelated_details = ['privprotocol', 'privpassphrase'];
 					}
+
+					array_unshift($unrelated_details, 'community');
 				}
 				else {
-					unset($data['interface']['details']['contextname'],
-						$data['interface']['details']['securityname'],
-						$data['interface']['details']['securitylevel'],
-						$data['interface']['details']['authprotocol'],
-						$data['interface']['details']['authpassphrase'],
-						$data['interface']['details']['privprotocol'],
-						$data['interface']['details']['privpassphrase']
-					);
+					$unrelated_details = ['contextname', 'securityname', 'securitylevel', 'authprotocol',
+						'authpassphrase', 'privprotocol', 'privpassphrase'
+					];
 				}
 
 				unset($data['interface']['type']);
+				$data['interface']['details'] = array_diff_key($data['interface']['details'],
+					array_flip($unrelated_details)
+				);
 			}
-			elseif ($key === 'query_fields') {
-				if ($value === '[]') {
-					unset($data[$key]);
-				}
-			}
-			elseif ($key === 'parameters') {
+			elseif (in_array($key, ['query_fields', 'headers', 'parameters'])) {
 				if (!$value) {
 					unset($data[$key]);
 				}
@@ -902,17 +833,16 @@ abstract class CControllerPopupItemTest extends CController {
 
 		$macros = [
 			'host' => [
-				'{HOSTNAME}' => $this->host['host'],
 				'{HOST.HOST}' => $this->host['host'],
 				'{HOST.NAME}' => $this->host['name']
 			],
 			'interface' => [
 				'{HOST.IP}' => $interface['ip'],
-				'{IPADDRESS}' => $interface['ip'],
 				'{HOST.DNS}' => $interface['dns'],
 				'{HOST.CONN}' => $interface['address'],
 				'{HOST.PORT}' => $interface['port']
 			],
+			'inventory' => [],
 			'item' => [
 				'{ITEM.ID}' => (array_key_exists('itemid', $inputs) && $inputs['itemid'])
 					? $inputs['itemid']
@@ -922,14 +852,24 @@ abstract class CControllerPopupItemTest extends CController {
 			]
 		];
 
-		if (array_key_exists('key', $inputs) && strstr($inputs['key'], '{') !== false) {
+		if (array_key_exists('inventory', $this->host)) {
+			foreach (CMacrosResolverGeneral::getSupportedHostInventoryMacrosMap() as $macro_name => $db_field_name) {
+				$macros['inventory'][$macro_name] = array_key_exists($db_field_name, $this->host['inventory'])
+					? $this->host['inventory'][$db_field_name]
+					: '';
+			}
+		}
+
+		if (array_key_exists('key', $inputs) && str_contains($inputs['key'], '{')) {
 			$usermacros = CMacrosResolverHelper::extractItemTestMacros([
 				'steps' => [],
 				'delay' => '',
 				'supported_macros' => array_diff_key($this->macros_by_item_props['key'],
 					['support_user_macros' => true, 'support_lld_macros' => true]
 				),
-				'support_lldmacros' => ($this->preproc_item instanceof CItemPrototype),
+				'support_lldmacros' => in_array($this->test_type,
+					[self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]
+				),
 				'texts_support_macros' => [$inputs['key']],
 				'texts_support_lld_macros' => [$inputs['key']],
 				'texts_support_user_macros' => [$inputs['key']],
@@ -946,76 +886,6 @@ abstract class CControllerPopupItemTest extends CController {
 	}
 
 	/**
-	 * Transform front-end familiar array of http query fields to the form server is capable to handle.
-	 *
-	 * @param array $data
-	 * @param array $data[name]   Indexed array of names.
-	 * @param array $data[value]  Indexed array of values.
-	 *
-	 * @return string
-	 */
-	protected function transformQueryFields(array $data) {
-		$result = [];
-
-		if (array_key_exists('name', $data) && array_key_exists('value', $data)) {
-			foreach (array_keys($data['name']) as $num) {
-				if (array_key_exists($num, $data['value']) && $data['name'][$num] !== '') {
-					$result[] = [$data['name'][$num] => $data['value'][$num]];
-				}
-			}
-		}
-
-		return json_encode($result);
-	}
-
-	/**
-	 * Transform front-end familiar array of parameters fields to the form server is capable to handle. Server expects
-	 * one object where parameter names are keys and parameter values are values. Note that parameter names are unique.
-	 *
-	 * @param array $data
-	 * @param array $data[name]   Indexed array of names.
-	 * @param array $data[value]  Indexed array of values.
-	 *
-	 * @return array
-	 */
-	protected function transformParametersFields(array $data): array {
-		$result = [];
-
-		if (array_key_exists('name', $data) && array_key_exists('value', $data)) {
-			foreach (array_keys($data['name']) as $num) {
-				if (array_key_exists($num, $data['value']) && $data['name'][$num] !== '') {
-					$result += [$data['name'][$num] => $data['value'][$num]];
-				}
-			}
-		}
-
-		return $result;
-	}
-
-	/**
-	 * Transform front-end familiar array of http header fields to the form server is capable to handle.
-	 *
-	 * @param array $data
-	 * @param array $data[name]   Indexed array of names.
-	 * @param array $data[value]  Indexed array of values.
-	 *
-	 * @return string
-	 */
-	protected function transformHeaderFields(array $data) {
-		$result = [];
-
-		if (array_key_exists('name', $data) && array_key_exists('value', $data)) {
-			foreach (array_keys($data['name']) as $num) {
-				if (array_key_exists($num, $data['value']) && $data['name'][$num] !== '') {
-					$result[] = $data['name'][$num].': '.$data['value'][$num];
-				}
-			}
-		}
-
-		return implode("\r\n", $result);
-	}
-
-	/**
 	 * Resolve macros used in preprocessing step parameter fields.
 	 *
 	 * @param array $steps  Steps from item test input form.
@@ -1025,7 +895,14 @@ abstract class CControllerPopupItemTest extends CController {
 	protected function resolvePreprocessingStepMacros(array $steps) {
 		// Resolve macros used in parameter fields.
 		$macros_posted = $this->getInput('macros', []);
-		$macros_types = ($this->preproc_item instanceof CItemPrototype)
+		$macros_posted = array_combine(
+			array_column($macros_posted, 'name'),
+			array_column($macros_posted, 'value')
+		);
+
+		$macros_types = in_array($this->test_type,
+			[self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]
+		)
 			? ['usermacros' => true, 'lldmacros' => true]
 			: ['usermacros' => true];
 
@@ -1038,7 +915,7 @@ abstract class CControllerPopupItemTest extends CController {
 
 			// Resolve macros in parameter fields before send data to Zabbix server.
 			foreach (['params', 'error_handler_params'] as $field) {
-				$matched_macros = (new CMacrosResolverGeneral)->getMacroPositions($step[$field], $macros_types);
+				$matched_macros = CMacrosResolverGeneral::getMacroPositions($step[$field], $macros_types);
 
 				foreach (array_reverse($matched_macros, true) as $pos => $macro) {
 					$macro_value = array_key_exists($macro, $macros_posted)
@@ -1069,7 +946,9 @@ abstract class CControllerPopupItemTest extends CController {
 
 		$expression_parser = new CExpressionParser([
 			'usermacros' => true,
-			'lldmacros' => ($this->preproc_item instanceof CItemPrototype),
+			'lldmacros' => in_array($this->test_type,
+				[self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]
+			),
 			'calculated' => true,
 			'host_macro' => true,
 			'empty_host' => true
@@ -1141,6 +1020,11 @@ abstract class CControllerPopupItemTest extends CController {
 											);
 											$expression[] = CFilterParser::quoteString($string);
 											break;
+
+										case CFilterParser::TOKEN_TYPE_KEYWORD:
+										case CFilterParser::TOKEN_TYPE_OPERATOR:
+											$expression[] = $filter_token['match'];
+											break;
 									}
 								}
 								break;
@@ -1182,6 +1066,10 @@ abstract class CControllerPopupItemTest extends CController {
 	protected function resolveItemPropertyMacros(array $inputs) {
 		// Resolve macros used in parameter fields.
 		$macros_posted = $this->getInput('macros', []);
+		$macros_posted = array_combine(
+			array_column($macros_posted, 'name'),
+			array_column($macros_posted, 'value')
+		);
 
 		foreach (array_keys($this->macros_by_item_props) as $field) {
 			if (!array_key_exists($field, $inputs)) {
@@ -1200,11 +1088,11 @@ abstract class CControllerPopupItemTest extends CController {
 				'macros_n' => []
 			];
 
-			if ($this->preproc_item instanceof CItemPrototype) {
+			if (in_array($this->test_type, [self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE])) {
 				$types += ['lldmacros' => true];
 			}
 
-			foreach (['host', 'interface', 'item'] as $type) {
+			foreach (['host', 'interface', 'item', 'inventory'] as $type) {
 				if (array_key_exists($type, $this->macros_by_item_props[$field])) {
 					$types['macros_n'] = array_merge($types['macros_n'], $this->macros_by_item_props[$field][$type]);
 				}
@@ -1216,45 +1104,82 @@ abstract class CControllerPopupItemTest extends CController {
 					continue;
 				}
 
-				foreach (['name', 'value'] as $key) {
-					foreach (array_keys($inputs[$field][$key]) as $nr) {
-						$str = &$inputs[$field][$key][$nr];
-						if (strstr($str, '{') !== false) {
-							$matched_macros = (new CMacrosResolverGeneral)->getMacroPositions($str, $types);
+				foreach ($inputs[$field] as &$entry) {
+					if (str_contains($entry['name'], '{')) {
+						$matched_macros = CMacrosResolverGeneral::getMacroPositions($entry['name'], $types);
 
-							foreach (array_reverse($matched_macros, true) as $pos => $macro) {
-								$macro_value = array_key_exists($macro, $macros_posted)
-									? $macros_posted[$macro]
-									: '';
+						foreach (array_reverse($matched_macros, true) as $pos => $macro) {
+							$macro_value = array_key_exists($macro, $macros_posted)
+								? $macros_posted[$macro]
+								: '';
 
-								$str = substr_replace($str, $macro_value, $pos, strlen($macro));
+							$entry['name'] = substr_replace($entry['name'], $macro_value, $pos, strlen($macro));
+						}
+					}
+
+					if (str_contains($entry['value'], '{')) {
+						$matched_macros = CMacrosResolverGeneral::getMacroPositions($entry['value'], $types);
+
+						foreach (array_reverse($matched_macros, true) as $pos => $macro) {
+							$macro_value = array_key_exists($macro, $macros_posted)
+								? $macros_posted[$macro]
+								: '';
+
+							$entry['value'] = substr_replace($entry['value'], $macro_value, $pos, strlen($macro));
+						}
+					}
+				}
+				unset($entry);
+			}
+			elseif ($field === 'query') {
+				$query = json_decode($inputs[$field], true);
+
+				if (!array_key_exists('conditions', $query['filter'])) {
+					continue;
+				}
+
+				foreach ($query['filter']['conditions'] as &$condition) {
+					foreach (['attribute_key', 'value'] as $name) {
+						$matched_macros = CMacrosResolverGeneral::getMacroPositions($condition[$name], $types);
+
+						foreach (array_reverse($matched_macros, true) as $pos => $macro) {
+							$macro_value = array_key_exists($macro, $macros_posted)
+								? $macros_posted[$macro]
+								: '';
+
+							$condition[$name] = substr_replace($condition[$name], $macro_value, $pos, strlen($macro));
+						}
+					}
+				}
+				unset($condition);
+
+				$inputs[$field] = json_encode($query, JSON_UNESCAPED_UNICODE);
+			}
+			elseif (str_contains($inputs[$field], '{')) {
+				if ($field === 'key') {
+					$inputs[$field] = CMacrosResolverGeneral::resolveItemKeyMacros($inputs[$field], $macros_posted, $types);
+				}
+				else {
+					$matched_macros = CMacrosResolverGeneral::getMacroPositions($inputs[$field], $types);
+
+					foreach (array_reverse($matched_macros, true) as $pos => $macro) {
+						$macro_value = array_key_exists($macro, $macros_posted)
+							? $macros_posted[$macro]
+							: '';
+
+						if ($inputs['type'] == ITEM_TYPE_HTTPAGENT && $field === 'posts') {
+							if ($inputs['post_type'] == ZBX_POSTTYPE_JSON && !is_numeric($macro_value)) {
+								$macro_value = json_encode($macro_value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+								// Remove " wrapping.
+								$macro_value = substr($macro_value, 1, -1);
+							}
+							elseif ($inputs['post_type'] == ZBX_POSTTYPE_XML) {
+								$macro_value = htmlentities($macro_value);
 							}
 						}
 
-						unset($str);
+						$inputs[$field] = substr_replace($inputs[$field], $macro_value, $pos, strlen($macro));
 					}
-				}
-			}
-			elseif (strstr($inputs[$field], '{') !== false) {
-				$matched_macros = (new CMacrosResolverGeneral)->getMacroPositions($inputs[$field], $types);
-
-				foreach (array_reverse($matched_macros, true) as $pos => $macro) {
-					$macro_value = array_key_exists($macro, $macros_posted)
-						? $macros_posted[$macro]
-						: '';
-
-					if ($inputs['type'] == ITEM_TYPE_HTTPAGENT && $field === 'posts') {
-						if ($inputs['post_type'] == ZBX_POSTTYPE_JSON && !is_numeric($macro_value)) {
-							$macro_value = json_encode($macro_value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-							// Remove " wrapping.
-							$macro_value = substr($macro_value, 1, -1);
-						}
-						elseif ($inputs['post_type'] == ZBX_POSTTYPE_XML) {
-							$macro_value = htmlentities($macro_value);
-						}
-					}
-
-					$inputs[$field] = substr_replace($inputs[$field], $macro_value, $pos, strlen($macro));
 				}
 			}
 		}
@@ -1262,13 +1187,14 @@ abstract class CControllerPopupItemTest extends CController {
 		// Resolve interface details (SNMP) macros separately.
 		if (array_key_exists('interface', $inputs) && array_key_exists('details', $inputs['interface'])) {
 			foreach ($inputs['interface']['details'] as &$field) {
-				if (strstr($field, '{') !== false) {
-					$matched_macros = (new CMacrosResolverGeneral)->getMacroPositions($field, ['usermacros' => true]);
+				if (str_contains($field, '{')) {
+					$matched_macros = CMacrosResolverGeneral::getMacroPositions($field, ['usermacros' => true]);
 
 					foreach (array_reverse($matched_macros, true) as $pos => $macro) {
+						// If matching macro is not found, return unresolved macro string.
 						$macro_value = array_key_exists($macro, $macros_posted)
 							? $macros_posted[$macro]
-							: '';
+							: $macro;
 
 						$field = substr_replace($field, $macro_value, $pos, strlen($macro));
 					}
@@ -1298,44 +1224,67 @@ abstract class CControllerPopupItemTest extends CController {
 		return $value;
 	}
 
+	/**
+	 * Gathers (non-empty) properties needed for server to collect item value.
+	 *
+	 * @return array $data
+	 * @return array $data['item]
+	 * @return array $data['host]
+	 */
+	protected function prepareTestData(): array {
+		$data = $this->getItemTestProperties($this->getInputAll(), true);
+		$data['item'] = $this->resolveItemPropertyMacros($data['item']);
+
+		// Rename form fields according to API conventions.
+		$data['item'] = CArrayHelper::renameKeys($data['item'], [
+			'params_ap' => 'params',
+			'params_es' => 'params',
+			'params_f' => 'params',
+			'script' => 'params',
+			'browser_script' => 'params',
+			'http_username' => 'username',
+			'http_password' => 'password',
+			'http_authtype' => 'authtype',
+			'item_type' => 'type'
+		]);
+
+		// Only non-empty fields are sent to server, except item status_codes.
+		$data = $this->unsetEmptyValues($data);
+
+		// Server defaults to checking status code is 200 if field not present. Turn off code check if unspecified.
+		if ($this->item_type == ITEM_TYPE_HTTPAGENT) {
+			$data['item'] += ['status_codes' => ''];
+
+			self::transformHttpFields($data['item']);
+		}
+
+		if (array_key_exists('parameters', $data['item'])) {
+			$data['item']['parameters'] = array_column($data['item']['parameters'], 'value', 'name');
+		}
+
+		return $data;
+	}
 
 	/**
-	 * Validates interface object in context of current item type.
-	 *
-	 * @param array  $interface
-	 * @param string $interface['address']               (optional)
-	 * @param string $interface['port']                  (optional)
-	 * @param array  $interface['details']               (optional)
-	 * @param int    $interface['details']['version']
-	 * @param string $interface['details']['community']  (optional)
-	 *
-	 * @return bool
+	 * @param array $item
 	 */
-	final protected function validateInterface(array $interface): bool {
-		if ($this->item_type == ITEM_TYPE_SNMP) {
-			if (($interface['details']['version'] == SNMP_V1 || $interface['details']['version'] == SNMP_V2C)
-					&& (!array_key_exists('community', $interface['details'])
-						|| $interface['details']['community'] === '')) {
-				error(_s('Incorrect value for field "%1$s": %2$s.', _('SNMP community'), _('cannot be empty')));
-
-				return false;
+	protected static function transformHttpFields(array &$item): void {
+		if (array_key_exists('query_fields', $item)) {
+			foreach ($item['query_fields'] as &$query_field) {
+				$query_field = [$query_field['name'] => $query_field['value']];
 			}
+			unset($query_field);
+
+			$item['query_fields'] = json_encode(array_values($item['query_fields']), JSON_UNESCAPED_UNICODE);
 		}
 
-		if ($this->items_require_interface[$this->item_type]['address']
-				&& (!array_key_exists('address', $interface) || $interface['address'] === '')) {
-			error(_s('Incorrect value for field "%1$s": %2$s.', _('Host address'), _('cannot be empty')));
+		if (array_key_exists('headers', $item)) {
+			foreach ($item['headers'] as &$header) {
+				$header = $header['name'].': '.$header['value'];
+			}
+			unset($header);
 
-			return false;
+			$item['headers'] = implode("\r\n", $item['headers']);
 		}
-
-		if ($this->items_require_interface[$this->item_type]['port']
-				&& (!array_key_exists('port', $interface) || $interface['port'] === '')) {
-			error(_s('Incorrect value for field "%1$s": %2$s.', _('Port'), _('cannot be empty')));
-
-			return false;
-		}
-
-		return true;
 	}
 }

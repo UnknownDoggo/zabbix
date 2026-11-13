@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -108,7 +103,7 @@ class CGlobalRegexp {
 			}
 		}
 		else {
-			$result = (bool) @preg_match('/'.str_replace('/', '\/', $this->expression).'/', $string);
+			$result = (bool) @preg_match('/'.CRegexHelper::handleSlashEscaping($this->expression).'/', $string);
 		}
 
 		return $result;
@@ -117,15 +112,13 @@ class CGlobalRegexp {
 	/**
 	 * Matches expression against test string, respecting expression type.
 	 *
-	 * @static
-	 *
 	 * @param array $expression
 	 * @param $string
 	 *
 	 * @return bool
 	 */
 	public static function matchExpression(array $expression, $string) {
-		if ($expression['expression_type'] == EXPRESSION_TYPE_TRUE || $expression['expression_type'] == EXPRESSION_TYPE_FALSE) {
+		if ($expression['expression_type'] == REGEX_TYPE_MATCHES_REGEX || $expression['expression_type'] == REGEX_TYPE_NOT_MATCHES_REGEX) {
 			$result = self::_matchRegular($expression, $string);
 		}
 		else {
@@ -138,45 +131,21 @@ class CGlobalRegexp {
 	/**
 	 * Matches expression as regular expression.
 	 *
-	 * @static
-	 *
 	 * @param array $expression
 	 * @param string $string
 	 *
 	 * @return bool
 	 */
 	private static function _matchRegular(array $expression, $string) {
-		$pattern = self::buildRegularExpression($expression);
+		$expected = $expression['expression_type'] == REGEX_TYPE_MATCHES_REGEX;
+		$pattern = '/'.CRegexHelper::handleSlashEscaping($expression['expression']).'/';
+		$pattern .= $expression['case_sensitive'] ? 'm' : 'mi';
 
-		$expectedResult = ($expression['expression_type'] == EXPRESSION_TYPE_TRUE);
-
-		return preg_match($pattern, $string) == $expectedResult;
-	}
-
-	/**
-	 * Combines regular expression provided as definition array into a string.
-	 *
-	 * @static
-	 *
-	 * @param array $expression
-	 *
-	 * @return string
-	 */
-	private static function buildRegularExpression(array $expression) {
-		$expression['expression'] = str_replace('/', '\/', $expression['expression']);
-
-		$pattern = '/'.$expression['expression'].'/m';
-		if (!$expression['case_sensitive']) {
-			$pattern .= 'i';
-		}
-
-		return $pattern;
+		return preg_match($pattern, $string) == $expected;
 	}
 
 	/**
 	 * Matches expression as string.
-	 *
-	 * @static
 	 *
 	 * @param array $expression
 	 * @param string $string
@@ -186,14 +155,14 @@ class CGlobalRegexp {
 	private static function _matchString(array $expression, $string) {
 		$result = true;
 
-		if ($expression['expression_type'] == EXPRESSION_TYPE_ANY_INCLUDED) {
+		if ($expression['expression_type'] == REGEX_TYPE_CONTAINS_ANY_SUBSTRING) {
 			$patterns = array_filter(explode($expression['exp_delimiter'], $expression['expression']), 'strlen');
 		}
 		else {
 			$patterns = [$expression['expression']];
 		}
 
-		$expectedResult = ($expression['expression_type'] != EXPRESSION_TYPE_NOT_INCLUDED);
+		$expectedResult = ($expression['expression_type'] != REGEX_TYPE_NOT_CONTAINS_STRING);
 
 		if (!$expression['case_sensitive']) {
 			$string = mb_strtolower($string);
@@ -207,7 +176,7 @@ class CGlobalRegexp {
 			$pos = mb_strpos($string, $pattern);
 			$tmp = (($pos !== false) == $expectedResult);
 
-			if ($expression['expression_type'] == EXPRESSION_TYPE_ANY_INCLUDED && $tmp) {
+			if ($expression['expression_type'] == REGEX_TYPE_CONTAINS_ANY_SUBSTRING && $tmp) {
 				return true;
 			}
 			else {

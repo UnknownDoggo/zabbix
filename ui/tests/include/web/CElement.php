@@ -1,35 +1,32 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/CBaseElement.php';
-require_once dirname(__FILE__).'/CElementQuery.php';
+require_once __DIR__.'/CBaseElement.php';
+require_once __DIR__.'/CElementQuery.php';
 
-require_once dirname(__FILE__).'/IWaitable.php';
-require_once dirname(__FILE__).'/WaitableTrait.php';
-require_once dirname(__FILE__).'/CastableTrait.php';
+require_once __DIR__.'/IWaitable.php';
+require_once __DIR__.'/WaitableTrait.php';
+require_once __DIR__.'/CastableTrait.php';
 
 use Facebook\WebDriver\WebDriverExpectedCondition;
 use Facebook\WebDriver\Remote\RemoteWebElement;
 use Facebook\WebDriver\WebDriverKeys;
+use Facebook\WebDriver\Interactions\WebDriverActions;
+use Facebook\WebDriver\Exception\StaleElementReferenceException;
 
 /**
  * Generic web page element.
@@ -263,11 +260,29 @@ class CElement extends CBaseElement implements IWaitable {
 	 * @inheritdoc
 	 */
 	public function getText() {
-		if (!$this->isVisible()) {
-			return CElementQuery::getDriver()->executeScript('return arguments[0].textContent;', [$this]);
+		try {
+			if (!$this->isVisible()) {
+				return $this->getAllText();
+			}
+		}
+		catch (StaleElementReferenceException $exception) {
+			$this->reload();
+
+			if (!$this->isVisible()) {
+				return $this->getAllText();
+			}
 		}
 
 		return parent::getText();
+	}
+
+	/**
+	 * Get text of element including text of non-visible parts of the element.
+	 *
+	 * @return string
+	 */
+	public function getAllText() {
+		return CElementQuery::getDriver()->executeScript('return arguments[0].textContent;', [$this]);
 	}
 
 	/**
@@ -330,7 +345,12 @@ class CElement extends CBaseElement implements IWaitable {
 	 * @return $this
 	 */
 	public function fill($text) {
-		return $this->overwrite($text);
+		if (is_string($text) && preg_match('/[\x{10000}-\x{10FFFF}]/u', $text) === 1) {
+			CElementQuery::getDriver()->executeScript('arguments[0].value = '.json_encode($text).';', [$this]);
+		}
+		else {
+			return $this->overwrite($text);
+		}
 	}
 
 	/**
@@ -488,19 +508,31 @@ class CElement extends CBaseElement implements IWaitable {
 	}
 
 	/**
+	 * @inheritdoc
+	 */
+	public function getClassesPresentCondition($classes) {
+		$target = $this;
+
+		return function () use ($target, $classes) {
+			return $target->hasClass($classes);
+		};
+	}
+
+	/**
 	 * Check if element is ready.
 	 *
 	 * @return boolean
 	 */
 	public function isReady() {
-		return $this->isClickable();
+		return call_user_func($this->getReadyCondition());
 	}
 
 	/**
 	* @inheritdoc
 	*/
 	public function isEnabled($enabled = true) {
-		$classes = explode(' ', parent::getAttribute('class'));
+		$attribute = parent::getAttribute('class');
+		$classes = ($attribute !== null) ? explode(' ', $attribute) : [];
 
 		$is_enabled = parent::isEnabled()
 				&& (parent::getAttribute('disabled') === null)
@@ -508,6 +540,17 @@ class CElement extends CBaseElement implements IWaitable {
 				&& (parent::getAttribute('readonly') === null);
 
 		return $is_enabled === $enabled;
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	public function getEnabledCondition() {
+		$target = $this;
+
+		return function () use ($target) {
+			return $target->isEnabled();
+		};
 	}
 
 	/**
@@ -549,6 +592,18 @@ class CElement extends CBaseElement implements IWaitable {
 	}
 
 	/**
+	 * Double-click on element.
+	 *
+	 * @return $this
+	 */
+	public function doubleClick() {
+		$actions = new WebDriverActions(CElementQuery::getDriver());
+		$actions->doubleClick($this)->perform();
+
+		return $this;
+	}
+
+	/**
 	 * @inheritdoc
 	 */
 	public function getReadyCondition() {
@@ -558,25 +613,51 @@ class CElement extends CBaseElement implements IWaitable {
 	/**
 	 * Wait until element changes it's state from stalled to normal.
 	 *
+	 * @param integer $timeout    timeout in seconds
+	 *
 	 * @return $this
 	 * @throws Exception
 	 */
-	public function waitUntilReloaded() {
+	public function waitUntilReloaded($timeout = null) {
 		if ($this->by === null) {
 			throw new Exception('Cannot wait for element reload on element selected in multi-element query.');
 		}
 
+		return $this->waitUntilStalled($timeout, true);
+	}
+
+	/**
+	 * Wait until element changes it's state to stalled.
+	 *
+	 * @param integer $timeout    timeout in seconds
+	 * @param boolean $reload     if element need to be reloaded
+	 *
+	 * @return $this
+	 * @throws Exception
+	 */
+	public function waitUntilStalled($timeout = null, $reload = false) {
 		$element = $this;
-		CElementQuery::wait()->until(function () use ($element) {
+		$wait = forward_static_call_array([CElementQuery::class, 'wait'], $timeout !== null ? [$timeout] : []);
+		$wait->until(function () use ($element, $reload) {
+			try {
+				if (!$reload) {
+					return $element->isStalled();
+				}
+
 				if ($element->isStalled()) {
 					$element->reload();
 
 					return !$element->isStalled();
 				}
 
-				return null;
+				return false;
 			}
-		);
+			catch (Exception $e) {
+				// Code is not missing here.
+			}
+
+			return null;
+		}, 'Failed to wait until element '.($reload ? 'reloaded' : 'stalled').'.');
 
 		return $this;
 	}
@@ -584,10 +665,13 @@ class CElement extends CBaseElement implements IWaitable {
 	/**
 	 * Wait until element is selected.
 	 *
+	 * @param integer $timeout    timeout in seconds
+	 *
 	 * @return $this
 	 */
-	public function waitUntilSelected() {
-		CElementQuery::wait()->until(WebDriverExpectedCondition::elementToBeSelected($this));
+	public function waitUntilSelected($timeout = null) {
+		$wait = forward_static_call_array([CElementQuery::class, 'wait'], $timeout !== null ? [$timeout] : []);
+		$wait->until(WebDriverExpectedCondition::elementToBeSelected($this));
 
 		return $this;
 	}
@@ -612,8 +696,16 @@ class CElement extends CBaseElement implements IWaitable {
 			return $this->asDropdown($options);
 		}
 
+		if ($tag === 'z-color-picker') {
+			return $this->asColorPicker($options);
+		}
+
 		if ($tag === 'table') {
 			return $this->asTable($options);
+		}
+
+		if ($tag === 'z-textarea-flexible') {
+			return $this->asTextareaFlexible($options);
 		}
 
 		if ($tag === 'input') {
@@ -626,33 +718,44 @@ class CElement extends CBaseElement implements IWaitable {
 			}
 		}
 
-		$class = explode(' ', $this->getAttribute('class'));
-		if (in_array('multiselect-control', $class)) {
-			return $this->asMultiselect($options);
-		}
+		$attribute = $this->getAttribute('class');
+		if ($attribute) {
+			$class = explode(' ', $attribute);
+			if (in_array('multiselect-control', $class) || in_array('multiselect', $class)) {
+				return $this->asMultiselect($options);
+			}
 
-		if (in_array('radio-list-control', $class)) {
-			return $this->asSegmentedRadio($options);
-		}
+			if (in_array('radio-list-control', $class)) {
+				return $this->asSegmentedRadio($options);
+			}
 
-		if (in_array('checkbox-list', $class)) {
-			return $this->asCheckboxList($options);
-		}
+			if (in_array('checkbox-list', $class)) {
+				return $this->asCheckboxList($options);
+			}
 
-		if (in_array('range-control', $class) || in_array('calendar-control', $class)) {
-			return $this->asCompositeInput($options);
-		}
+			if (in_array('range-control', $class) || in_array('date-selector', $class)) {
+				return $this->asCompositeInput($options);
+			}
 
-		if (in_array('color-picker', $class)) {
-			return $this->asColorPicker($options);
-		}
+			if (in_array('multilineinput-control', $class)) {
+				return $this->asMultiline($options);
+			}
 
-		if (in_array('multilineinput-control', $class)) {
-			return $this->asMultiline($options);
-		}
+			if (in_array('macro-input-group', $class)) {
+				return $this->asInputGroup($options);
+			}
 
-		if (in_array('macro-input-group', $class)) {
-			return $this->asInputGroup($options);
+			if (in_array('fields-group', $class)) {
+				return $this->asElement($options);
+			}
+
+			if (in_array('datatable', $class)) {
+				return $this->asDatatableGroup($options);
+			}
+
+			if (in_array('multilineinput-preview', $class)) {
+				return $this->asElement($options);
+			}
 		}
 
 		CTest::zbxAddWarning('No specific element was detected');
@@ -716,7 +819,7 @@ class CElement extends CBaseElement implements IWaitable {
 				$expected = json_encode($expected);
 			}
 
-			throw new Exception('Element value '.$value.' doesn\'t match expected '.$expected.'.');
+			throw new Exception('Element value "'.$value.'" doesn\'t match expected "'.$expected.'".');
 		}
 
 		return ($expected == $value);
@@ -738,5 +841,66 @@ class CElement extends CBaseElement implements IWaitable {
 	 */
 	public function scrollToTop() {
 		CElementQuery::getDriver()->executeScript('arguments[0].scrollTo(0, 0)', [$this]);
+	}
+
+	/**
+	 * Scroll the element to the visible position. In datatables element can be covered by the datatable-options button
+	 * or the horizontal scrollbar, and still be considered visible by Selenium. Therefore, it is possible to scroll by
+	 * the $additional_scroll amount of pixels to make sure the element is really visible.
+	 *
+	 * @param int $additional_scroll  number of px that is required to scroll after element has been scrolled into view.
+	 *
+	 * @return $this
+	 */
+	public function scrollIntoView($additional_scroll = null) {
+		CElementQuery::getDriver()->executeScript('arguments[0].scrollIntoView({behavior:\'instant\',block:\'end\',inline:\'nearest\'});',
+				[$this]
+		);
+
+		if ($additional_scroll) {
+			CElementQuery::getDriver()->executeScript('document.querySelector(".wrapper").scrollBy(0, '.$additional_scroll.');',
+					[$this]
+			);
+		}
+
+		return $this;
+	}
+
+	/**
+	 * Check presence of the class(es).
+	 *
+	 * @param string|array $class	class or classes to be present.
+	 *
+	 * @return boolean
+	 */
+	public function hasClass($class) {
+		$attribute = parent::getAttribute('class');
+		$classes = ($attribute !== null) ? explode(' ', $attribute) : [];
+
+		if (!is_array($class)) {
+			$class = [$class];
+		}
+
+		return (count(array_diff($class, $classes)) === 0);
+	}
+
+	/**
+	 * Hover mouse over the element
+	 */
+	public function hoverMouse() {
+		$mouse = CElementQuery::getDriver()->getMouse();
+		$mouse->mouseMove($this->getCoordinates());
+
+		return $this;
+	}
+
+	/**
+	 * Moves the mouse to the element.
+	 */
+	public function moveMouse() {
+		$actions = new WebDriverActions(CElementQuery::getDriver());
+		$actions->moveToElement($this)->perform();
+
+		return $this;
 	}
 }

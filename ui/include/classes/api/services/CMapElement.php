@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -27,8 +22,8 @@
 abstract class CMapElement extends CApiService {
 
 	protected function checkSelementInput(&$selements, $method) {
-		$create = ($method === 'createSelements');
-		$update = ($method === 'updateSelements');
+		$create = ($method === 'createSelementsOld');
+		$update = ($method === 'updateSelementsOld');
 
 		$element_types = [SYSMAP_ELEMENT_TYPE_HOST, SYSMAP_ELEMENT_TYPE_MAP, SYSMAP_ELEMENT_TYPE_TRIGGER,
 			SYSMAP_ELEMENT_TYPE_HOST_GROUP, SYSMAP_ELEMENT_TYPE_IMAGE
@@ -42,10 +37,6 @@ abstract class CMapElement extends CApiService {
 		}
 
 		foreach ($selements as &$selement) {
-			if (!is_array($selement)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
-			}
-
 			if ($create) {
 				// Check required parameters.
 				$missing_keys = array_diff(['sysmapid', 'elementtype', 'iconid_off'], array_keys($selement));
@@ -57,28 +48,36 @@ abstract class CMapElement extends CApiService {
 				}
 			}
 
-			if (array_key_exists('urls', $selement)) {
-				$url_validate_options = ['allow_user_macro' => false];
-				if ($selement['elementtype'] == SYSMAP_ELEMENT_TYPE_HOST) {
-					$url_validate_options['allow_inventory_macro'] = INVENTORY_URL_MACRO_HOST;
-				}
-				elseif ($selement['elementtype'] == SYSMAP_ELEMENT_TYPE_TRIGGER) {
-					$url_validate_options['allow_inventory_macro'] = INVENTORY_URL_MACRO_TRIGGER;
-				}
-				else {
-					$url_validate_options['allow_inventory_macro'] = INVENTORY_URL_MACRO_NONE;
-				}
-
-				foreach ($selement['urls'] as $url_data) {
-					if (!CHtmlUrlValidator::validate($url_data['url'], $url_validate_options)) {
-						self::exception(ZBX_API_ERROR_PARAMETERS, _('Wrong value for "url" field.'));
-					}
-				}
+			if (array_key_exists('label', $selement)
+					&& mb_strlen($selement['label']) > DB::getFieldLength('sysmaps_elements', 'label')) {
+				self::exception(ZBX_API_ERROR_PARAMETERS, _s('Incorrect value for field "%1$s": %2$s.',
+					'label', _('value is too long')
+				));
 			}
 
-			if ($update && array_key_exists('selementid', $selement)
-						&& array_key_exists($selement['selementid'], $db_selements)) {
-				$db_selement = $db_selements[$selement['selementid']];
+			if (array_key_exists('urls', $selement)) {
+				$url_validate_options = ['schemes' => CSettingsHelper::getAllowedUriSchemes()];
+
+				if ($selement['elementtype'] == SYSMAP_ELEMENT_TYPE_HOST) {
+					$url_validate_options['inventory_macro'] = INVENTORY_URL_MACRO_HOST;
+				}
+				elseif ($selement['elementtype'] == SYSMAP_ELEMENT_TYPE_TRIGGER) {
+					$url_validate_options['inventory_macro'] = INVENTORY_URL_MACRO_TRIGGER;
+				}
+				else {
+					$url_validate_options['inventory_macro'] = INVENTORY_URL_MACRO_NONE;
+				}
+
+				$url_validator = new CUrlValidator($url_validate_options);
+
+				foreach ($selement['urls'] as &$url_data) {
+					if (!$url_validator->validate($url_data['url'])) {
+						self::exception(ZBX_API_ERROR_PARAMETERS, _('Wrong value for "url" field.'));
+					}
+
+					unset($url_data['sysmapelementurlid'], $url_data['selementid']);
+				}
+				unset($url_data);
 			}
 
 			if (!$elementtype_validator->validate($selement['elementtype'])) {
@@ -281,49 +280,6 @@ abstract class CMapElement extends CApiService {
 		return $selements;
 	}
 
-	protected function checkLinkInput($links, $method) {
-		$update = ($method == 'updateLink');
-		$delete = ($method == 'deleteLink');
-
-		// permissions
-		if ($update || $delete) {
-			$linkDbFields = ['linkid' => null];
-
-			$dbLinks = API::getApiService()->select('sysmap_element_url', [
-				'filter' => ['selementid' => zbx_objectValues($links, 'linkid')],
-				'output' => ['linkid'],
-				'preservekeys' => true
-			]);
-		}
-		else {
-			$linkDbFields = [
-				'sysmapid' => null,
-				'selementid1' => null,
-				'selementid2' => null
-			];
-		}
-
-		$colorValidator = new CColorValidator();
-
-		foreach ($links as $link) {
-			if (!check_db_fields($linkDbFields, $link)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Wrong fields for map link.'));
-			}
-
-			if (isset($link['color']) && !$colorValidator->validate($link['color'])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, $colorValidator->getError());
-			}
-
-			if ($update || $delete) {
-				if (!isset($dbLinks[$link['linkid']])) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _('No permissions to referred object or it does not exist!'));
-				}
-			}
-		}
-
-		return true;
-	}
-
 	/**
 	 * Add element to sysmap.
 	 *
@@ -341,9 +297,7 @@ abstract class CMapElement extends CApiService {
 	 *
 	 * @return array
 	 */
-	protected function createSelements(array $selements) {
-		$selements = zbx_toArray($selements);
-
+	protected function createSelementsOld(array $selements) {
 		$this->checkSelementInput($selements, __FUNCTION__);
 
 		$single_element_types = [SYSMAP_ELEMENT_TYPE_HOST, SYSMAP_ELEMENT_TYPE_MAP, SYSMAP_ELEMENT_TYPE_HOST_GROUP];
@@ -416,7 +370,7 @@ abstract class CMapElement extends CApiService {
 
 		$this->createSelementsTags($selements, $selementids);
 
-		return ['selementids' => $selementids];
+		return $selementids;
 	}
 
 	/**
@@ -435,9 +389,8 @@ abstract class CMapElement extends CApiService {
 	 * @param array $elements[0,...]['url']
 	 * @param array $elements[0,...]['label_location']
 	 */
-	protected function updateSelements(array $selements) {
-		$selements = zbx_toArray($selements);
-		$selementIds = [];
+	protected function updateSelementsOld(array $selements) {
+		$selementids = [];
 
 		$db_selements = $this->checkSelementInput($selements, __FUNCTION__);
 
@@ -497,7 +450,7 @@ abstract class CMapElement extends CApiService {
 				'values' => $selement,
 				'where' => ['selementid' => $selement['selementid']]
 			];
-			$selementIds[] = $selement['selementid'];
+			$selementids[] = $selement['selementid'];
 
 			if (!isset($selement['urls'])) {
 				continue;
@@ -584,22 +537,7 @@ abstract class CMapElement extends CApiService {
 			DB::insert('sysmap_element_trigger', $triggers_to_add);
 		}
 
-		return ['selementids' => $selementIds];
-	}
-
-	/**
-	 * Delete element from map.
-	 *
-	 * @param array $selements							multidimensional array with selement objects
-	 * @param array $selements[0, ...]['selementid']	selementid to delete
-	 */
-	protected function deleteSelements(array $selements) {
-		$selements = zbx_toArray($selements);
-		$selementIds = zbx_objectValues($selements, 'selementid');
-
-		DB::delete('sysmaps_elements', ['selementid' => $selementIds]);
-
-		return $selementIds;
+		return $selementids;
 	}
 
 	/**
@@ -654,155 +592,6 @@ abstract class CMapElement extends CApiService {
 	}
 
 	/**
-	 * Create link.
-	 *
-	 * @param array $links
-	 * @param array $links[0,...]['sysmapid']
-	 * @param array $links[0,...]['selementid1']
-	 * @param array $links[0,...]['selementid2']
-	 * @param array $links[0,...]['drawtype']
-	 * @param array $links[0,...]['color']
-	 *
-	 * @return array
-	 */
-	protected function createLinks(array $links) {
-		$links = zbx_toArray($links);
-
-		$this->checkLinkInput($links, __FUNCTION__);
-
-		$linkIds = DB::insert('sysmaps_links', $links);
-
-		return ['linkids' => $linkIds];
-	}
-
-	protected function updateLinks($links) {
-		$links = zbx_toArray($links);
-
-		$this->checkLinkInput($links, __FUNCTION__);
-
-		$udpateLinks = [];
-		foreach ($links as $link) {
-			$udpateLinks[] = ['values' => $link, 'where' => ['linkid' => $link['linkid']]];
-		}
-
-		DB::update('sysmaps_links', $udpateLinks);
-
-		return ['linkids' => zbx_objectValues($links, 'linkid')];
-	}
-
-	/**
-	 * Delete Link from map.
-	 *
-	 * @param array $links						multidimensional array with link objects
-	 * @param array $links[0, ...]['linkid']	link ID to delete
-	 *
-	 * @return array
-	 */
-	protected function deleteLinks($links) {
-		zbx_value2array($links);
-		$linkIds = zbx_objectValues($links, 'linkid');
-
-		$this->checkLinkInput($links, __FUNCTION__);
-
-		DB::delete('sysmaps_links', ['linkid' => $linkIds]);
-
-		return ['linkids' => $linkIds];
-	}
-
-	/**
-	 * Add link trigger to link (sysmap).
-	 *
-	 * @param array $links[0,...]['linkid']
-	 * @param array $links[0,...]['triggerid']
-	 * @param array $links[0,...]['drawtype']
-	 * @param array $links[0,...]['color']
-	 */
-	protected function createLinkTriggers($linkTriggers) {
-		$linkTriggers = zbx_toArray($linkTriggers);
-
-		$this->validateCreateLinkTriggers($linkTriggers);
-
-		$linkTriggerIds = DB::insert('sysmaps_link_triggers', $linkTriggers);
-
-		return ['linktriggerids' => $linkTriggerIds];
-	}
-
-	protected function validateCreateLinkTriggers(array $linkTriggers) {
-		$linkTriggerDbFields = [
-			'linkid' => null,
-			'triggerid' => null
-		];
-
-		$colorValidator = new CColorValidator();
-
-		foreach ($linkTriggers as $linkTrigger) {
-			if (!check_db_fields($linkTriggerDbFields, $linkTrigger)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
-			}
-
-			if (isset($linkTrigger['color']) && !$colorValidator->validate($linkTrigger['color'])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, $colorValidator->getError());
-			}
-		}
-	}
-
-	protected function updateLinkTriggers($linkTriggers) {
-		$linkTriggers = zbx_toArray($linkTriggers);
-		$this->validateUpdateLinkTriggers($linkTriggers);
-
-		$linkTriggerIds = zbx_objectValues($linkTriggers, 'linktriggerid');
-
-		$updateLinkTriggers = [];
-		foreach ($linkTriggers as $linkTrigger) {
-			$updateLinkTriggers[] = [
-				'values' => $linkTrigger,
-				'where' => ['linktriggerid' => $linkTrigger['linktriggerid']]
-			];
-		}
-
-		DB::update('sysmaps_link_triggers', $updateLinkTriggers);
-
-		return ['linktriggerids' => $linkTriggerIds];
-	}
-
-	protected function validateUpdateLinkTriggers(array $linkTriggers) {
-		$linkTriggerDbFields = ['linktriggerid' => null];
-
-		$colorValidator = new CColorValidator();
-
-		foreach ($linkTriggers as $linkTrigger) {
-			if (!check_db_fields($linkTriggerDbFields, $linkTrigger)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
-			}
-
-			if (isset($linkTrigger['color']) && !$colorValidator->validate($linkTrigger['color'])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, $colorValidator->getError());
-			}
-		}
-	}
-
-	protected function deleteLinkTriggers($linkTriggers) {
-		$linkTriggers = zbx_toArray($linkTriggers);
-		$this->validateDeleteLinkTriggers($linkTriggers);
-
-		$linkTriggerIds = zbx_objectValues($linkTriggers, 'linktriggerid');
-
-		DB::delete('sysmaps_link_triggers', ['linktriggerid' => $linkTriggerIds]);
-
-		return ['linktriggerids' => $linkTriggerIds];
-	}
-
-	protected function validateDeleteLinkTriggers(array $linkTriggers) {
-		$linktriggerDbFields = ['linktriggerid' => null];
-
-		foreach ($linkTriggers as $linkTrigger) {
-			if (!check_db_fields($linktriggerDbFields, $linkTrigger)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
-			}
-		}
-	}
-
-	/**
 	 * Create map element tags.
 	 *
 	 * @param array  $selements
@@ -846,7 +635,7 @@ abstract class CMapElement extends CApiService {
 	protected function updateElementsTags(array $selements): void {
 		// Select tags from database.
 		$db_tags = DBselect(
-			'SELECT selementtagid, selementid, tag, value, operator'.
+			'SELECT selementtagid,selementid,tag,value,operator'.
 			' FROM sysmaps_element_tag'.
 			' WHERE '.dbConditionInt('selementid', array_column($selements, 'selementid'))
 		);

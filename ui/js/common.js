@@ -1,37 +1,17 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-
-const KEY_ARROW_DOWN = 40;
-const KEY_ARROW_LEFT = 37;
-const KEY_ARROW_RIGHT = 39;
-const KEY_ARROW_UP = 38;
-const KEY_BACKSPACE = 8;
-const KEY_DELETE = 46;
-const KEY_ENTER = 13;
-const KEY_ESCAPE = 27;
-const KEY_TAB = 9;
-const KEY_PAGE_UP = 33;
-const KEY_PAGE_DOWN = 34;
-const KEY_END = 35;
-const KEY_HOME = 36;
-const KEY_SPACE = 32;
 
 /**
  * jQuery based publish/subscribe handler.
@@ -131,13 +111,14 @@ function is_array(obj) {
  *
  * @returns {Array}
  */
-Array.prototype.xor = function(arr) {
-	var merged_arr = this.concat(arr);
+Object.defineProperty(Array.prototype, 'xor', {
+	value: function(arr) {
+		const merged = this.concat(arr);
 
-	return merged_arr.filter(function(e) {
-		return (merged_arr.indexOf(e) === merged_arr.lastIndexOf(e));
-	});
-};
+		return merged.filter(e => merged.indexOf(e) === merged.lastIndexOf(e));
+	},
+	enumerable: false
+});
 
 function addListener(element, eventname, expression, bubbling) {
 	bubbling = bubbling || false;
@@ -174,10 +155,6 @@ function removeListener(element, eventname, expression, bubbling) {
 }
 
 function cancelEvent(e) {
-	if (!e) {
-		e = window.event;
-	}
-
 	e.stopPropagation();
 	e.preventDefault();
 
@@ -198,42 +175,10 @@ function Confirm(msg) {
 	return confirm(msg);
 }
 
-/**
- * Function removes input elements in specified form that matches given selector.
- *
- * @param {object}|{string}  form_name  Form element in which input elements will be selected. If given value is 'null',
- *                                      the DOM document object will be used.
- * @param {string} selector             String containing one or more commas separated CSS selectors.
- *
- * @returns {bool}
- */
-function removeVarsBySelector(form_name, selector) {
-	if (form_name !== null) {
-		var source = is_string(form_name) ? document.forms[form_name] : form_name;
-	}
-	else {
-		var source = document;
-	}
-
-	if (!source) {
-		return false;
-	}
-
-	var inputs = source.querySelectorAll(selector);
-
-	if (inputs.length) {
-		for (var i in inputs) {
-			if (typeof inputs[i] === 'object') {
-				inputs[i].parentNode.removeChild(inputs[i]);
-			}
-		}
-	}
-}
-
 function create_var(form_name, var_name, var_value, doSubmit) {
 	var objForm = is_string(form_name) ? document.forms[form_name] : form_name;
 	if (!objForm) {
-		return false;
+		return;
 	}
 
 	var objVar = (typeof(objForm[var_name]) != 'undefined') ? objForm[var_name] : null;
@@ -241,7 +186,7 @@ function create_var(form_name, var_name, var_value, doSubmit) {
 		objVar = document.createElement('input');
 		objVar.setAttribute('type', 'hidden');
 		if (!objVar) {
-			return false;
+			return;
 		}
 		objVar.setAttribute('name', var_name);
 		objVar.setAttribute('id', var_name.replace(']', '').replace('[', '_'));
@@ -258,8 +203,6 @@ function create_var(form_name, var_name, var_value, doSubmit) {
 	if (doSubmit) {
 		objForm.submit();
 	}
-
-	return false;
 }
 
 function getDimensions(obj) {
@@ -323,39 +266,60 @@ function getPosition(obj) {
 }
 
 /**
- * Opens popup content in overlay dialogue.
+ * Preload and display popup dialogue.
  *
- * @param {string}           action              Popup controller related action.
- * @param {array|object}     parameters          Array with key/value pairs that will be used as query for popup
- *                                               request.
- *
+ * @param {string}           action              Popup action (controller).
+ * @param {Array|Object}     parameters          Popup action (controller) parameters.
+ * @param {string|null}      dialogueid          Dialogue overlay ID.
  * @param {string}           dialogue_class      CSS class, usually based on .modal-popup and .modal-popup-{size}.
- * @param {string|null}      dialogueid          ID of overlay dialogue.
- * @param {HTMLElement|null} trigger_element     UI element which was clicked to open overlay dialogue.
- * @param {bool}             prevent_navigation  Show warning when navigating away from an active dialogue.
+ * @param {boolean}	         is_modal            Whether to prevent interaction with background objects.
+ * @param {boolean}	         is_draggable        Whether to allow dragging the form around.
+ * @param {string|undefined} position            Positioning strategy (Overlay.prototype.POSITION_*).
+ * @param {Object|null}      position_fix        Specific position, if not null.
+ * @param {HTMLElement|null} trigger_element     DOM element which triggered opening overlay dialogue.
+ * @param {boolean}          prevent_navigation  Show warning when navigating away from an active dialogue.
  *
  * @returns {Overlay}
  */
 function PopUp(action, parameters, {
 	dialogueid = null,
 	dialogue_class = '',
+	is_modal = true,
+	is_draggable = false,
+	position = undefined,
+	position_fix = null,
 	trigger_element = document.activeElement,
 	prevent_navigation = false
 } = {}) {
-	var overlay = overlays_stack.getById(dialogueid);
+	hintBox.deleteAll();
+
+	let overlay = overlays_stack.getById(dialogueid);
 
 	if (!overlay) {
 		overlay = overlayDialogue({
-			dialogueid,
 			title: '',
 			doc_url: '',
-			content: jQuery('<div>', {'height': '68px', class: 'is-loading'}),
-			class: 'modal-popup ' + dialogue_class,
+			content: jQuery('<div>', {'height': '68px', 'width': '105px', class: 'is-loading'}),
+			class: `modal-popup ${dialogue_class}`,
 			buttons: [],
-			element: trigger_element,
-			type: 'popup',
 			prevent_navigation
+		}, {
+			type: 'popup',
+			dialogueid,
+			is_modal,
+			is_draggable,
+			position,
+			position_fix,
+			trigger_element
 		});
+	}
+	else {
+		// Throw reload event for dialogs to shut down scripting properly.
+		overlay.$dialogue[0].dispatchEvent(new CustomEvent('dialogue.reload'));
+	}
+
+	if (action === 'template.edit') {
+		parameters = JSON.stringify(parameters);
 	}
 
 	overlay
@@ -363,8 +327,20 @@ function PopUp(action, parameters, {
 		.then(function(resp) {
 			if ('error' in resp) {
 				overlay.setProperties({
-					content: makeMessageBox('bad', resp.error.messages, resp.error.title, false)
+					title: resp.header !== undefined ? resp.header : '',
+					content: makeMessageBox('bad', resp.error.messages, resp.error.title, false),
+					buttons: [
+						{
+							'title': t('Cancel'),
+							'class': 'btn-alt js-cancel',
+							'cancel': true,
+							'action': function() {}
+						}
+					]
 				});
+
+				// Display the close button after the screen reader announces the dialog title.
+				overlay.$dialogue.$close_btn.show();
 			}
 			else {
 				var buttons = resp.buttons !== null ? resp.buttons : [];
@@ -376,17 +352,19 @@ function PopUp(action, parameters, {
 						buttons.push({
 							'title': t('Ok'),
 							'cancel': true,
-							'action': (typeof resp.cancel_action !== 'undefined') ? resp.cancel_action : function() {}
+							'action': (resp.cancel_action !== undefined) ? resp.cancel_action : () => {}
 						});
 						break;
 
 					default:
-						buttons.push({
-							'title': t('Cancel'),
-							'class': 'btn-alt js-cancel',
-							'cancel': true,
-							'action': (typeof resp.cancel_action !== 'undefined') ? resp.cancel_action : function() {}
-						});
+						if (!buttons.some(button => button.cancel)) {
+							buttons.push({
+								'title': t('Cancel'),
+								'class': 'btn-alt js-cancel',
+								'cancel': true,
+								'action': (resp.cancel_action !== undefined) ? resp.cancel_action : () => {}
+							});
+						}
 				}
 
 				overlay.setProperties({
@@ -394,49 +372,76 @@ function PopUp(action, parameters, {
 					doc_url: resp.doc_url,
 					content: resp.body,
 					controls: resp.controls,
+					class: `modal-popup ${resp.dialogue_class ?? dialogue_class}`,
 					buttons,
 					debug: resp.debug,
 					script_inline: resp.script_inline,
 					data: resp.data || null
 				});
+
+				// Display the close button after the screen reader announces the dialog title.
+				overlay.$dialogue.$head.$close_button.show();
+
+				overlay.$dialogue[0].addEventListener('dialogue.close', () => {
+					for (const form of overlay.$dialogue.$body[0].querySelectorAll('form')) {
+						form.dispatchEvent(new CustomEvent('form.destroyed'));
+					}
+				});
+
+				const resizeHandler = (grid) => {
+					for (const label of grid.querySelectorAll(':scope > label')) {
+						const rect = label.getBoundingClientRect()
+
+						if (rect.width > 0) {
+							// Use of setTimeout() to prevent ResizeObserver observation error in Safari.
+							setTimeout(() => {
+								grid.style.setProperty('--label-width', `${Math.round(rect.width)}px`);
+							});
+							break;
+						}
+					}
+				}
+
+				for (const grid of overlay.$dialogue.$body[0].querySelectorAll(`form .${ZBX_STYLE_FORM_GRID}`)) {
+					new ResizeObserver(() => resizeHandler(grid)).observe(grid);
+
+					const labels = grid.querySelectorAll(`:scope > label, :scope > .${ZBX_STYLE_COLLAPSIBLE} > label`);
+					for (const label of labels) {
+						new MutationObserver(() => resizeHandler(grid)).observe(label, {childList: true});
+					}
+				}
 			}
 
 			overlay.recoverFocus();
 			overlay.containFocus();
+		})
+		.fail((resp) => {
+			if (resp.statusText !== 'abort') {
+				const error = resp.responseJSON !== undefined && resp.responseJSON.error !== undefined
+					? resp.responseJSON.error
+					: {title: t('Unexpected server error.')};
+
+				overlay.setProperties({
+					content: makeMessageBox('bad', error.messages, error.title, false),
+					buttons: [
+						{
+							'title': t('Cancel'),
+							'class': 'btn-alt js-cancel',
+							'cancel': true,
+							'action': function() {}
+						}
+					]
+				});
+
+				// Display the close button after the screen reader announces the dialog title.
+				overlay.$dialogue.$close_btn.show();
+
+				overlay.recoverFocus();
+				overlay.containFocus();
+			}
 		});
 
 	addToOverlaysStack(overlay);
-
-	return overlay;
-}
-
-/**
- * Open "Update problem" dialog and manage URL change.
- *
- * @param {Object} parameters
- * @param {array}  parameters['eventids']  Eventids to update.
- * @param {object} trigger_element        (optional) UI element which was clicked to open overlay dialogue.
- *
- * @returns {Overlay}
- */
-function acknowledgePopUp(parameters, trigger_element) {
-	var overlay = PopUp('popup.acknowledge.edit', parameters, {trigger_element}),
-		backurl = location.href;
-
-	overlay.trigger_parents = $(trigger_element).parents();
-
-	overlay.xhr.then(function() {
-		var url = new Curl('zabbix.php', false);
-		url.setArgument('action', 'popup');
-		url.setArgument('popup_action', 'acknowledge.edit');
-		url.setArgument('eventids', parameters.eventids);
-
-		history.replaceState({}, '', url.getUrl());
-	});
-
-	overlay.$dialogue[0].addEventListener('overlay.close', () => {
-		history.replaceState({}, '', backurl);
-	}, {once: true});
 
 	return overlay;
 }
@@ -470,28 +475,29 @@ function addToOverlaysStack(id, element, type, xhr) {
 
 // Keydown handler. Closes last opened overlay UI element.
 function closeDialogHandler(event) {
-	if (event.which == 27) { // ESC
-		var dialog = overlays_stack.end();
-		if (typeof dialog !== 'undefined') {
-			switch (dialog.type) {
+	if (event.which === KEY_ESCAPE) {
+		const overlay = overlays_stack.end();
+
+		if (typeof overlay !== 'undefined') {
+			switch (overlay.type) {
 				// Close overlay popup.
 				case 'popup':
-					overlayDialogueDestroy(dialog.dialogueid);
+					overlayDialogueDestroy(overlay.dialogueid, Overlay.prototype.CLOSE_BY_USER);
 					break;
 
 				// Close overlay hintbox.
 				case 'hintbox':
-					hintBox.hideHint(dialog.element, true);
+					hintBox.hideHint(overlay.element, true);
 					break;
 
 				// Close popup menu overlays.
 				case 'menu-popup':
-					jQuery('.menu-popup.menu-popup-top:visible').menuPopup('close', dialog.element);
+					jQuery('.menu-popup.menu-popup-top:visible').menuPopup('close', overlay.element);
 					break;
 
 				// Close context menu preloader.
 				case 'preloader':
-					overlayPreloaderDestroy(dialog.dialogueid);
+					overlayPreloaderDestroy(overlay.dialogueid);
 					break;
 
 				// Close overlay time picker.
@@ -506,9 +512,9 @@ function closeDialogHandler(event) {
 					});
 					break;
 
-				// Close overlay color picker.
-				case 'color_picker':
-					jQuery.colorpicker('hide');
+				// Close map/shape overlay.
+				case 'map-window':
+					jQuery('#map-window .btn-overlay-close').trigger('click');
 					break;
 			}
 		}
@@ -516,23 +522,22 @@ function closeDialogHandler(event) {
 }
 
 /**
- * Removed overlay from overlays stack and sets focus to source element.
+ * Remove overlay from stack and set focus to source element.
  *
- * @param {string} dialogueid		Id of dialogue, that is being closed.
- * @param {boolean} return_focus	If not FALSE, the element stored in overlay.element will be focused.
+ * @param {string}  dialogueid
+ * @param {boolean} return_focus  If true, overlay.element will be focused.
  *
- * @return {object|undefined|null}  Overlay object, if found.
+ * @return {Object|undefined}  Overlay object, if found.
  */
-function removeFromOverlaysStack(dialogueid, return_focus) {
-	var overlay = null;
+function removeFromOverlaysStack(dialogueid, return_focus = true) {
+	const overlay = overlays_stack.removeById(dialogueid);
 
-	if (return_focus !== false) {
-		return_focus = true;
-	}
-
-	overlay = overlays_stack.removeById(dialogueid);
 	if (overlay && return_focus) {
-		jQuery(overlay.element).focus();
+		if (overlay.element !== undefined) {
+			const element = overlay.element instanceof jQuery ? overlay.element[0] : overlay.element;
+
+			element.focus({preventScroll: true});
+		}
 	}
 
 	// Remove event listener.
@@ -546,21 +551,133 @@ function removeFromOverlaysStack(dialogueid, return_focus) {
 /**
  * Reload content of Modal Overlay dialogue without closing it.
  *
- * @param {object} form		Filter form in which element has been changed. Assumed that form is inside Overlay Dialogue.
- * @param {string} action	(optional) action value that is used in CRouter. Default value is 'popup.generic'.
+ * @param {object} form			Filter form in which element has been changed. Assumed that form is inside Overlay Dialogue.
+ * @param {string} action		(optional) action value that is used in CRouter. Default value is 'popup.generic'.
+ * @param {object} parameters	(optional) Form values to use instead of serializing form fields.
  */
-function reloadPopup(form, action) {
-	var dialogueid = form.closest('[data-dialogueid]').dataset.dialogueid,
-		dialogue_class = jQuery(form).closest('[data-dialogueid]').prop('class'),
-		action = action || 'popup.generic',
-		parameters = {};
+function reloadPopup(form, action, parameters = null) {
+	const dialogueid = form.closest('[data-dialogueid]').dataset.dialogueid;
+	const dialogue_class = jQuery(form).closest('[data-dialogueid]').prop('class');
 
-	for (const input of form.elements) {
-		parameters[input.name] = input.value;
-	};
+	action = action || 'popup.generic';
+	parameters = parameters !== null ? parameters : getFormFields(form);
 
 	PopUp(action, parameters, {dialogueid, dialogue_class});
 }
+
+/**
+ * A singleton class instance for maintaining a focus within a specified container.
+ */
+const Focuser = new class {
+
+	#FOCUSABLE_SELECTORS = ['button:not([disabled])', 'input:not([type="hidden"]):not([disabled])',
+		'select:not([disabled])', 'textarea:not([disabled])', '[tabindex]:not([tabindex="-1"]):not([disabled])',
+		'[href]:not([tabindex="-1"])'
+	];
+
+	/**
+	 * @type {Map<HTMLElement, AbortController>}
+	 */
+	#contain_abort_controllers = new Map();
+
+	/**
+	 * Get the first focusable, enabled, and visible element within the container.
+	 *
+	 * @param {HTMLElement|null} container
+	 *
+	 * @returns {HTMLElement|null}
+	 */
+	getFocusableElement(container) {
+		if (!(container instanceof HTMLElement)) {
+			return null;
+		}
+
+		for (const element of container.querySelectorAll(this.#FOCUSABLE_SELECTORS.join(', '))) {
+			if (isVisible(element)) {
+				return element;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Focus and preselect the element, mimicking the autofocus behavior.
+	 *
+	 * @param {HTMLElement|null} element
+	 */
+	focus(element) {
+		if (!(element instanceof HTMLElement)) {
+			return null;
+		}
+
+		element.focus({preventScroll: true});
+
+		if (element instanceof HTMLInputElement && ['text', 'password'].includes(element.type)) {
+			element.select();
+		}
+	}
+
+	/**
+	 * Focus and preselect the first focusable element of the container, mimicking the autofocus behavior.
+	 *
+	 * @param {HTMLElement|null} container
+	 */
+	recoverFocus(container) {
+		this.focus(this.getFocusableElement(container));
+	}
+
+	/**
+	 * Prevent the focus from running away from the specified container.
+	 *
+	 * @param {HTMLElement} container
+	 */
+	containFocus(container) {
+		if (!(container instanceof HTMLElement)) {
+			return null;
+		}
+
+		if (this.#contain_abort_controllers.has(container)) {
+			this.#contain_abort_controllers.get(container).abort();
+			this.#contain_abort_controllers.delete(container);
+		}
+
+		const focusable_elements = [
+			...container.querySelectorAll(this.#FOCUSABLE_SELECTORS.join(', '))
+		].filter(element => isVisible(element));
+
+		if (focusable_elements.length === 0) {
+			return;
+		}
+
+		const abort_controller = new AbortController();
+
+		this.#contain_abort_controllers.set(container, abort_controller);
+
+		if (focusable_elements.length > 1) {
+			focusable_elements[0].addEventListener('keydown', e => {
+				if (e.key === 'Tab' && e.shiftKey) {
+					e.preventDefault();
+					focusable_elements.at(-1).focus();
+				}
+			}, {signal: abort_controller.signal});
+
+			focusable_elements.at(-1).addEventListener('keydown', e => {
+				if (e.key === 'Tab' && !e.shiftKey) {
+					e.preventDefault();
+					focusable_elements[0].focus();
+				}
+			}, {signal: abort_controller.signal});
+		}
+		else {
+			focusable_elements[0].addEventListener('keydown', e => {
+				if (e.key === 'Tab') {
+					e.preventDefault();
+				}
+			}, {signal: abort_controller.signal});
+		}
+	}
+};
 
 /**
  * Pass value to add.popup trigger.
@@ -614,11 +731,11 @@ function addValues(frame, values) {
 			frm_storage = document.getElementById(key);
 		}
 
-		if (jQuery(frm_storage).is('span')) {
-			jQuery(frm_storage).html(values[key]);
+		if (jQuery(frm_storage).is(':input')) {
+			jQuery(frm_storage).val(values[key]).change();
 		}
 		else {
-			jQuery(frm_storage).val(values[key]).change();
+			jQuery(frm_storage).text(values[key]);
 		}
 	}
 }
@@ -646,94 +763,10 @@ function addSelectedValues(object, parentid) {
 	jQuery(document).trigger('add.popup', data);
 }
 
-/**
- * Add media.
- *
- * @param {string} formname			name of destination form
- * @param {integer} media			media id. If -1, then assumes that this is new media
- * @param {integer} mediatypeid		media type id
- * @param {string} sendto			media sendto value
- * @param {string} period			media period value
- * @param {string} active			media active value
- * @param {string} severity			media severity value
- *
- * @returns true
- */
-function add_media(formname, media, mediatypeid, sendto, period, active, severity) {
-	var form = window.document.forms[formname];
-	var media_name = (media > -1) ? 'medias[' + media + ']' : 'new_media';
-
-	window.create_var(form, media_name + '[mediatypeid]', mediatypeid);
-	if (typeof sendto === "object") {
-		window.removeVarsBySelector(form, 'input[name^="'+media_name+'[sendto]"]');
-		jQuery(sendto).each(function(i, st) {
-			window.create_var(form, media_name + '[sendto]['+i+']', st);
-		});
-	}
-	else {
-		window.create_var(form, media_name + '[sendto]', sendto);
-	}
-	window.create_var(form, media_name + '[period]', period);
-	window.create_var(form, media_name + '[active]', active);
-	window.create_var(form, media_name + '[severity]', severity);
-
-	form.submit();
-	return true;
-}
-
-/**
- * Send trigger expression form data to server for validation before adding it to trigger expression field.
- *
- * @param {Overlay} overlay
- */
-function validate_trigger_expression(overlay) {
-	var $form = overlay.$dialogue.find('form'),
-		url = new Curl($form.attr('action'));
-
-	url.setArgument('add', 1);
-
-	overlay.setLoading();
-	overlay.xhr = jQuery.ajax({
-		url: url.getUrl(),
-		data: $form.serialize(),
-		complete: function() {
-			overlay.unsetLoading();
-		},
-		success: function(ret) {
-			overlay.$dialogue.find('.msg-bad, .msg-good').remove();
-
-			if ('error' in ret) {
-				const message_box = makeMessageBox('bad', ret.error.messages, ret.error.title);
-
-				message_box.insertBefore($form);
-
-				return;
-			}
-
-			var form = window.document.forms[ret.dstfrm];
-			var obj = (typeof form !== 'undefined')
-				? jQuery(form).find('#' + ret.dstfld1).get(0)
-				: document.getElementById(ret.dstfld1);
-
-			if (ret.dstfld1 === 'expression' || ret.dstfld1 === 'recovery_expression') {
-				jQuery(obj).val(jQuery(obj).val() + ret.expression);
-			}
-			else {
-				jQuery(obj).val(ret.expression);
-			}
-
-			overlayDialogueDestroy(overlay.dialogueid);
-		},
-		dataType: 'json',
-		type: 'POST'
-	});
-}
-
-function redirect(uri, method, needle, invert_needle, add_sid, allow_empty) {
+function redirect(uri, method, needle, invert_needle, allow_empty) {
 	method = (method || 'get').toLowerCase();
-	add_sid = (method !== 'get' && (typeof add_sid === 'undefined' || add_sid));
 
-	var url = new Curl(uri, add_sid);
+	var url = new Curl(uri);
 
 	if (method == 'get') {
 		window.location = url.getUrl();
@@ -759,11 +792,11 @@ function redirect(uri, method, needle, invert_needle, add_sid, allow_empty) {
 			if ((is_needle && !invert_needle) || (!is_needle && invert_needle)) {
 				if (Array.isArray(args[key])) {
 					for (var i = 0, l = args[key].length; i < l; i++) {
-						action += '&' + key + '[]=' + args[key][i];
+						action += '&' + key + '[]=' + encodeURIComponent(args[key][i]);
 					}
 				}
 				else {
-					action += '&' + key + '=' + args[key];
+					action += '&' + key + '=' + encodeURIComponent(args[key]);
 				}
 
 				continue;
@@ -875,33 +908,14 @@ function showHideVisible(obj) {
 }
 
 /**
- * Switch element classes and return final class.
+ * Check if an element is visible.
  *
- * @param object|string obj			object or object id
- * @param string        class1
- * @param string        class2
+ * @param {Element} element
  *
- * @return string
+ * @return {boolean}
  */
-function switchElementClass(obj, class1, class2) {
-	obj = (typeof obj === 'string') ? jQuery('#' + obj) : jQuery(obj);
-
-	if (obj.length > 0) {
-		if (obj.hasClass(class1)) {
-			obj.removeClass(class1);
-			obj.addClass(class2);
-
-			return class2;
-		}
-		else if (obj.hasClass(class2)) {
-			obj.removeClass(class2);
-			obj.addClass(class1);
-
-			return class1;
-		}
-	}
-
-	return null;
+function isVisible(element) {
+	return element.getClientRects().length > 0 && window.getComputedStyle(element).visibility !== 'hidden';
 }
 
 /**
@@ -931,25 +945,6 @@ function basename(path, suffix) {
  */
 function appendZero(val) {
 	return val < 10 ? '0' + val : val;
-}
-
-/**
- * Function converts unix timestamp to human readable time in format 'Y-m-d H:i:s'.
- *
- * @param {type} time   Unix timestamp to convert.
- *
- * @returns {string}
- */
-function time2str(time) {
-	var dt = new Date(time * 1000),
-		Y = dt.getFullYear(),
-		m = appendZero(dt.getMonth()+1),
-		d = appendZero(dt.getDate()),
-		H = appendZero(dt.getHours()),
-		i = appendZero(dt.getMinutes()),
-		s = appendZero(dt.getSeconds());
-
-	return Y + '-' + m + '-' + d + ' ' + H + ':' + i + ':' + s;
 }
 
 /**
@@ -1000,7 +995,7 @@ Function.prototype.bindAsEventListener = function (context) {
 	var method = this, args = Array.prototype.slice.call(arguments, 1);
 
 	return function(event) {
-		return method.apply(context, [event || window.event].concat(args));
+		return method.apply(context, [event].concat(args));
 	};
 };
 
@@ -1020,17 +1015,17 @@ function openMassupdatePopup(action, parameters = {}, {
 	}
 
 	switch (action) {
-		case 'popup.massupdate.item':
+		case 'item.massupdate':
 			parameters.context = form.querySelector('#form_context').value;
 			parameters.prototype = 0;
 			break;
 
-		case 'popup.massupdate.trigger':
+		case 'trigger.massupdate':
 			parameters.context = form.querySelector('#form_context').value;
 			break;
 
-		case 'popup.massupdate.itemprototype':
-		case 'popup.massupdate.triggerprototype':
+		case 'item.prototype.massupdate':
+		case 'trigger.prototype.massupdate':
 			parameters.parent_discoveryid = form.querySelector('#form_parent_discoveryid').value;
 			parameters.context = form.querySelector('#form_context').value;
 			parameters.prototype = 1;
@@ -1061,7 +1056,7 @@ function visibilityStatusChanges(value, objectid, replace_to) {
 		}
 		else if (!value) {
 			const new_obj = document.createElement('span');
-			new_obj.setAttribute('name', obj.name);
+			new_obj.classList.add('visibility-box-caption');
 			new_obj.setAttribute('id', obj.id);
 			new_obj.innerHTML = replace_to;
 			new_obj.originalObject = obj;
@@ -1102,3 +1097,161 @@ function uncheckTableRows(page, keepids = [], mvc = true) {
 		sessionStorage.removeItem(key);
 	}
 }
+
+/**
+ * Deep comparison of two values.
+ * Returns true if values are the same and false if not.
+ *
+ * @param {any} first
+ * @param {any} second
+ * @returns {boolean}
+ */
+function deepCompare(first, second) {
+	if (first == second) {
+		return true;
+	}
+
+	if (Array.isArray(first) && Array.isArray(second)) {
+		if (first.length != second.length) {
+			return false;
+		}
+
+		for (let i = 0; i < first.length; i++) {
+			if (!deepCompare(first[i], second[i])) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	if (typeof first == 'object' && typeof second == 'object') {
+		if (deepCompare(Object.keys(first), Object.keys(second))) {
+			return deepCompare(Object.values(first), Object.values(second));
+		}
+
+		return Object.is(first, second);
+	}
+
+	return false;
+}
+
+function deepMerge(target, ...sources) {
+	if (!sources.length) {
+		return target;
+	}
+
+	const source = sources.shift();
+
+	if (typeof target === 'object' && typeof source === 'object') {
+		for (const key in source) {
+			if (typeof source[key] === 'object') {
+				if (!target[key]) {
+					Object.assign(target, {[key]: {}});
+				}
+
+				deepMerge(target[key], source[key]);
+			} else {
+				Object.assign(target, {[key]: source[key]});
+			}
+		}
+	}
+
+	return deepMerge(target, ...sources);
+}
+
+/**
+ * Set value in multidimensional object.
+ *
+ * @param {object} object - object to modify
+ * @param {array}  path   - array with keys, where value must be added
+ * @param {mixed}  value  - value to be added
+ *
+ * @return {object} - modified input object
+ */
+function objectSetDeepValue(object, path, value) {
+	let tmp = object;
+
+	while (path.length > 1) {
+		const key = path.shift();
+
+		if (!Object.hasOwn(tmp, key)) {
+			tmp[key] = Object.create(null);
+		}
+		else if (tmp[key] === null) {
+			if (value === null) {
+				return object;
+			}
+			else {
+				throw Error('Trying to set value to null object.');
+			}
+		}
+
+		if (typeof tmp[key] !== 'object') {
+			throw Error('Invalid path. Node is not an Object.');
+		}
+
+		tmp = tmp[key];
+	}
+
+	tmp[path.shift()] = value;
+
+	return object;
+}
+
+/**
+ * Determines whether the user has opened a hintbox or a popup.
+ *
+ * @param {HTMLElement|Document} target
+ * @returns {boolean}
+ */
+function isUserInteracting(target = document) {
+	return target.querySelectorAll('[data-expanded="true"], [aria-expanded="true"][aria-haspopup="true"]').length > 0;
+}
+
+// Fix jQuery ui.sortable vertical positioning bug.
+$.widget("ui.sortable", $.extend({}, $.ui.sortable.prototype, {
+	_getParentOffset: function () {
+		this.offsetParent = this.helper.offsetParent();
+
+		let pos = this.offsetParent.offset();
+
+		if (this.scrollParent[0] !== this.document[0]
+				&& $.contains(this.scrollParent[0], this.offsetParent[0])) {
+			pos.left += this.scrollParent.scrollLeft();
+			pos.top += this.scrollParent.scrollTop();
+		}
+
+		if ((this.offsetParent[0].tagName && this.offsetParent[0].tagName.toLowerCase() === 'html' && $.ui.ie)
+				|| this.offsetParent[0] === this.document[0].body) {
+			pos = {top: 0, left: 0};
+		}
+
+		return {
+			top: pos.top + (parseInt(this.offsetParent.css('borderTopWidth'), 10) || 0),
+			left: pos.left + (parseInt(this.offsetParent.css('borderLeftWidth'), 10) || 0)
+		};
+	}
+}));
+
+// Publish an event for back/forward navigation.
+// Use the Navigation Timing API as a fallback (in case the browser bypasses the bfcache).
+window.addEventListener('pageshow', event => {
+	if (!event.persisted) {
+		if (!PerformanceObserver.supportedEntryTypes.includes('navigation')) {
+			return;
+		}
+
+		const entries = performance.getEntriesByType('navigation').filter(entry => entry.type === 'back_forward');
+		if (entries.length === 0) {
+			return;
+		}
+	}
+
+	ZABBIX.EventHub.publish(new CEventHubEvent({
+		descriptor: {
+			context: EVENT_CONTEXT_PAGE_NAVIGATION,
+			event: EVENT_BACK_FORWARD
+		}
+	}))
+});

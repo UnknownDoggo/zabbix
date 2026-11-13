@@ -1,44 +1,37 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../common/testFormFilter.php';
+
+require_once __DIR__.'/../common/testFormFilter.php';
 
 /**
+ * @dataSource MonitoringOverview
+ *
  * @backup profiles
  *
  * @onBefore prepareUserData, pepareFilterTabsData
- *
- * @onAfter clearData
  */
 class testFormFilterLatestData extends testFormFilter {
 
 	public $url = 'zabbix.php?action=latest.view';
+	public $table_selector = 'id:datatable-latest';
 
 	protected static $users = [
 		'user-delete',
 		'user-update'
 	];
-
-	private function getTableSelector() {
-		return 'xpath://table['.CXPathHelper::fromClass('overflow-ellipsis').']';
-	}
 
 	/**
 	 * Add user for updating.
@@ -127,7 +120,7 @@ class testFormFilterLatestData extends testFormFilter {
 					'error_message' => 'Incorrect value for field "filter_name": cannot be empty.'
 				]
 			],
-			// Dataprovider with 1 space instead of name.
+			// Data provider with 1 space instead of name.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -137,17 +130,16 @@ class testFormFilterLatestData extends testFormFilter {
 					'error_message' => 'Incorrect value for field "filter_name": cannot be empty.'
 				]
 			],
-			// Dataprovider with default name
+			// Data provider with default name
 			[
 				[
 					'expected' => TEST_GOOD,
 					'filter_form' => [
-						'Host groups' => ['ZBX6648 All Triggers']
+						'Host groups' => ['Group to check triggers filtering']
 					],
 					'filter' => [
 						'Show number of records' => true
-					],
-					'tab_id' => '1'
+					]
 				]
 			],
 			[
@@ -158,26 +150,35 @@ class testFormFilterLatestData extends testFormFilter {
 					],
 					'filter' => [
 						'Name' => 'simple_name'
-					],
-					'tab_id' => '2'
+					]
 				]
 			],
-			// Dataprovider with symbols instead of name.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'filter_form' => [
-						'Show details' => true,
+						'Name' => 'non_exist'
+					],
+					'filter' => [
+						'Name' => 'simple_name and 0 records',
+						'Show number of records' => true
+					]
+				]
+			],
+			// Data provider with symbols instead of name.
+			[
+				[
+					'expected' => TEST_GOOD,
+					'filter_form' => [
 						'Name' => '_item'
 					],
 					'filter' => [
 						'Name' => '*;%№:?(',
 						'Show number of records' => true
-					],
-					'tab_id' => '3'
+					]
 				]
 			],
-			// Dataprovider with name as cyrillic.
+			// Data provider with name as cyrillic.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -186,27 +187,26 @@ class testFormFilterLatestData extends testFormFilter {
 					],
 					'filter' => [
 						'Name' => 'кириллица'
-					],
-					'tab_id' => '4'
+					]
 				]
 			],
-			// Two dataproviders with same name and options.
+			// Two data providers with same name and options.
+			[
+				[
+					'expected' => TEST_GOOD,
+					'filter' => [
+						'Name' => 'duplicated_name'
+					]
+				]
+			],
 			[
 				[
 					'expected' => TEST_GOOD,
 					'filter' => [
 						'Name' => 'duplicated_name'
 					],
-					'tab_id' => '5'
-				]
-			],
-			[
-				[
-					'expected' => TEST_GOOD,
-					'filter' => [
-						'Name' => 'duplicated_name'
-					],
-					'tab_id' => '6'
+					// Should be added previous 5 filter tabs from data provider.
+					'tab' => '6'
 				]
 			]
 		];
@@ -218,9 +218,51 @@ class testFormFilterLatestData extends testFormFilter {
 	 * @dataProvider getCheckCreatedFilterData
 	 */
 	public function testFormFilterLatestData_CheckCreatedFilter($data) {
-		$this->createFilter($data, 'filter-create', 'zabbix');
-		$this->checkFilters($data, $this->getTableSelector());
+		$this->createFilter($data, 'filter-create', 'zabbix', $this->table_selector);
+		$this->checkFilters($data, $this->table_selector);
 	}
+
+	public static function getCheckRememberedFilterData() {
+		return [
+			[
+				[
+					'filter' => [
+						'Host groups' => ['Zabbix servers'],
+						'Hosts' => ['ЗАББИКС Сервер'],
+						'Name' => 'Free'
+					],
+					'header_settings' => [
+						'Tags' => [
+							'Number of tags' => '1'
+						]
+					]
+				]
+			],
+			[
+				[
+					'filter' => [
+						'Name' => 'Total'
+					],
+					'header_settings' => [
+						'Tags' => [
+							'Tag display priority' => 'Alfa, Beta',
+							'Tag name display' => 'Shortened'
+						]
+					]
+				]
+			]
+		];
+	}
+
+	/**
+	 * Create and remember new filters.
+	 *
+	 * @dataProvider getCheckRememberedFilterData
+	 */
+	public function testFormFilterLatestData_CheckRememberedFilter($data) {
+		$this->checkRememberedFilters($data, $this->table_selector);
+	}
+
 
 	/**
 	 * Delete created filter.
@@ -233,7 +275,7 @@ class testFormFilterLatestData extends testFormFilter {
 	 * Updating filter form.
 	 */
 	public function testFormFilterLatestData_UpdateForm() {
-		$this->updateFilterForm('latest-filter-update', 'Update_filter_passw0rd', $this->getTableSelector());
+		$this->updateFilterForm('latest-filter-update', 'Update_filter_passw0rd', $this->table_selector);
 	}
 
 	/**
@@ -241,16 +283,5 @@ class testFormFilterLatestData extends testFormFilter {
 	 */
 	public function testFormFilterLatestData_UpdateProperties() {
 		$this->updateFilterProperties('latest-filter-update', 'Update_filter_passw0rd');
-	}
-
-	/**
-	 * Delete created user data after test.
-	 */
-	public static function clearUsersData() {
-		// Delete Hosts.
-		CDataHelper::call('user.delete', [
-				self::$data['user-delete'],
-				self::$data['user-update']
-		]);
 	}
 }

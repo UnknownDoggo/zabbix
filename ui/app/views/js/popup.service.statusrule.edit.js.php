@@ -1,40 +1,39 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 ?>
 
 
 window.service_status_rule_edit_popup = new class {
 
-	init() {
+	init({rules}) {
 		this.overlay = overlays_stack.getById('service_status_rule_edit');
 		this.dialogue = this.overlay.$dialogue[0];
-		this.form = this.overlay.$dialogue.$body[0].querySelector('form');
+		this.footer = this.overlay.$dialogue.$footer[0];
+		this.form_element = this.overlay.$dialogue.$body[0].querySelector('form');
+		this.form = new CForm(this.form_element, rules);
 
 		document
 			.getElementById('service-status-rule-type')
-			.addEventListener('change', (e) => this._update());
+			.addEventListener('change', () => this.#update());
 
-		this._update();
+		this.#update();
+
+		this.footer.querySelector('.js-submit').addEventListener('click', () => this.#submit());
 	}
 
-	_update() {
+	#update() {
 		const type = document.getElementById('service-status-rule-type').value;
 
 		const limit_value_label = document.getElementById('service-status-rule-limit-value-label');
@@ -66,17 +65,35 @@ window.service_status_rule_edit_popup = new class {
 		}
 	}
 
-	submit() {
-		this.overlay.setLoading();
+	#submit() {
+		this.#removePopupMessages();
+		const fields = this.form.getAllValues();
 
-		const curl = new Curl('zabbix.php', false);
+		this.form.validateSubmit(fields)
+			.then((result) => {
+				if (!result) {
+					this.overlay.unsetLoading();
 
-		curl.setArgument('action', 'service.statusrule.validate');
+					return;
+				}
 
-		fetch(curl.getUrl(), {
+				const curl = new Curl('zabbix.php');
+
+				curl.setArgument('action', 'service.statusrule.validate');
+
+				this.#post(curl.getUrl(), fields, (response) => {
+					overlayDialogueDestroy(this.overlay.dialogueid);
+
+					this.dialogue.dispatchEvent(new CustomEvent('dialogue.submit', {detail: response.body}));
+				});
+			});
+	}
+
+	#post(url, data, success_callback) {
+		fetch(url, {
 			method: 'POST',
 			headers: {'Content-Type': 'application/json'},
-			body: JSON.stringify(getFormFields(this.form))
+			body: JSON.stringify(getFormFields(this.form_element))
 		})
 			.then((response) => response.json())
 			.then((response) => {
@@ -84,33 +101,40 @@ window.service_status_rule_edit_popup = new class {
 					throw {error: response.error};
 				}
 
-				overlayDialogueDestroy(this.overlay.dialogueid);
+				if ('form_errors' in response) {
+					this.form.setErrors(response.form_errors, true, true);
+					this.form.renderErrors();
 
-				this.dialogue.dispatchEvent(new CustomEvent('dialogue.submit', {detail: response.body}));
+					return;
+				}
+
+				success_callback(response);
 			})
-			.catch((exception) => {
-				for (const element of this.form.parentNode.children) {
-					if (element.matches('.msg-good, .msg-bad, .msg-warning')) {
-						element.parentNode.removeChild(element);
-					}
-				}
+			.catch((exception) => this.#ajaxExceptionHandler(exception))
+			.finally(() => this.overlay.unsetLoading());
+	}
 
-				let title, messages;
+	#removePopupMessages() {
+		for (const el of this.form_element.parentNode.children) {
+			if (el.matches('.msg-good, .msg-bad, .msg-warning')) {
+				el.parentNode.removeChild(el);
+			}
+		}
+	}
 
-				if (typeof exception === 'object' && 'error' in exception) {
-					title = exception.error.title;
-					messages = exception.error.messages;
-				}
-				else {
-					messages = [<?= json_encode(_('Unexpected server error.')) ?>];
-				}
+	#ajaxExceptionHandler(exception) {
+		let title, messages;
 
-				const message_box = makeMessageBox('bad', messages, title)[0];
+		if (typeof exception === 'object' && 'error' in exception) {
+			title = exception.error.title;
+			messages = exception.error.messages;
+		}
+		else {
+			messages = [<?= json_encode(_('Unexpected server error.')) ?>];
+		}
 
-				this.form.parentNode.insertBefore(message_box, this.form);
-			})
-			.finally(() => {
-				this.overlay.unsetLoading();
-			});
+		const message_box = makeMessageBox('bad', messages, title)[0];
+
+		this.form_element.parentNode.insertBefore(message_box, this.form_element);
 	}
 };

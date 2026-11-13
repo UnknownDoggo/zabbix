@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -23,8 +18,14 @@ class CPieGraphDraw extends CGraphDraw {
 
 	const DEFAULT_HEADER_PADDING_TOP = 30;
 
-	const GRAPH_WIDTH_MIN = 20;
-	const GRAPH_HEIGHT_MIN = 20;
+	private $background;
+	private $sum;
+	private $exploderad;
+	private $exploderad3d;
+	private $graphheight3d;
+	private $shiftlegendright;
+	private $dataFrom;
+	private $shiftYLegend;
 
 	public function __construct($type = GRAPH_TYPE_PIE) {
 		parent::__construct($type);
@@ -39,8 +40,29 @@ class CPieGraphDraw extends CGraphDraw {
 	/********************************************************************************************************/
 	/* PRE CONFIG: ADD / SET / APPLY
 	/********************************************************************************************************/
-	public function addItem($itemid, $calc_fnc = CALC_FNC_AVG, $color = null, $type = null) {
-		$this->items[$this->num] = get_item_by_itemid($itemid);
+	public function addItem($itemid, bool $resolve_macros, $calc_fnc = CALC_FNC_AVG, $color = null, $type = null) {
+		$items = API::Item()->get([
+			'output' => ['itemid', 'hostid', $resolve_macros ? 'name_resolved' : 'name', 'key_', 'units', 'value_type',
+				'valuemapid', 'history', 'trends'
+			],
+			'itemids' => [$itemid],
+			'webitems' => true
+		]);
+
+		if ($resolve_macros) {
+			$items = CArrayHelper::renameObjectsKeys($items, ['name_resolved' => 'name']);
+		}
+
+		if (!$items) {
+			$items = API::ItemPrototype()->get([
+				'output' => ['itemid', 'hostid', 'name', 'key_', 'units', 'value_type', 'valuemapid', 'history',
+					'trends'
+				],
+				'itemids' => [$itemid]
+			]);
+		}
+
+		$this->items[$this->num] = reset($items);
 
 		$host = get_host_by_hostid($this->items[$this->num]['hostid']);
 
@@ -86,22 +108,24 @@ class CPieGraphDraw extends CGraphDraw {
 		$count *= $this->exploderad;
 		$anglemid = (int) (($anglestart + $angleend) / 2);
 
-		$y+= round($count * sin(deg2rad($anglemid)));
-		$x+= round($count * cos(deg2rad($anglemid)));
+		$y += round($count * sin(deg2rad($anglemid)));
+		$x += round($count * cos(deg2rad($anglemid)));
 
-		return [$x, $y];
+		return [(int) $x, (int) $y];
 	}
 
 	protected function calcExplodedRadius($sizeX, $sizeY, $count) {
 		$count *= $this->exploderad * 2;
 		$sizeX -= $count;
 		$sizeY -= $count;
-		return [$sizeX, $sizeY];
+
+		return [(int) $sizeX, (int) $sizeY];
 	}
 
 	protected function calc3DAngle($sizeX, $sizeY) {
 		$sizeY *= GRAPH_3D_ANGLE / 90;
-		return [$sizeX, round($sizeY)];
+
+		return [$sizeX, (int) round($sizeY)];
 	}
 
 	protected function selectData() {
@@ -131,55 +155,46 @@ class CPieGraphDraw extends CGraphDraw {
 		}
 
 		$items = [];
+		$this->items = CMacrosResolverHelper::resolveTimeUnitMacros($this->items, ['history', 'trends']);
+		$from_time = $this->from_time;
+		$to_time = $this->to_time;
 
 		for ($i = 0; $i < $this->num; $i++) {
-			$item = get_item_by_itemid($this->items[$i]['itemid']);
-			$from_time = $this->from_time;
-			$to_time = $this->to_time;
-
+			$item = $this->items[$i];
 			$to_resolve = [];
 
-			// Override item history setting with housekeeping settings, if they are enabled in config.
-			if (CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY_GLOBAL)) {
-				$item['history'] = timeUnitToSeconds(CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY));
-			}
-			else {
-				$to_resolve[] = 'history';
+			[
+				'keep_history' => $item['history'],
+				'history_has_errors' => $history_has_errors,
+				'keep_trends' => $item['trends'],
+				'trends_has_errors' => $trends_has_errors
+			] = CItemHelper::getStoragePeriods((int) $item['value_type'], $item['history'], $item['trends']);
+
+			if ($history_has_errors) {
+				show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'history',
+					_('invalid history storage period')
+				));
+				exit;
 			}
 
-			if (CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS_GLOBAL)) {
-				$item['trends'] = timeUnitToSeconds(CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS));
+			if ($trends_has_errors) {
+				show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'trends',
+					_('invalid trend storage period')
+				));
+				exit;
 			}
-			else {
-				$to_resolve[] = 'trends';
+
+			if ($item['history'] === null) {
+				$item['history'] = 25 * SEC_PER_YEAR;
 			}
 
-			// Otherwise, resolve user macro and parse the string. If successful, convert to seconds.
-			if ($to_resolve) {
-				$item = CMacrosResolverHelper::resolveTimeUnitMacros([$item], $to_resolve)[0];
-
-				$simple_interval_parser = new CSimpleIntervalParser();
-
-				if (!CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY_GLOBAL)) {
-					if ($simple_interval_parser->parse($item['history']) != CParser::PARSE_SUCCESS) {
-						show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'history',
-							_('invalid history storage period')
-						));
-						exit;
-					}
-					$item['history'] = timeUnitToSeconds($item['history']);
-				}
-
-				if (!CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS_GLOBAL)) {
-					if ($simple_interval_parser->parse($item['trends']) != CParser::PARSE_SUCCESS) {
-						show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'trends',
-							_('invalid trend storage period')
-						));
-						exit;
-					}
-					$item['trends'] = timeUnitToSeconds($item['trends']);
-				}
+			if ($item['trends'] === null) {
+				$item['trends'] = 25 * SEC_PER_YEAR;
 			}
+
+			$item['source'] = $item['trends'] == 0 || $item['history'] > time() - ($from_time + $this->period / 2)
+				? 'history'
+				: 'trends';
 
 			$this->data[$this->items[$i]['itemid']]['last'] = isset($history[$item['itemid']])
 				? $history[$item['itemid']][0]['value'] : null;
@@ -187,9 +202,6 @@ class CPieGraphDraw extends CGraphDraw {
 			$this->data[$this->items[$i]['itemid']]['shift_max'] = 0;
 			$this->data[$this->items[$i]['itemid']]['shift_avg'] = 0;
 
-			$item['source'] = ($item['trends'] == 0 || ($item['history'] > time() - ($from_time + $this->period / 2)))
-				? 'history'
-				: 'trends';
 			$items[] = $item;
 		}
 
@@ -213,7 +225,7 @@ class CPieGraphDraw extends CGraphDraw {
 				$this->dataFrom = $item['source'];
 			}
 
-			switch ($this->items[$i]['calc_fnc']) {
+			switch ($item['calc_fnc']) {
 				case CALC_FNC_MIN:
 					$fncName = 'min';
 					break;
@@ -232,7 +244,7 @@ class CPieGraphDraw extends CGraphDraw {
 				? 0
 				: abs($this->data[$item['itemid']][$fncName]);
 
-			if ($this->items[$i]['calc_type'] == GRAPH_ITEM_SUM) {
+			if ($item['calc_type'] == GRAPH_ITEM_SUM) {
 				$this->background = $i;
 				$graph_sum = $item_value;
 			}
@@ -432,23 +444,13 @@ class CPieGraphDraw extends CGraphDraw {
 			list($sizeX, $sizeY) = $this->calcExplodedRadius($sizeX, $sizeY, count($values));
 		}
 
-		$xc = $x = (int) $this->sizeX / 2 + $this->shiftXleft;
-		$yc = $y = (int) $this->sizeY / 2 + $this->shiftY;
+		$xc = $x = (int) ($this->sizeX / 2) + $this->shiftXleft;
+		$yc = $y = (int) ($this->sizeY / 2) + $this->shiftY;
 
-		$anglestart = 0;
-		$angleend = 0;
+		$calculated_angles = self::calculatePieAngles($values, $sum);
 
-		foreach ($values as $item => $value) {
-			if ($value == 0) {
-				continue;
-			}
-
-			$angleend += (int) (360 * $value / $sum) + 1;
-			$angleend = ($angleend > 360) ? 360 : $angleend;
-
-			if (($angleend - $anglestart) < 1) {
-				continue;
-			}
+		foreach ($calculated_angles as $item => $value) {
+			[$anglestart, $angleend] = $value;
 
 			if ($this->type == GRAPH_TYPE_EXPLODED) {
 				list($x, $y) = $this->calcExplodedCenter($anglestart, $angleend, $xc, $yc, count($values));
@@ -476,7 +478,6 @@ class CPieGraphDraw extends CGraphDraw {
 				$this->getColor('Black'),
 				IMG_ARC_PIE | IMG_ARC_EDGED | IMG_ARC_NOFILL
 			);
-			$anglestart = $angleend;
 		}
 	}
 
@@ -513,24 +514,13 @@ class CPieGraphDraw extends CGraphDraw {
 
 		list($sizeX, $sizeY) = $this->calc3DAngle($sizeX, $sizeY);
 
-		$xc = $x = (int) $this->sizeX / 2 + $this->shiftXleft;
-		$yc = $y = (int) $this->sizeY / 2 + $this->shiftY;
+		$xc = $x = (int) ($this->sizeX / 2) + $this->shiftXleft;
+		$yc = $y = (int) ($this->sizeY / 2) + $this->shiftY;
 
-		// bottom angle line
-		$anglestart = 0;
-		$angleend = 0;
+		$calculated_angles = self::calculatePieAngles($values, $sum);
 
-		foreach ($values as $item => $value) {
-			if ($value == 0) {
-				continue;
-			}
-
-			$angleend += (int) (360 * $value / $sum) + 1;
-			$angleend = ($angleend > 360) ? 360 : $angleend;
-
-			if (($angleend - $anglestart) < 1) {
-				continue;
-			}
+		foreach ($calculated_angles as $item => $value) {
+			[$anglestart, $angleend] = $value;
 
 			if ($this->type == GRAPH_TYPE_3D_EXPLODED) {
 				list($x, $y) = $this->calcExplodedCenter($anglestart, $angleend, $xc, $yc, count($values));
@@ -558,26 +548,14 @@ class CPieGraphDraw extends CGraphDraw {
 				$this->getColor('Black'),
 				IMG_ARC_PIE | IMG_ARC_EDGED | IMG_ARC_NOFILL
 			);
-			$anglestart = $angleend;
 		}
 
 		// 3d effect
 		for ($i = $this->graphheight3d; $i > 0; $i--) {
-			$anglestart = 0;
-			$angleend = 0;
+			foreach ($calculated_angles as $item => $value) {
+				[$anglestart, $angleend] = $value;
 
-			foreach ($values as $item => $value) {
-				if ($value == 0) {
-					continue;
-				}
-
-				$angleend += (int) (360 * $value / $sum) + 1;
-				$angleend = ($angleend > 360) ? 360 : $angleend;
-
-				if (($angleend - $anglestart) < 1) {
-					continue;
-				}
-				elseif ($this->sum == 0) {
+				if ($this->sum == 0) {
 					continue;
 				}
 
@@ -596,24 +574,11 @@ class CPieGraphDraw extends CGraphDraw {
 					$this->getShadow((!$isEmptyData ? $this->items[$item]['color'] : 'FFFFFF'), 0),
 					IMG_ARC_PIE
 				);
-				$anglestart = $angleend;
 			}
 		}
 
-		$anglestart = 0;
-		$angleend = 0;
-
-		foreach ($values as $item => $value) {
-			if ($value == 0) {
-				continue;
-			}
-
-			$angleend += (int) (360 * $value / $sum) + 1;
-			$angleend = ($angleend > 360) ? 360 : $angleend;
-
-			if (($angleend - $anglestart) < 1) {
-				continue;
-			}
+		foreach ($calculated_angles as $item => $value) {
+			[$anglestart, $angleend] = $value;
 
 			if ($this->type == GRAPH_TYPE_3D_EXPLODED) {
 				list($x, $y) = $this->calcExplodedCenter($anglestart, $angleend, $xc, $yc, count($values));
@@ -641,7 +606,6 @@ class CPieGraphDraw extends CGraphDraw {
 				$this->getColor('Black'),
 				IMG_ARC_PIE | IMG_ARC_EDGED | IMG_ARC_NOFILL
 			);
-			$anglestart = $angleend;
 		}
 	}
 
@@ -701,12 +665,8 @@ class CPieGraphDraw extends CGraphDraw {
 		$this->exploderad = (int) $this->sizeX / 100;
 		$this->exploderad3d = (int) $this->sizeX / 60;
 
-		if (function_exists('ImageColorExactAlpha') && function_exists('ImageCreateTrueColor') && @imagecreatetruecolor(1, 1)) {
-			$this->im = imagecreatetruecolor($this->fullSizeX, $this->fullSizeY);
-		}
-		else {
-			$this->im = imagecreate($this->fullSizeX, $this->fullSizeY);
-		}
+		$this->im = imagecreatetruecolor($this->fullSizeX, $this->fullSizeY);
+
 		$this->initColors();
 		$this->drawRectangle();
 		$this->drawHeader();
@@ -774,5 +734,97 @@ class CPieGraphDraw extends CGraphDraw {
 		unset($this->items, $this->data);
 
 		imageOut($this->im);
+	}
+
+	private function getShadow($color, $alpha = 0) {
+		if (isset($this->colorsrgb[$color])) {
+			$red = $this->colorsrgb[$color][0];
+			$green = $this->colorsrgb[$color][1];
+			$blue = $this->colorsrgb[$color][2];
+		}
+		else {
+			list($red, $green, $blue) = hex2rgb($color);
+		}
+
+		if ($this->sum > 0) {
+			$red = (int) ($red * 0.6);
+			$green = (int) ($green * 0.6);
+			$blue = (int) ($blue * 0.6);
+		}
+
+		$RGB = [$red, $green, $blue];
+
+		if ($alpha != 0) {
+			return imagecolorexactalpha($this->im, $RGB[0], $RGB[1], $RGB[2], $alpha);
+		}
+
+		return imagecolorallocate($this->im, $RGB[0], $RGB[1], $RGB[2]);
+	}
+
+	protected static function calculatePieAngles(array $values, $sum): array {
+		if ($sum == 0) {
+			return [];
+		}
+
+		$angle_end = 0;
+		$angle_start = 0;
+
+		$visible_values = array_filter($values, function ($value) use (&$angle_end, &$angle_start, $sum) {
+			if ($value == 0 || $angle_end >= 360) {
+				return false;
+			}
+
+			$angle_end += (int) (360 * $value / $sum);
+
+			if (($angle_end - $angle_start) < 1) {
+				return false;
+			}
+
+			$angle_start = $angle_end;
+
+			return true;
+		});
+		unset($angle_start);
+
+		// Reserve extra 1px for each slice.
+		$space_to_split = 360 - count($visible_values);
+		$sum = array_sum($visible_values);
+
+		// Because angles must be integers angles are rounded and all values summed may take less than 360 degrees.
+		// Calculate how many angles are missed because of rounding.
+		$rounding_diff = $space_to_split;
+		foreach ($visible_values as $value) {
+			$rounding_diff -= (int) ($space_to_split * $value / $sum);
+		}
+
+		// Rounding difference is evenly added to N largest pie slices.
+		// Find what is considered a largest slice.
+		$rounding_boundary = 0;
+		if ($rounding_diff != 0) {
+			$values_sorted = $visible_values;
+			arsort($values_sorted);
+			$rounding_boundary = array_slice($values_sorted, $rounding_diff - 1, 1)[0];
+		}
+
+		$angle_start = 0;
+		$angle_end = 0;
+		$calculated_angles = [];
+
+		foreach ($visible_values as $item => $value) {
+			$angle_end += (int) ($space_to_split * $value / $sum) + 1;
+			$angle_end = ($angle_end > 360) ? 360 : $angle_end;
+
+			if ($value >= $rounding_boundary && $rounding_diff > 0) {
+				// Compensate rounding difference.
+				$angle_end += 1;
+				$rounding_diff--;
+			}
+
+			$calculated_angles[$item] = [$angle_start, $angle_end];
+
+			$angle_start = $angle_end;
+		}
+
+		return $calculated_angles;
 	}
 }

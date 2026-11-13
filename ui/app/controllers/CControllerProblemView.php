@@ -1,31 +1,32 @@
-<?php
+<?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
+/**
+ * Controller for the "Problems" page and Problems CSV export.
+ */
 class CControllerProblemView extends CControllerProblem {
 
-	protected function init() {
-		$this->disableSIDValidation();
+	public const DEFAULT_SORT = 'clock';
+	public const DEFAULT_SORTORDER = ZBX_SORT_UP;
+
+	protected function init(): void {
+		$this->disableCsrfValidation();
 	}
 
-	protected function checkInput() {
+	protected function checkInput(): bool {
 		$fields = [
 			'show' =>					'in '.TRIGGERS_OPTION_RECENT_PROBLEM.','.TRIGGERS_OPTION_IN_PROBLEM.','.TRIGGERS_OPTION_ALL,
 			'groupids' =>				'array_id',
@@ -38,16 +39,10 @@ class CControllerProblemView extends CControllerProblem {
 			'inventory' =>				'array',
 			'evaltype' =>				'in '.TAG_EVAL_TYPE_AND_OR.','.TAG_EVAL_TYPE_OR,
 			'tags' =>					'array',
-			'show_tags' =>				'in '.SHOW_TAGS_NONE.','.SHOW_TAGS_1.','.SHOW_TAGS_2.','.SHOW_TAGS_3,
+			'show_symptoms' =>			'in 0,1',
 			'show_suppressed' =>		'in 0,1',
-			'unacknowledged' =>			'in 0,1',
-			'compact_view' =>			'in 0,1',
-			'show_timeline' =>			'in 0,1',
-			'details' =>				'in 0,1',
-			'highlight_row' =>			'in 0,1',
-			'show_opdata' =>			'in '.OPERATIONAL_DATA_SHOW_NONE.','.OPERATIONAL_DATA_SHOW_SEPARATELY.','.OPERATIONAL_DATA_SHOW_WITH_PROBLEM,
-			'tag_name_format' =>		'in '.TAG_NAME_FULL.','.TAG_NAME_SHORTENED.','.TAG_NAME_NONE,
-			'tag_priority' =>			'string',
+			'acknowledgement_status' =>	'in '.ZBX_ACK_STATUS_ALL.','.ZBX_ACK_STATUS_UNACK.','.ZBX_ACK_STATUS_ACK,
+			'acknowledged_by_me' =>		'in 0,1',
 			'from' =>					'range_time',
 			'to' =>						'range_time',
 			'sort' =>					'in clock,host,severity,name',
@@ -58,34 +53,12 @@ class CControllerProblemView extends CControllerProblem {
 			'filter_custom_time' =>		'in 1,0',
 			'filter_show_counter' =>	'in 1,0',
 			'filter_counters' =>		'in 1',
-			'filter_reset' =>			'in 1',
-			'counter_index' =>			'ge 0'
+			'filter_set' =>				'in 1',
+			'filter_reset' =>			'in 1'
 		];
 
-		$ret = $this->validateInput($fields) && $this->validateTimeSelectorPeriod();
-
-		if ($ret && $this->hasInput('inventory')) {
-			foreach ($this->getInput('inventory') as $filter_inventory) {
-				if (count($filter_inventory) != 2
-						|| !array_key_exists('field', $filter_inventory) || !is_string($filter_inventory['field'])
-						|| !array_key_exists('value', $filter_inventory) || !is_string($filter_inventory['value'])) {
-					$ret = false;
-					break;
-				}
-			}
-		}
-
-		if ($ret && $this->hasInput('tags')) {
-			foreach ($this->getInput('tags') as $filter_tag) {
-				if (count($filter_tag) != 3
-						|| !array_key_exists('tag', $filter_tag) || !is_string($filter_tag['tag'])
-						|| !array_key_exists('value', $filter_tag) || !is_string($filter_tag['value'])
-						|| !array_key_exists('operator', $filter_tag) || !is_string($filter_tag['operator'])) {
-					$ret = false;
-					break;
-				}
-			}
-		}
+		$ret = $this->validateInput($fields) && $this->validateTimeSelectorPeriod() && $this->validateInventory()
+			&& $this->validateTags();
 
 		if (!$ret) {
 			$this->setResponse(new CControllerResponseFatal());
@@ -94,15 +67,24 @@ class CControllerProblemView extends CControllerProblem {
 		return $ret;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		return $this->checkAccess(CRoleHelper::UI_MONITORING_PROBLEMS);
 	}
 
-	protected function doAction() {
+	protected function doAction(): void {
 		$filter_tabs = [];
-		$profile = (new CTabFilterProfile(static::FILTER_IDX, static::FILTER_FIELDS_DEFAULT))
-			->read()
-			->setInput($this->cleanInput($this->getInputAll()));
+		$profile = (new CTabFilterProfile('web.monitoring.problem', static::FILTER_FIELDS_DEFAULT))->read();
+
+		if ($this->hasInput('filter_reset')) {
+			$profile->reset();
+		}
+		elseif ($this->hasInput('filter_set')) {
+			$profile->setTabFilter(0, ['filter_name' => ''] + $this->cleanInput($this->getInputAll()));
+			$profile->update();
+		}
+		else {
+			$profile->setInput($this->cleanInput($this->getInputAll()));
+		}
 
 		foreach ($profile->getTabsWithDefaults() as $index => $filter_tab) {
 			if ($filter_tab['filter_custom_time']) {
@@ -119,40 +101,53 @@ class CControllerProblemView extends CControllerProblem {
 		}
 
 		$filter = $filter_tabs[$profile->selected];
+		$filter = self::sanitizeFilter($filter);
+
+		$timeselector_from = $filter['filter_custom_time'] == 1 ? $filter['from'] : $profile->from;
+		$timeselector_to = $filter['filter_custom_time'] == 1 ? $filter['to'] : $profile->to;
+
+		$storage_idx = 'web.monitoring.problem.datatable';
+
+		$highlight_row_enabled = !in_array(CWebUser::$data['theme'], ['hc-light', 'hc-dark']);
 
 		$data = [
 			'action' => $this->getAction(),
-			'tabfilter_idx' => static::FILTER_IDX,
+			'default_sort_field' => CControllerProblem::DEFAULT_SORT,
+			'default_sort_order' => CControllerProblem::DEFAULT_SORTORDER,
 			'filter' => $filter,
-			'filter_view' => 'monitoring.problem.filter',
 			'filter_defaults' => $profile->filter_defaults,
+			'filter_tabs' => $filter_tabs,
+			'filter_view' => 'monitoring.problem.filter',
+			'highlight_row_enabled' => $highlight_row_enabled,
+			'inventories' => array_column(getHostInventories(), 'title', 'db_field'),
+			'page' => $this->getInput('page', 1),
+			'refresh_interval' => CWebUser::getRefresh() * 1000,
+			'severities' => CSeverityHelper::getSeverities(),
+			'storage_idx' => $storage_idx,
+			'sort_field' => $this->getInput('sort', CControllerProblem::DEFAULT_SORT),
+			'sort_order' => $this->getInput('sortorder', CControllerProblem::DEFAULT_SORTORDER),
 			'tabfilter_options' => [
-				'idx' => static::FILTER_IDX,
+				'idx' => 'web.monitoring.problem',
 				'selected' => $profile->selected,
 				'support_custom_time' => 1,
 				'expanded' => $profile->expanded,
+				'expanded_timeselector' => $profile->expanded_timeselector,
 				'page' => $filter['page'],
+				'csrf_token' => CCsrfTokenHelper::get('tabfilter'),
 				'timeselector' => [
-					'from' => $profile->from,
-					'to' => $profile->to,
-					'disabled' => ($filter['show'] != TRIGGERS_OPTION_ALL || $filter['filter_custom_time'])
-				] + getTimeselectorActions($profile->from, $profile->to)
+						'from' => $timeselector_from,
+						'to' => $timeselector_to,
+						'disabled' => ($filter['show'] != TRIGGERS_OPTION_ALL || $filter['filter_custom_time'])
+					] + getTimeselectorActions($timeselector_from, $timeselector_to)
 			],
-			'filter_tabs' => $filter_tabs,
-			'refresh_interval' => CWebUser::getRefresh() * 1000,
-			'inventories' => array_column(getHostInventories(), 'title', 'db_field'),
-			'sort' => $filter['sort'],
-			'sortorder' => $filter['sortorder'],
 			'uncheck' => $this->hasInput('filter_reset'),
-			'page' => $this->getInput('page', 1)
+			'user' => ['debug_mode' => $this->getDebugMode()],
+			'user_configs' => array_map(static fn (string $user_config) => json_decode($user_config, true) ?? [],
+				CProfile::getArray($storage_idx, []))
 		];
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Problems'));
-
-		if ($data['action'] === 'problem.view.csv') {
-			$response->setFileName('zbx_problems_export.csv');
-		}
 
 		$this->setResponse($response);
 	}

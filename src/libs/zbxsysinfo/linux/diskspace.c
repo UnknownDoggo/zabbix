@@ -1,28 +1,23 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-#include "common.h"
-#include "sysinfo.h"
-#include "zbxjson.h"
-#include "log.h"
-#include "zbxalgo.h"
+#include "../sysinfo.h"
+
 #include "inodes.h"
+
+#include "zbxjson.h"
+#include "zbxalgo.h"
 
 static int	get_fs_size_stat(const char *fs, zbx_uint64_t *total, zbx_uint64_t *free,
 		zbx_uint64_t *used, double *pfree, double *pused, char **error)
@@ -80,9 +75,11 @@ static int	get_fs_size_stat(const char *fs, zbx_uint64_t *total, zbx_uint64_t *f
 	}
 
 	return SYSINFO_RET_OK;
+#undef ZBX_STATFS
+#undef ZBX_BSIZE
 }
 
-static int	vfs_fs_size(AGENT_REQUEST *request, AGENT_RESULT *result)
+static int	vfs_fs_size_local(AGENT_REQUEST *request, AGENT_RESULT *result)
 {
 	char		*fsname, *mode, *error;
 	zbx_uint64_t	total, free, used;
@@ -122,14 +119,14 @@ static int	vfs_fs_size(AGENT_REQUEST *request, AGENT_RESULT *result)
 	return SYSINFO_RET_OK;
 }
 
-int	VFS_FS_SIZE(AGENT_REQUEST *request, AGENT_RESULT *result)
+int	vfs_fs_size(AGENT_REQUEST *request, AGENT_RESULT *result)
 {
-	return zbx_execute_threaded_metric(vfs_fs_size, request, result);
+	return zbx_execute_threaded_metric(vfs_fs_size_local, request, result);
 }
 
-int	VFS_FS_DISCOVERY(AGENT_REQUEST *request, AGENT_RESULT *result)
+int	vfs_fs_discovery(AGENT_REQUEST *request, AGENT_RESULT *result)
 {
-	char		line[MAX_STRING_LEN], *p, *mpoint, *mtype;
+	char		line[MAX_STRING_LEN], *p, *mpoint, *mtype, *mntopts;
 	FILE		*f;
 	struct zbx_json	j;
 
@@ -162,9 +159,17 @@ int	VFS_FS_DISCOVERY(AGENT_REQUEST *request, AGENT_RESULT *result)
 
 		*p = '\0';
 
+		mntopts = ++p;
+
+		if (NULL == (p = strchr(mntopts, ' ')))
+			continue;
+
+		*p = '\0';
+
 		zbx_json_addobject(&j, NULL);
 		zbx_json_addstring(&j, ZBX_LLD_MACRO_FSNAME, mpoint, ZBX_JSON_TYPE_STRING);
 		zbx_json_addstring(&j, ZBX_LLD_MACRO_FSTYPE, mtype, ZBX_JSON_TYPE_STRING);
+		zbx_json_addstring(&j, ZBX_LLD_MACRO_FSOPTIONS, mntopts, ZBX_JSON_TYPE_STRING);
 		zbx_json_close(&j);
 	}
 
@@ -179,20 +184,74 @@ int	VFS_FS_DISCOVERY(AGENT_REQUEST *request, AGENT_RESULT *result)
 	return SYSINFO_RET_OK;
 }
 
-static int	vfs_fs_get(AGENT_REQUEST *request, AGENT_RESULT *result)
-{
-	char			line[MAX_STRING_LEN], *p, *mpoint, *mtype, *error;
-	FILE			*f;
-	zbx_uint64_t		total, not_used, used;
-	zbx_uint64_t		itotal, inot_used, iused;
-	double			pfree, pused;
-	double			ipfree, ipused;
-	struct zbx_json		j;
-	zbx_vector_ptr_t	mntpoints;
-	zbx_mpoint_t		*mntpoint;
-	int			ret = SYSINFO_RET_FAIL;
+ZBX_PTR_VECTOR_DECL(mpoint_ptr, zbx_mpoint_t *)
+ZBX_PTR_VECTOR_IMPL(mpoint_ptr, zbx_mpoint_t *)
 
-	ZBX_UNUSED(request);
+static int	mpoint_ptr_fsname_compare(const zbx_mpoint_t *m1, const zbx_fsname_t *f2)
+{
+	int	res;
+
+	if (0 != (res = strcmp(m1->fsname, f2->mpoint)))
+		return res;
+
+	return strcmp(m1->fstype, f2->type);
+}
+
+static int	zbx_vector_mpoint_ptr_search_fsname(const zbx_vector_mpoint_ptr_t *vector, const zbx_fsname_t *value)
+{
+	int	index;
+
+	for (index = 0; index < vector->values_num; index++)
+	{
+		if (0 == mpoint_ptr_fsname_compare(vector->values[index], value))
+			return index;
+	}
+
+	return FAIL;
+}
+
+static int	parse_proc_mounts_line(char *line, zbx_fsname_t *fsname, char **mntopts)
+{
+	char	*p;
+
+	if (NULL == (p = strchr(line, ' ')))
+		return FAIL;
+
+	fsname->mpoint = ++p;
+
+	if (NULL == (p = strchr(fsname->mpoint, ' ')))
+		return FAIL;
+
+	*p = '\0';
+
+	fsname->type = ++p;
+
+	if (NULL == (p = strchr(fsname->type, ' ')))
+		return FAIL;
+
+	*p = '\0';
+
+	*mntopts = ++p;
+
+	if (NULL == (p = strchr(*mntopts, ' ')))
+		return FAIL;
+
+	*p = '\0';
+
+	return SUCCEED;
+}
+
+static int	match_mountpoint(const char *current, const char *requested)
+{
+	return (NULL == requested || 0 == strcmp(current, requested)) ? SUCCEED : FAIL;
+}
+
+static int	vfs_fs_get_short(const char *mountpoint, AGENT_RESULT *result)
+{
+	char		line[MAX_STRING_LEN], *mntopts;
+	FILE		*f;
+	struct zbx_json	j;
+	zbx_fsname_t	fsname;
 
 	if (NULL == (f = fopen("/proc/mounts", "r")))
 	{
@@ -200,54 +259,115 @@ static int	vfs_fs_get(AGENT_REQUEST *request, AGENT_RESULT *result)
 		return SYSINFO_RET_FAIL;
 	}
 
-	zbx_vector_ptr_create(&mntpoints);
+	zbx_json_initarray(&j, ZBX_JSON_STAT_BUF_LEN);
 
 	while (NULL != fgets(line, sizeof(line), f))
 	{
-		if (NULL == (p = strchr(line, ' ')))
+		if (FAIL == parse_proc_mounts_line(line, &fsname, &mntopts))
 			continue;
 
-		mpoint = ++p;
-
-		if (NULL == (p = strchr(mpoint, ' ')))
+		if (FAIL == match_mountpoint(fsname.mpoint, mountpoint))
 			continue;
 
-		*p = '\0';
+		zbx_json_addobject(&j, NULL);
+		zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSNAME, fsname.mpoint, ZBX_JSON_TYPE_STRING);
+		zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSTYPE, fsname.type, ZBX_JSON_TYPE_STRING);
+		zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSOPTIONS, mntopts, ZBX_JSON_TYPE_STRING);
+		zbx_json_close(&j);
+	}
 
-		mtype = ++p;
+	zbx_fclose(f);
 
-		if (NULL == (p = strchr(mtype, ' ')))
+	zbx_json_close(&j);
+
+	SET_STR_RESULT(result, zbx_strdup(NULL, j.buffer));
+
+	zbx_json_free(&j);
+
+	return SYSINFO_RET_OK;
+}
+
+static int	vfs_fs_get_local(AGENT_REQUEST *request, AGENT_RESULT *result)
+{
+	char			*mode, *mountpoint, line[MAX_STRING_LEN], *mntopts, *error;
+	FILE			*f;
+	zbx_uint64_t		total, not_used, used, itotal, inot_used, iused;
+	double			pfree, pused, ipfree, ipused;
+	struct zbx_json		j;
+	zbx_vector_mpoint_ptr_t	mpoints;
+	zbx_mpoint_t		*mpoint;
+	zbx_fsname_t		fsname;
+	int			ret = SYSINFO_RET_FAIL;
+
+	if (2 < request->nparam)
+	{
+		SET_MSG_RESULT(result, zbx_strdup(NULL, "Too many parameters."));
+		return SYSINFO_RET_FAIL;
+	}
+
+	mode = get_rparam(request, 0);
+	mountpoint = get_rparam(request, 1);
+
+	if (NULL != mountpoint && '\0' == *mountpoint)
+		mountpoint = NULL;
+
+	if (NULL != mode && '\0' != *mode)
+	{
+		if (0 == strcmp(mode, "short"))
+			return vfs_fs_get_short(mountpoint, result);
+
+		if (0 != strcmp(mode, "full"))
+		{
+			SET_MSG_RESULT(result, zbx_strdup(NULL, "Invalid first parameter."));
+			return SYSINFO_RET_FAIL;
+		}
+	}
+
+	if (NULL == (f = fopen("/proc/mounts", "r")))
+	{
+		SET_MSG_RESULT(result, zbx_dsprintf(NULL, "Cannot open /proc/mounts: %s", zbx_strerror(errno)));
+		return SYSINFO_RET_FAIL;
+	}
+
+	zbx_vector_mpoint_ptr_create(&mpoints);
+
+	while (NULL != fgets(line, sizeof(line), f))
+	{
+		if (FAIL == parse_proc_mounts_line(line, &fsname, &mntopts))
 			continue;
 
-		*p = '\0';
+		if (FAIL == match_mountpoint(fsname.mpoint, mountpoint))
+			continue;
 
-		if (SYSINFO_RET_OK != get_fs_size_stat(mpoint, &total, &not_used, &used, &pfree, &pused, &error))
+		if (SYSINFO_RET_OK != get_fs_size_stat(fsname.mpoint, &total, &not_used, &used, &pfree, &pused, &error))
 		{
 			zbx_free(error);
 			continue;
 		}
-		if (SYSINFO_RET_OK != get_fs_inode_stat(mpoint, &itotal, &inot_used, &iused, &ipfree, &ipused, "pused",
-				&error))
+
+		if (SYSINFO_RET_OK != get_fs_inode_stat(fsname.mpoint, &itotal, &inot_used, &iused, &ipfree, &ipused,
+				"pused", &error))
 		{
 			zbx_free(error);
 			continue;
 		}
 
-		mntpoint = (zbx_mpoint_t *)zbx_malloc(NULL, sizeof(zbx_mpoint_t));
-		zbx_strlcpy(mntpoint->fsname, mpoint, MAX_STRING_LEN);
-		zbx_strlcpy(mntpoint->fstype, mtype, MAX_STRING_LEN);
-		mntpoint->bytes.total = total;
-		mntpoint->bytes.used = used;
-		mntpoint->bytes.not_used = not_used;
-		mntpoint->bytes.pfree = pfree;
-		mntpoint->bytes.pused = pused;
-		mntpoint->inodes.total = itotal;
-		mntpoint->inodes.used = iused;
-		mntpoint->inodes.not_used = inot_used;
-		mntpoint->inodes.pfree = ipfree;
-		mntpoint->inodes.pused = ipused;
+		mpoint = (zbx_mpoint_t *)zbx_malloc(NULL, sizeof(zbx_mpoint_t));
+		zbx_strlcpy(mpoint->fsname, fsname.mpoint, MAX_STRING_LEN);
+		zbx_strlcpy(mpoint->fstype, fsname.type, MAX_STRING_LEN);
+		mpoint->bytes.total = total;
+		mpoint->bytes.used = used;
+		mpoint->bytes.not_used = not_used;
+		mpoint->bytes.pfree = pfree;
+		mpoint->bytes.pused = pused;
+		mpoint->inodes.total = itotal;
+		mpoint->inodes.used = iused;
+		mpoint->inodes.not_used = inot_used;
+		mpoint->inodes.pfree = ipfree;
+		mpoint->inodes.pused = ipused;
+		mpoint->options = zbx_strdup(NULL, mntopts);
 
-		zbx_vector_ptr_append(&mntpoints, mntpoint);
+		zbx_vector_mpoint_ptr_append(&mpoints, mpoint);
 	}
 	zbx_fclose(f);
 
@@ -256,41 +376,40 @@ static int	vfs_fs_get(AGENT_REQUEST *request, AGENT_RESULT *result)
 		SET_MSG_RESULT(result, zbx_dsprintf(NULL, "Cannot open /proc/mounts: %s", zbx_strerror(errno)));
 		goto out;
 	}
+
 	zbx_json_initarray(&j, ZBX_JSON_STAT_BUF_LEN);
 
 	while (NULL != fgets(line, sizeof(line), f))
 	{
 		int idx;
 
-		if (NULL == (p = strchr(line, ' ')))
+		if (FAIL == parse_proc_mounts_line(line, &fsname, &mntopts))
 			continue;
 
-		mpoint = ++p;
-
-		if (NULL == (p = strchr(mpoint, ' ')))
+		if (FAIL == match_mountpoint(fsname.mpoint, mountpoint))
 			continue;
 
-		*p = '\0';
-		if (FAIL != (idx = zbx_vector_ptr_search(&mntpoints, mpoint, ZBX_DEFAULT_STR_COMPARE_FUNC)))
+		if (FAIL != (idx = zbx_vector_mpoint_ptr_search_fsname(&mpoints, &fsname)))
 		{
-			mntpoint = (zbx_mpoint_t *)mntpoints.values[idx];
+			mpoint = mpoints.values[idx];
 			zbx_json_addobject(&j, NULL);
-			zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSNAME, mntpoint->fsname, ZBX_JSON_TYPE_STRING);
-			zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSTYPE, mntpoint->fstype, ZBX_JSON_TYPE_STRING);
+			zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSNAME, mpoint->fsname, ZBX_JSON_TYPE_STRING);
+			zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSTYPE, mpoint->fstype, ZBX_JSON_TYPE_STRING);
 			zbx_json_addobject(&j, ZBX_SYSINFO_TAG_BYTES);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_TOTAL, mntpoint->bytes.total);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_FREE, mntpoint->bytes.not_used);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_USED, mntpoint->bytes.used);
-			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PFREE, mntpoint->bytes.pfree);
-			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PUSED, mntpoint->bytes.pused);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_TOTAL, mpoint->bytes.total);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_FREE, mpoint->bytes.not_used);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_USED, mpoint->bytes.used);
+			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PFREE, mpoint->bytes.pfree);
+			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PUSED, mpoint->bytes.pused);
 			zbx_json_close(&j);
 			zbx_json_addobject(&j, ZBX_SYSINFO_TAG_INODES);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_TOTAL, mntpoint->inodes.total);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_FREE, mntpoint->inodes.not_used);
-			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_USED, mntpoint->inodes.used);
-			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PFREE, mntpoint->inodes.pfree);
-			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PUSED, mntpoint->inodes.pused);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_TOTAL, mpoint->inodes.total);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_FREE, mpoint->inodes.not_used);
+			zbx_json_adduint64(&j, ZBX_SYSINFO_TAG_USED, mpoint->inodes.used);
+			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PFREE, mpoint->inodes.pfree);
+			zbx_json_addfloat(&j, ZBX_SYSINFO_TAG_PUSED, mpoint->inodes.pused);
 			zbx_json_close(&j);
+			zbx_json_addstring(&j, ZBX_SYSINFO_TAG_FSOPTIONS, mpoint->options, ZBX_JSON_TYPE_STRING);
 			zbx_json_close(&j);
 		}
 	}
@@ -303,16 +422,14 @@ static int	vfs_fs_get(AGENT_REQUEST *request, AGENT_RESULT *result)
 
 	zbx_json_free(&j);
 	ret = SYSINFO_RET_OK;
-
 out:
-	zbx_vector_ptr_clear_ext(&mntpoints, (zbx_clean_func_t)zbx_mpoints_free);
-	zbx_vector_ptr_destroy(&mntpoints);
+	zbx_vector_mpoint_ptr_clear_ext(&mpoints, zbx_mpoints_free);
+	zbx_vector_mpoint_ptr_destroy(&mpoints);
 
 	return ret;
 }
 
-int	VFS_FS_GET(AGENT_REQUEST *request, AGENT_RESULT *result)
+int	vfs_fs_get(AGENT_REQUEST *request, AGENT_RESULT *result)
 {
-	return zbx_execute_threaded_metric(vfs_fs_get, request, result);
-
+	return zbx_execute_threaded_metric(vfs_fs_get_local, request, result);
 }

@@ -1,68 +1,81 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package docker
 
 import (
-	"errors"
+	"context"
+	"net"
+	"net/http"
 	"strings"
 
-	"git.zabbix.com/ap/plugin-support/conf"
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/sdk/conf"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/plugin"
 )
 
-// Options is a plugin configuration
+// Options is a plugin configuration.
 type Options struct {
-	plugin.SystemOptions `conf:"optional"`
-	Endpoint             string `conf:"default=unix:///var/run/docker.sock"`
-	Timeout              int    `conf:"optional,range=1:30"`
+	Endpoint      string `conf:"default=unix:///var/run/docker.sock"`
+	LegacyTimeout int    `conf:"name=Timeout,optional,range=1:30"`
 }
 
-// Configure implements the Configurator interface.
+// Configure implements the plugin.Configurator interface.
 // Initializes configuration structures.
-func (p *Plugin) Configure(global *plugin.GlobalOptions, options interface{}) {
-	if err := conf.Unmarshal(options, &p.options); err != nil {
+func (p *Plugin) Configure(global *plugin.GlobalOptions, options any) {
+	err := conf.UnmarshalStrict(options, &p.options)
+	if err != nil {
 		p.Errf("cannot unmarshal configuration options: %s", err)
 	}
 
-	if p.options.Timeout == 0 {
-		p.options.Timeout = global.Timeout
+	if p.options.LegacyTimeout != 0 {
+		log.Debugf("config value 'Timeout' is deprecated")
+	}
+
+	if p.options.LegacyTimeout == 0 {
+		p.options.LegacyTimeout = global.Timeout
 	}
 
 	socketPath := strings.Split(p.options.Endpoint, "://")[1]
-	p.client = newClient(socketPath, p.options.Timeout)
+	transport := &http.Transport{
+		DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+			//nolint:noctx // as this function is intentionally ran
+			// without context needs to be looked at during refactor.
+			return net.Dial("unix", socketPath)
+		},
+	}
+
+	p.client = &http.Client{
+		Transport: transport,
+	}
 }
 
-// Validate implements the Configurator interface.
+// Validate implements the plugin.Configurator interface.
 // Returns an error if validation of a plugin's configuration is failed.
-func (p *Plugin) Validate(options interface{}) error {
+func (*Plugin) Validate(options any) error {
 	var opts Options
 
-	err := conf.Unmarshal(options, &opts)
+	err := conf.UnmarshalStrict(options, &opts)
 	if err != nil {
-		return err
+		return errs.Wrap(err, "cannot unmarshal plugin options")
 	}
 
 	endpointParts := strings.SplitN(opts.Endpoint, "://", 2)
 	if len(endpointParts) == 1 || endpointParts[0] != "unix" {
-		return errors.New("invalid endpoint format")
+		return errs.New("invalid endpoint format")
 	}
 
-	return err
+	return nil
 }

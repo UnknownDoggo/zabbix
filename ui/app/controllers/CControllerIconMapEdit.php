@@ -1,37 +1,47 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerIconMapEdit extends CController {
 
+	/**
+	 * @var array
+	 */
+	private $iconmap = [];
+
 	protected function init() {
-		$this->disableSIDValidation();
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput() {
-		$fields = [
-			'iconmapid' => 'db icon_map.iconmapid',
-			'iconmap'   => 'array'
-		];
+		$rules = ['object', 'fields' => [
+			'iconmapid' => ['db icon_map.iconmapid'],
+			'iconmap' => ['object', 'fields' => [
+				'name' => ['string'],
+				'mappings' => ['objects', 'fields' => [
+					'inventory_link' => ['string'],
+					'expression' => ['string'],
+					'iconid' => ['db icon_mapping.iconid'],
+					'sortorder' => ['integer']
+				]],
+				'default_iconid' => ['db icon_map.default_iconid']
+			]]
+		]];
 
-		$ret = $this->validateInput($fields);
+		$ret = $this->validateInput($rules, true);
 
 		if (!$ret) {
 			$this->setResponse(new CControllerResponseFatal());
@@ -45,6 +55,12 @@ class CControllerIconMapEdit extends CController {
 			return false;
 		}
 
+		$this->iconmap = $this->getInput('iconmap', []) + [
+			'name' => '',
+			'default_iconid' => 0,
+			'mappings' => []
+		];
+
 		if ($this->hasInput('iconmapid')) {
 			$iconmaps = API::IconMap()->get([
 				'output' => ['iconmapid', 'name', 'default_iconid'],
@@ -56,14 +72,7 @@ class CControllerIconMapEdit extends CController {
 				return false;
 			}
 
-			$this->iconmap = $this->getInput('iconmap', []) + $iconmaps[0];
-		}
-		else {
-			$this->iconmap = $this->getInput('iconmap', []) + [
-				'name' => '',
-				'default_iconid' => 0,
-				'mappings' => []
-			];
+			$this->iconmap = $iconmaps[0];
 		}
 
 		return true;
@@ -71,6 +80,7 @@ class CControllerIconMapEdit extends CController {
 
 	protected function doAction() {
 		order_result($this->iconmap['mappings'], 'sortorder');
+		$this->iconmap['mappings'] = array_values($this->iconmap['mappings']);
 
 		$images = API::Image()->get([
 			'output' => ['imageid', 'name'],
@@ -81,17 +91,34 @@ class CControllerIconMapEdit extends CController {
 		$images = array_column($images, 'name', 'imageid');
 
 		$default_imageid = key($images);
+		$inventory_list = array_column(getHostInventories(), 'title', 'nr');
 
 		if (!$this->hasInput('iconmapid')) {
-			$this->iconmap['default_iconid'] = $default_imageid;
+			if ($this->iconmap['default_iconid'] == 0) {
+				$this->iconmap['default_iconid'] = $default_imageid;
+			}
+
+			if (!$this->iconmap['mappings']) {
+				$this->iconmap['mappings'] = [[
+					'inventory_link' => key($inventory_list),
+					'expression' => "",
+					'iconid' => $default_imageid,
+					'sortorder' => 0
+				]];
+			}
 		}
+
+		$rules = $this->hasInput('iconmapid')
+			? (new CFormValidator(CControllerIconMapUpdate::getValidationRules()))->getRules()
+			: (new CFormValidator(CControllerIconMapCreate::getValidationRules()))->getRules();
 
 		$data = [
 			'iconmapid' => $this->getInput('iconmapid', 0),
 			'icon_list' => $images,
 			'iconmap' => $this->iconmap,
-			'inventory_list' => array_column(getHostInventories(), 'title', 'nr'),
-			'default_imageid' => $default_imageid
+			'inventory_list' => $inventory_list,
+			'default_imageid' => $default_imageid,
+			'js_validation_rules' => $rules
 		];
 
 		$response = new CControllerResponseData($data);

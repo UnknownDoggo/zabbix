@@ -3,10 +3,6 @@ This plugin provides a native solution for monitoring modbus devices by Zabbix.
 The plugin can monitor several modbus devices simultaneously via Zabbix agent 2. Both TCP and 
 RTU connections are supported.
 
-## Requirements
-- Zabbix Agent 2
-- Go >= 1.12 (required only to build from source)
-
 ## Installation
 The plugin is supplied as part of the Zabbix Agent 2 and does not require any special installation steps. Once 
 Zabbix Agent 2 is installed, the plugin is ready to work. Now you need to make sure that a modbus device is 
@@ -15,13 +11,11 @@ available for connection and configure monitoring.
 ## Configuration
 Open the Zabbix Agent configuration file (zabbix_agent2.conf) and set the required parameters.
 
-**Plugins.Modbus.Timeout** — request execution timeout (how long to wait for a request to complete before shutting it down).  
-*Default value:* equals the global 'Timeout' (configuration parameter set in zabbix_agent2.conf).  
-*Limits:* 1-30
-
 #### Named sessions
 Named sessions allow you to define specific parameters for each instance of modbus device. Currently, only three parameters are supported: 
 Endpoint, SlaveID and Timeout (if certain parameter is not specified for a named session, a value from key will be used). 
+
+Timeout is now *deprecated*, and used only for requests coming from Zabbix servers older than 7.0 version.
 
 *Example:*  
 If you have two instances: "MB1" and "MB2", the following options have to be added to the agent configuration:

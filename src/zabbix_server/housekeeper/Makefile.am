@@ -1,11 +1,16 @@
 ## Process this file with automake to produce Makefile.in
 
-noinst_LIBRARIES = libzbxhousekeeper.a
+noinst_LIBRARIES = libzbxhousekeeper_server.a
 
-libzbxhousekeeper_a_SOURCES = \
-	housekeeper.c \
-	housekeeper.h \
+libzbxhousekeeper_server_a_SOURCES = \
+	housekeeper_server.c \
+	housekeeper_server.h \
 	history_compress.c \
 	history_compress.h \
 	trigger_housekeeper.c \
-	trigger_housekeeper.h
+	trigger_housekeeper.h \
+	housekeeper_table.c \
+	housekeeper_table.h
+
+libzbxhousekeeper_server_a_CFLAGS = \
+	$(TLS_CFLAGS)

@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -27,78 +22,27 @@ class CControllerUserroleEdit extends CControllerUserroleEditGeneral {
 	private $role;
 
 	protected function init(): void {
-		$this->disableSIDValidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput(): bool {
+		global $ZBX_FEATURE_FLAGS;
+
 		$fields = [
-			'roleid' => 								'db users.roleid',
-			'name' => 									'db role.name',
-			'type' => 									'in '.implode(',', [USER_TYPE_ZABBIX_USER, USER_TYPE_ZABBIX_ADMIN, USER_TYPE_SUPER_ADMIN]),
-			'ui_monitoring_dashboard' => 				'in 0,1',
-			'ui_monitoring_problems' => 				'in 0,1',
-			'ui_monitoring_hosts' => 					'in 0,1',
-			'ui_monitoring_latest_data' => 				'in 0,1',
-			'ui_monitoring_maps' => 					'in 0,1',
-			'ui_monitoring_discovery' => 				'in 0,1',
-			'ui_services_services' => 					'in 0,1',
-			'ui_services_actions' => 					'in 0,1',
-			'ui_services_sla' => 						'in 0,1',
-			'ui_services_sla_report' => 				'in 0,1',
-			'ui_inventory_overview' => 					'in 0,1',
-			'ui_inventory_hosts' => 					'in 0,1',
-			'ui_reports_system_info' => 				'in 0,1',
-			'ui_reports_scheduled_reports' => 			'in 0,1',
-			'ui_reports_availability_report' => 		'in 0,1',
-			'ui_reports_top_triggers' => 				'in 0,1',
-			'ui_reports_audit' => 						'in 0,1',
-			'ui_reports_action_log' => 					'in 0,1',
-			'ui_reports_notifications' => 				'in 0,1',
-			'ui_configuration_host_groups' => 			'in 0,1',
-			'ui_configuration_templates' => 			'in 0,1',
-			'ui_configuration_hosts' => 				'in 0,1',
-			'ui_configuration_maintenance' => 			'in 0,1',
-			'ui_configuration_actions' => 				'in 0,1',
-			'ui_configuration_event_correlation' => 	'in 0,1',
-			'ui_configuration_discovery' => 			'in 0,1',
-			'ui_administration_general' => 				'in 0,1',
-			'ui_administration_proxies' => 				'in 0,1',
-			'ui_administration_authentication' => 		'in 0,1',
-			'ui_administration_user_groups' => 			'in 0,1',
-			'ui_administration_user_roles' => 			'in 0,1',
-			'ui_administration_users' => 				'in 0,1',
-			'ui_administration_media_types' => 			'in 0,1',
-			'ui_administration_scripts' => 				'in 0,1',
-			'ui_administration_queue' => 				'in 0,1',
-			'actions_edit_dashboards' => 				'in 0,1',
-			'actions_edit_maps' => 						'in 0,1',
-			'actions_edit_maintenance' => 				'in 0,1',
-			'actions_acknowledge_problems' => 			'in 0,1',
-			'actions_close_problems' => 				'in 0,1',
-			'actions_change_severity' => 				'in 0,1',
-			'actions_add_problem_comments' => 			'in 0,1',
-			'actions_execute_scripts' => 				'in 0,1',
-			'actions_manage_api_tokens' => 				'in 0,1',
-			'actions_manage_scheduled_reports' => 		'in 0,1',
-			'actions_manage_sla' => 					'in 0,1',
-			'actions_invoke_execute_now' =>				'in 0,1',
-			'ui_default_access' => 						'in 0,1',
-			'modules_default_access' => 				'in 0,1',
-			'actions_default_access' => 				'in 0,1',
-			'modules' => 								'array',
-			'api_access' => 							'in 0,1',
-			'api_mode' => 								'in '.implode(',', [ZBX_ROLE_RULE_API_MODE_DENY, ZBX_ROLE_RULE_API_MODE_ALLOW]),
-			'api_methods' => 							'array',
-			'service_read_access' => 					'in '.implode(',', [CRoleHelper::SERVICES_ACCESS_NONE, CRoleHelper::SERVICES_ACCESS_ALL, CRoleHelper::SERVICES_ACCESS_LIST]),
-			'service_read_list' => 						'array_db services.serviceid',
-			'service_read_tag_tag' => 					'string',
-			'service_read_tag_value' => 				'string',
-			'service_write_access' => 					'in '.implode(',', [CRoleHelper::SERVICES_ACCESS_NONE, CRoleHelper::SERVICES_ACCESS_ALL, CRoleHelper::SERVICES_ACCESS_LIST]),
-			'service_write_list' => 					'array_db services.serviceid',
-			'service_write_tag_tag' => 					'string',
-			'service_write_tag_value' => 				'string',
-			'form_refresh' => 							'int32'
+			'roleid' =>					'db users.roleid',
+			'name' =>					'db role.name',
+			'super_admin_role_clone' =>	'in 1'
 		];
+
+		if (!$ZBX_FEATURE_FLAGS['modules_config_enabled']) {
+			unset($fields['fields']['modules'], $fields['fields']['modules_default_access']);
+		}
+
+		if (!CSettingsHelper::isMobileDevicesEnabled()) {
+			unset($fields['fields']['ui_administration_linked_devices'], $fields['fields']['devices_actions'],
+				$fields['fields']['devices_actions_default_access']
+			);
+		}
 
 		$ret = $this->validateInput($fields);
 
@@ -138,181 +82,106 @@ class CControllerUserroleEdit extends CControllerUserroleEditGeneral {
 	 * @throws APIException
 	 */
 	protected function doAction(): void {
+		global $ZBX_FEATURE_FLAGS;
+
 		$db_defaults = DB::getDefaults('role');
 
-		if ($this->hasInput('form_refresh')) {
-			$data = $this->getFormData([
+		$data = match (true) {
+			$this->hasInput('super_admin_role_clone') => [
 				'roleid' => null,
+				'name' => $this->getInput('name'),
+				'type' => USER_TYPE_SUPER_ADMIN,
 				'readonly' => (bool) $db_defaults['readonly'],
-				'is_own_role' => $this->getInput('roleid', 0) == CWebUser::$data['roleid'],
-				'rules' => $this->getRulesDefaults((int) $this->getInput('type'))
-			]);
-		}
-		elseif ($this->role !== null) {
-			$data = [
-				'roleid' => $this->role['roleid'],
-				'name' => $this->role['name'],
-				'type' => $this->role['type'],
-				'readonly' => (bool) $this->role['readonly'],
-				'is_own_role' => $this->role['roleid'] == CWebUser::$data['roleid'],
+				'is_own_role' => false,
 				'rules' => array_merge(
-					$this->getRulesDefaults((int) $this->role['type']),
-					$this->getRules($this->role['roleid'])
+					$this->getRulesDefaults(USER_TYPE_SUPER_ADMIN),
+					$this->getRulesByRoleid(USER_TYPE_SUPER_ADMIN)
 				)
-			];
-		}
-		else {
-			$data = [
+			],
+			$this->role === null => [
 				'roleid' => null,
 				'name' => $db_defaults['name'],
 				'type' => $db_defaults['type'],
 				'readonly' => (bool) $db_defaults['readonly'],
 				'is_own_role' => false,
 				'rules' => $this->getRulesDefaults((int) $db_defaults['type'])
-			];
-		}
+			],
+			default => [
+				'roleid' => $this->role['roleid'],
+				'name' => $this->role['name'],
+				'type' => $this->role['type'],
+				'readonly' => (bool) $this->role['readonly'],
+				'is_own_role' => bccomp($this->role['roleid'], CWebUser::$data['roleid']) == 0,
+				'rules' => array_merge(
+					$this->getRulesDefaults((int) $this->role['type']),
+					$this->getRulesByRoleid($this->role['roleid'])
+				)
+			]
+		};
 
-		$data['labels'] = $this->getLabels();
+		$data['rules']['modules_config_enabled'] = $ZBX_FEATURE_FLAGS['modules_config_enabled'];
+		$data['rules']['service_read_list'] = $this->getServicesList($data['rules']['service_read_list']);
+		$data['rules']['service_write_list'] = $this->getServicesList($data['rules']['service_write_list']);
 
-		$data['rules']['service_read_list'] = API::Service()->get([
-			'output' => ['serviceid', 'name'],
-			'serviceids' => array_column($data['rules']['service_read_list'], 'serviceid')
-		]);
+		$db_modules = $data['rules']['modules_config_enabled']
+			? API::Module()->get([
+				'output' => ['moduleid', 'relative_path', 'status']
+			])
+			: [];
 
-		$data['rules']['service_write_list'] = API::Service()->get([
-			'output' => ['serviceid', 'name'],
-			'serviceids' => array_column($data['rules']['service_write_list'], 'serviceid')
-		]);
+		$disabled_modules = array_filter($db_modules,
+			static fn(array $db_module): bool => $db_module['status'] == MODULE_STATUS_DISABLED
+		);
+
+		$data['js_validation_rules_create'] = (new CFormValidator(CControllerUserroleCreate::getValidationRules()))
+			->getRules();
+
+		$data += [
+			'disabled_moduleids' => array_column($disabled_modules, 'moduleid', 'moduleid'),
+			'labels' => $this->getLabels($db_modules),
+			'js_validation_rules' => $data['roleid'] === null
+				? $data['js_validation_rules_create']
+				: (new CFormValidator(CControllerUserroleUpdate::getValidationRules()))->getRules()
+		];
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Configuration of user roles'));
 		$this->setResponse($response);
 	}
 
-	private function getFormData(array $data): array {
-		$this->getInputs($data, ['name', 'type']);
-
-		// Overwrite default access inputs.
-		if ($this->hasInput('ui_default_access')) {
-			$data['rules']['ui.default_access'] = $this->getInput('ui_default_access');
-		}
-
-		if ($this->hasInput('modules_default_access')) {
-			$data['rules']['modules.default_access'] = $this->getInput('modules_default_access');
-		}
-
-		if ($this->hasInput('actions_default_access')) {
-			$data['rules']['actions.default_access'] = $this->getInput('actions_default_access');
-		}
-
-		// UI section.
-		foreach (CRoleHelper::getUiElementsByUserType((int) $data['type']) as $label) {
-			$input_name = str_replace('.', '_', $label);
-
-			if ($this->hasInput($input_name)) {
-				$data['rules']['ui'][$label] = $this->getInput($input_name);
-			}
-		}
-
-		// Services section.
-		if ($this->hasInput('service_read_access')) {
-			$data['rules']['service_read_access'] = $this->getInput('service_read_access');
-		}
-
-		if ($data['rules']['service_read_access'] == CRoleHelper::SERVICES_ACCESS_LIST) {
-			if ($this->hasInput('service_read_list')) {
-				foreach ($this->getInput('service_read_list') as $serviceid) {
-					$data['rules']['service_read_list'][] = ['serviceid' => $serviceid];
-				}
-			}
-
-			if ($this->hasInput('service_read_tag_tag')) {
-				$data['rules']['service_read_tag']['tag'] = trim($this->getInput('service_read_tag_tag'));
-			}
-
-			if ($this->hasInput('service_read_tag_value')) {
-				$data['rules']['service_read_tag']['value'] = trim($this->getInput('service_read_tag_value'));
-			}
-		}
-
-		if ($this->hasInput('service_write_access')) {
-			$data['rules']['service_write_access'] = $this->getInput('service_write_access');
-		}
-
-		if ($data['rules']['service_write_access'] == CRoleHelper::SERVICES_ACCESS_LIST) {
-			if ($this->hasInput('service_write_list')) {
-				foreach ($this->getInput('service_write_list') as $serviceid) {
-					$data['rules']['service_write_list'][] = ['serviceid' => $serviceid];
-				}
-			}
-
-			if ($this->hasInput('service_write_tag_tag')) {
-				$data['rules']['service_write_tag']['tag'] = trim($this->getInput('service_write_tag_tag'));
-			}
-
-			if ($this->hasInput('service_write_tag_value')) {
-				$data['rules']['service_write_tag']['value'] = trim($this->getInput('service_write_tag_value'));
-			}
-		}
-
-		// Modules section.
-		if ($this->hasInput('modules')) {
-			$data['rules']['modules'] = $this->getInput('modules');
-		}
-
-		// API section.
-		if ($this->hasInput('api_access')) {
-			$data['rules']['api.access'] = $this->getInput('api_access');
-		}
-		if ($this->hasInput('api_mode')) {
-			$data['rules']['api.mode'] = $this->getInput('api_mode');
-		}
-		foreach ($this->getInput('api_methods', []) as $method) {
-			$data['rules']['api'][] = ['id' => $method, 'name' => $method];
-		}
-
-		// Actions section.
-		foreach (CRoleHelper::getActionsByUserType((int) $data['type']) as $label) {
-			$input_name = str_replace('.', '_', $label);
-
-			if ($this->hasInput($input_name)) {
-				$data['rules']['actions'][$label] = $this->getInput($input_name);
-			}
-		}
-
-		return $data;
+	private function getServicesList(array $serviceids): array {
+		return API::Service()->get([
+			'output' => ['serviceid', 'name'],
+			'serviceids' => array_column($serviceids, 'serviceid')
+		]);
 	}
 
-	/**
-	 * @throws APIException
-	 */
-	private function getLabels(): array {
+	private function getLabels(array $db_modules): array {
 		$labels = [
 			'sections' => CRoleHelper::getUiSectionsLabels(USER_TYPE_SUPER_ADMIN),
-			'actions' => CRoleHelper::getActionsLabels(USER_TYPE_SUPER_ADMIN)
+			'actions' => CRoleHelper::getActionsLabels(USER_TYPE_SUPER_ADMIN),
+			'devices_actions' => CRoleHelper::getDevicesActionsLabels(USER_TYPE_SUPER_ADMIN)
 		];
 
 		foreach (array_keys(CRoleHelper::getUiSectionsLabels(USER_TYPE_SUPER_ADMIN)) as $section) {
 			$labels['rules'][$section] = CRoleHelper::getUiSectionRulesLabels($section, USER_TYPE_SUPER_ADMIN);
 		}
 
-		$db_modules = API::Module()->get([
-			'output' => ['moduleid', 'relative_path'],
-			'filter' => [
-				'status' => MODULE_STATUS_ENABLED
-			]
-		]);
+		$labels['modules'] = [];
 
 		if ($db_modules) {
-			$module_manager = new CModuleManager(APP::ModuleManager()->getModulesDir());
-			foreach ($db_modules as $module) {
-				$manifest = $module_manager->addModule($module['relative_path']);
-				$labels['modules'][$module['moduleid']] = $manifest['name'];
+			$module_manager = new CModuleManager(APP::getRootDir());
+
+			foreach ($db_modules as $db_module) {
+				$manifest = $module_manager->addModule($db_module['relative_path']);
+
+				if ($manifest !== null) {
+					$labels['modules'][$db_module['moduleid']] = $manifest['name'];
+				}
 			}
 		}
-		else {
-			$labels['modules'] = [];
-		}
+
+		natcasesort($labels['modules']);
 
 		return $labels;
 	}
@@ -321,6 +190,8 @@ class CControllerUserroleEdit extends CControllerUserroleEditGeneral {
 		return [
 			'ui' => array_fill_keys(CRoleHelper::getUiElementsByUserType($user_type), true),
 			'ui.default_access' => true,
+			'profile.redirect.enforce' => false,
+			'profile.redirect.url' => '',
 			'service_read_access' => CRoleHelper::SERVICES_ACCESS_ALL,
 			'service_read_list' => [],
 			'service_read_tag' => ['tag' => '', 'value' => ''],
@@ -330,85 +201,103 @@ class CControllerUserroleEdit extends CControllerUserroleEditGeneral {
 			'modules' => [],
 			'modules.default_access' => true,
 			'api' => [],
-			'api.access' => true,
-			'api.mode' => 'api.mode',
+			'api.access' => false,
+			'api.mode' => false,
 			'actions' => array_fill_keys(CRoleHelper::getActionsByUserType($user_type), true),
-			'actions.default_access' => true
+			'actions.default_access' => true,
+			'devices.access' => ZBX_ROLE_RULE_DISABLED,
+			'devices.actions' => array_fill_keys(CRoleHelper::getDeviceActionsByUserType($user_type), false),
+			'devices.actions.default_access' => ZBX_ROLE_RULE_DISABLED
 		];
 	}
 
 	/**
 	 * @throws APIException
 	 */
-	private function getRules(string $roleid): array {
+	private function getRulesByRoleid(string $roleid): array {
+		global $ZBX_FEATURE_FLAGS;
+
+		$select_rules = ['ui', 'ui.default_access', 'profile.redirect.enforce', 'profile.redirect.url', 'api',
+			'api.access', 'api.mode', 'actions', 'actions.default_access', 'services.read.mode', 'services.read.list',
+			'services.read.tag', 'services.write.mode', 'services.write.list', 'services.write.tag', 'devices.access',
+			'devices.actions', 'devices.actions.default_access'
+		];
+
+		if ($ZBX_FEATURE_FLAGS['modules_config_enabled']) {
+			$select_rules = array_merge($select_rules, ['modules', 'modules.default_access']);
+		}
+
 		$roles = API::Role()->get([
 			'output' => ['roleid'],
-			'selectRules' => ['ui', 'ui.default_access', 'modules', 'modules.default_access', 'api', 'api.access',
-				'api.mode', 'actions', 'actions.default_access', 'services.read.mode', 'services.read.list',
-				'services.read.tag', 'services.write.mode', 'services.write.list', 'services.write.tag'
-			],
+			'selectRules' => $select_rules,
 			'roleids' => $roleid
 		]);
 
-		$role = $roles[0];
+		return $this->getRules($roles[0]['rules']);
+	}
 
-		$rules = [];
+	private function getRules(array $input): array {
+		global $ZBX_FEATURE_FLAGS;
 
-		foreach ($role['rules']['ui'] as $rule) {
+		$rules = [
+			'ui' => [],
+			'actions' => [],
+			'service_read_access' => match (true) {
+				$input['services.read.mode'] == ZBX_ROLE_RULE_SERVICES_ACCESS_ALL => CRoleHelper::SERVICES_ACCESS_ALL,
+				$input['services.read.list'] || $input['services.read.tag']['tag'] !== '' =>
+					CRoleHelper::SERVICES_ACCESS_LIST,
+				default => CRoleHelper::SERVICES_ACCESS_NONE
+			},
+			'service_read_list' => $input['services.read.list'],
+			'service_read_tag' => $input['services.read.tag'],
+			'service_write_access' => match (true) {
+				$input['services.write.mode'] == ZBX_ROLE_RULE_SERVICES_ACCESS_ALL => CRoleHelper::SERVICES_ACCESS_ALL,
+				$input['services.write.list'] || $input['services.write.tag']['tag'] !== '' =>
+					CRoleHelper::SERVICES_ACCESS_LIST,
+				default => CRoleHelper::SERVICES_ACCESS_NONE
+			},
+			'service_write_list' => $input['services.write.list'],
+			'service_write_tag' => $input['services.write.tag'],
+			'ui.default_access' => $input['ui.default_access'],
+			'api.access' => $input['api.access'],
+			'api.mode' => $input['api.mode'],
+			'actions.default_access' => $input['actions.default_access'],
+			'devices.access' => $input['devices.access'],
+			'devices.actions.default_access' => $input['devices.actions.default_access'],
+			'profile.redirect.enforce' => $input['profile.redirect.enforce'],
+			'profile.redirect.url' => $input['profile.redirect.url']
+		];
+
+		foreach ($input['ui'] as $rule) {
 			$rules['ui']['ui.'.$rule['name']] = $rule['status'];
 		}
 
-		if ($role['rules']['services.read.mode'] == ZBX_ROLE_RULE_SERVICES_ACCESS_ALL) {
-			$rules['service_read_access'] = CRoleHelper::SERVICES_ACCESS_ALL;
-		}
-		elseif ($role['rules']['services.read.list'] || $role['rules']['services.read.tag']['tag'] !== '') {
-			$rules['service_read_access'] = CRoleHelper::SERVICES_ACCESS_LIST;
-		}
-		else {
-			$rules['service_read_access'] = CRoleHelper::SERVICES_ACCESS_NONE;
-		}
-
-		$rules['service_read_list'] = $role['rules']['services.read.list'];
-		$rules['service_read_tag'] = $role['rules']['services.read.tag'];
-
-		if ($role['rules']['services.write.mode'] == ZBX_ROLE_RULE_SERVICES_ACCESS_ALL) {
-			$rules['service_write_access'] = CRoleHelper::SERVICES_ACCESS_ALL;
-		}
-		elseif ($role['rules']['services.write.list'] || $role['rules']['services.write.tag']['tag'] !== '') {
-			$rules['service_write_access'] = CRoleHelper::SERVICES_ACCESS_LIST;
-		}
-		else {
-			$rules['service_write_access'] = CRoleHelper::SERVICES_ACCESS_NONE;
+		if ($ZBX_FEATURE_FLAGS['modules_config_enabled']) {
+			$rules += [
+				'modules' => [],
+				'modules.default_access' => $input['modules.default_access']
+			];
+			foreach ($input['modules'] as $rule) {
+				$rules['modules'][$rule['moduleid']] = $rule['status'];
+			}
 		}
 
-		$rules['service_write_list'] = $role['rules']['services.write.list'];
-		$rules['service_write_tag'] = $role['rules']['services.write.tag'];
-
-		foreach ($role['rules']['modules'] as $rule) {
-			$rules['modules'][$rule['moduleid']] = $rule['status'];
+		if ($input['api']) {
+			$rules += [
+				'api' => array_map(
+					static fn(string $method): array => ['id' => $method, 'name' => $method],
+					$input['api']
+				)
+			];
 		}
 
-		if ($role['rules']['api']) {
-			$rules['api'] = array_map(
-				static function (string $method): array {
-					return [
-						'id' => $method,
-						'name' => $method
-					];
-				},
-				$role['rules']['api']
-			);
-		}
-
-		foreach ($role['rules']['actions'] as $rule) {
+		foreach ($input['actions'] as $rule) {
 			$rules['actions']['actions.'.$rule['name']] = $rule['status'];
 		}
 
-		$rules['ui.default_access'] = $role['rules']['ui.default_access'];
-		$rules['modules.default_access'] = $role['rules']['modules.default_access'];
-		$rules['api.access'] = $role['rules']['api.access'];
-		$rules['api.mode'] = $role['rules']['api.mode'];
-		$rules['actions.default_access'] = $role['rules']['actions.default_access'];
+		foreach ($input['devices.actions'] as $rule) {
+			$rules['devices.actions']['devices.actions.'.$rule['name']] = $rule['status'];
+		}
 
 		return $rules;
 	}

@@ -1,114 +1,148 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package oracle
 
 import (
 	"context"
-	"net/http"
-	"net/url"
+	"errors"
+	"strconv"
+	"strings"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/uri"
-	"git.zabbix.com/ap/plugin-support/zbxerr"
-
-	"github.com/omeid/go-yarn"
-
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/agent2/plugins/oracle/dbconn"
+	"golang.zabbix.com/agent2/plugins/oracle/handlers"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
 const (
 	pluginName = "Oracle"
-	hkInterval = 10
-	sqlExt     = ".sql"
 )
+
+// impl is the pointer to the plugin implementation.
+var impl Plugin //nolint:gochecknoglobals
 
 // Plugin inherits plugin.Base and store plugin-specific data.
 type Plugin struct {
 	plugin.Base
-	connMgr *ConnManager
+
+	connMgr *dbconn.ConnManager
 	options PluginOptions
 }
 
-// impl is the pointer to the plugin implementation.
-var impl Plugin
-
 // Export implements the Exporter interface.
-func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider) (result interface{}, err error) {
-
-	params, extraParams, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
-	if err != nil {
-		return nil, err
+//
+//nolint:gocyclo,cyclop // Complex code that currently has no unit tests and hence is not safe for refactoring.
+func (p *Plugin) Export(key string, rawParams []string, ctx plugin.ContextProvider) (any, error) {
+	if key == keyCustomQuery && !p.options.CustomQueriesEnabled {
+		return nil, errs.Errorf("key %q is disabled", keyCustomQuery)
 	}
 
-	service := url.QueryEscape(params["Service"])
-
-	uri, err := uri.NewWithCreds(params["URI"]+"?service="+service, params["User"], params["Password"], uriDefaults)
-	if err != nil {
-		return nil, err
+	if strings.TrimSpace(key) == "" {
+		return nil, errs.Errorf("key cannot be empty")
 	}
 
-	handleMetric := getHandlerFunc(key)
+	params, extraParams, hardcodedParams, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
+	if err != nil {
+		return nil, errs.WrapConst(err, zbxerr.ErrorInvalidParams)
+	}
+
+	err = metric.SetDefaults(params, hardcodedParams, p.options.Default)
+	if err != nil {
+		return nil, errs.WrapConst(err, zbxerr.ErrorInvalidParams)
+	}
+
+	handleMetric := metricsMeta[key]
 	if handleMetric == nil {
 		return nil, zbxerr.ErrorUnsupportedMetric
 	}
 
-	conn, err := p.connMgr.GetConnection(*uri)
+	connDetails, err := dbconn.NewConnDetails(params["URI"], params["User"], params["Password"], params["Service"])
 	if err != nil {
-		// Special logic of processing connection errors should be used if oracle.ping is requested
-		// because it must return pingFailed if any error occurred.
-		if key == keyPing {
-			return pingFailed, nil
-		}
+		return nil, errs.WrapConst(err, zbxerr.ErrorInvalidParams)
+	}
 
-		p.Errf(err.Error())
-
+	connectionTimeout, err := p.getConnectionTimeout(params)
+	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(conn.ctx, conn.callTimeout)
-	defer cancel()
+	p.Tracef("connection timeout set to: %d", connectionTimeout)
 
-	result, err = handleMetric(ctx, conn, params, extraParams...)
-
+	conn, err := p.connMgr.GetConnection(*connDetails, connectionTimeout)
 	if err != nil {
-		p.Errf(err.Error())
+		p.Errf("%s failed: %v\n", key, err.Error())
+
+		// Special logic of processing connection errors should be used if oracle.ping is requested,
+		// because it must return pingFailed if any error occurred.
+		if key == keyPing {
+			return handlers.PingFailed, nil
+		}
+
+		return nil, errs.Wrap(err, "get connection failed")
 	}
 
-	return result, err
+	if ctx.LegacyTimeout() {
+		ctx = plugin.OverrideTimeout(ctx, time.Now(), p.options.LegacyItemTimeout)
+	}
+
+	p.Tracef("query timeout set to: %d", ctx.Timeout())
+
+	result, err := handleMetric(ctx, conn, params, extraParams...)
+	if err != nil {
+		p.Errf("%s failed: %v\n", key, err.Error())
+
+		ctxErr := ctx.Err()
+		if ctxErr != nil && errors.Is(ctxErr, context.DeadlineExceeded) {
+			p.Errf(
+				"failed to handle metric %q: query execution timeout %d exceeded: %s",
+				key,
+				ctx.Timeout(),
+				err.Error(),
+			)
+
+			return nil, errs.Wrap(ctxErr, "query execution timeout exceeded")
+		}
+
+		if ctxErr != nil {
+			p.Errf("failed to handle metric %q: %s", key, ctxErr.Error())
+
+			return nil, errs.Wrap(ctxErr, "failed to handle metric")
+		}
+
+		p.Errf("failed to handle metric %q: %s", key, err.Error())
+
+		return nil, errs.Wrap(err, "failed to handle metric")
+	}
+
+	return result, nil
 }
 
-// Start implements the Runner interface and performs initialization when plugin is activated.
+// Start implements the Runner interface and performs an initialization when the plugin is activated.
 func (p *Plugin) Start() {
-	queryStorage, err := yarn.New(http.Dir(p.options.CustomQueriesPath), "*"+sqlExt)
-	if err != nil {
-		p.Errf(err.Error())
-		// create empty storage if error occurred
-		queryStorage = yarn.NewFromMap(map[string]string{})
+	opt := &dbconn.Options{
+		KeepAlive:            time.Duration(p.options.KeepAlive) * time.Second,
+		CustomQueriesEnabled: p.options.CustomQueriesEnabled,
+		CustomQueriesPath:    p.options.CustomQueriesPath,
+		ResolveTNS:           p.options.ResolveTNS,
 	}
-
-	p.connMgr = NewConnManager(
-		time.Duration(p.options.KeepAlive)*time.Second,
-		time.Duration(p.options.ConnectTimeout)*time.Second,
-		time.Duration(p.options.CallTimeout)*time.Second,
-		hkInterval*time.Second,
-		queryStorage,
+	p.connMgr = dbconn.NewConnManager(
+		p.Logger,
+		opt,
 	)
 }
 
@@ -116,4 +150,20 @@ func (p *Plugin) Start() {
 func (p *Plugin) Stop() {
 	p.connMgr.Destroy()
 	p.connMgr = nil
+}
+
+func (p *Plugin) getConnectionTimeout(params map[string]string) (int, error) {
+	connectionTimeout, err := strconv.Atoi(params["ConnectionTimeout"])
+	if err != nil {
+		p.Tracef("failed to convert parameter connection timeout %s", err.Error())
+
+		connectionTimeout, err = strconv.Atoi(p.options.Default.ConnectionTimeout)
+		if err != nil {
+			p.Tracef("failed to convert default connection timeout %s", err.Error())
+
+			return 0, errs.New("failed to get connection timeout")
+		}
+	}
+
+	return connectionTimeout, nil
 }

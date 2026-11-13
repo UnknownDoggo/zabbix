@@ -1,5 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <project name="Zabbix" default="build" basedir=".">
+	<!-- Initialize TLS library option based on the ENCRYPTION variable: openssl (default), gnutls, or none -->
+	<condition property="with.encryption" value="--with-gnutls">
+		<equals arg1="${ENCRYPTION}" arg2="GNUTLS" casesensitive="false"/>
+	</condition>
+	<condition property="with.encryption" value="">
+		<equals arg1="${ENCRYPTION}" arg2="NONE" casesensitive="false"/>
+	</condition>
+	<property name="with.encryption" value="--with-openssl"/>
+
 	<target name="init-common">
 		<condition property="phpunit_filter" value=" --filter='${PHPUNIT_FILTER}'" else="">
 			<and>
@@ -17,6 +26,7 @@
 	<target name="create-frontend-configs">
 		<property name="dbtype" value="${DBTYPE}"/>
 		<property name="dbhost" value="${DBHOST}"/>
+		<property name="dbport" value="${DBPORT}"/>
 		<property name="dbname" value="${DBNAME}"/>
 		<property name="dbuser" value="${DBUSER}"/>
 		<property name="dbpassword" value="${DBPASSWORD}"/>
@@ -27,6 +37,7 @@
 		<copy overwrite="true" file="ui/tests/templates/zabbix.conf.php" tofile="ui/conf/zabbix.conf.php"/>
 		<replace file="ui/conf/zabbix.conf.php" token="{DBTYPE}" value="${dbtype}"/>
 		<replace file="ui/conf/zabbix.conf.php" token="{DBHOST}" value="${dbhost}"/>
+		<replace file="ui/conf/zabbix.conf.php" token="'{DBPORT}'" value="${dbport}"/>
 		<replace file="ui/conf/zabbix.conf.php" token="{DBNAME}" value="${dbname}"/>
 		<replace file="ui/conf/zabbix.conf.php" token="{DBUSER}" value="${dbuser}"/>
 		<replace file="ui/conf/zabbix.conf.php" token="{DBPASSWORD}" value="${dbpassword}"/>
@@ -39,6 +50,7 @@
 		<property name="url" value="${URL}"/>
 		<property name="screenshot_dir" value="${SCREENSHOT_DIR}"/>
 		<property name="screenshot_url" value="${SCREENSHOT_URL}"/>
+		<property name="component_dir" value="${COMPONENT_DIR}"/>
 		<property name="phpunit_port_prefix" value="${PHPUNIT_PORT_PREFIX}"/>
 		<property name="screenshot_references_dir" value="${SCREENSHOT_REFERENCES_DIR}"/>
 		<condition property="phpunit_driver_address" value="${PHPUNIT_DRIVER_ADDRESS}" else="localhost">
@@ -58,11 +70,17 @@
 		<replace file="ui/tests/bootstrap.php" token="{BINARY_DIR}" value="${basedir}/sbin/"/>
 		<replace file="ui/tests/bootstrap.php" token="{CONFIG_SOURCE_DIR}" value="${basedir}/conf/"/>
 		<replace file="ui/tests/bootstrap.php" token="{CONFIG_DIR}" value="${basedir}/etc/"/>
-		<replace file="ui/tests/bootstrap.php" token="{COMPONENT_DIR}" value="${basedir}/runtime/"/>
+		<replace file="ui/tests/bootstrap.php" token="{COMPONENT_DIR}" value="${component_dir}"/>
 		<replace file="ui/tests/bootstrap.php" token="{PORT_PREFIX}" value="${phpunit_port_prefix}"/>
 		<replace file="ui/tests/bootstrap.php" token="{SCREENSHOT_REFERENCES_DIR}" value="${screenshot_references_dir}"/>
 		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_DRIVER_ADDRESS}" value="${phpunit_driver_address}"/>
 		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_DATA_SOURCES_DIR}" value="${basedir}/ui/tests/selenium/data/sources/"/>
+	</target>
+
+	<target name="show-browser-info">
+		<exec executable="php" failonerror="on">
+			<arg line="ui/tests/browser.php"/>
+		</exec>
 	</target>
 
 	<target name="create-saml-configs">
@@ -86,9 +104,43 @@
 		<chmod file="${SIMPLESAMLPHP_CFG_FILE}" perm="go+r"/>
 	</target>
 
+	<target name="create-ldap-configs">
+		<property name="phpunit_ldap_host" value="${PHPUNIT_LDAP_HOST}"/>
+		<property name="phpunit_ldap_bind_password" value="${PHPUNIT_LDAP_BIND_PASSWORD}"/>
+		<property name="phpunit_ldap_username" value="${PHPUNIT_LDAP_USERNAME}"/>
+		<property name="phpunit_ldap_user_password" value="${PHPUNIT_LDAP_USER_PASSWORD}"/>
+
+		<!-- LDAP settings -->
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_LDAP_HOST}" value="${phpunit_ldap_host}"/>
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_LDAP_BIND_PASSWORD}" value="${phpunit_ldap_bind_password}"/>
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_LDAP_USERNAME}" value="${phpunit_ldap_username}"/>
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_LDAP_USER_PASSWORD}" value="${phpunit_ldap_user_password}"/>
+	</target>
+
+	<target name="create-hashicorp-configs">
+		<property name="phpunit_hashicorp_address" value="${PHPUNIT_HASHICORP_ADDRESS}"/>
+		<property name="phpunit_hashicorp_root_token_id" value="${PHPUNIT_HASHICORP_ROOT_TOKEN_ID}"/>
+
+		<!-- HashiCorp settings -->
+		<replace file="ui/tests/bootstrap.php" token="'PHPUNIT_HASHICORP_VAULT_TESTS_ENABLED', false" value="'PHPUNIT_HASHICORP_VAULT_TESTS_ENABLED', true"/>
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_HASHICORP_ADDRESS}" value="${phpunit_hashicorp_address}"/>
+		<replace file="ui/tests/bootstrap.php" token="{PHPUNIT_HASHICORP_ROOT_TOKEN_ID}" value="${phpunit_hashicorp_root_token_id}"/>
+	</target>
+
 	<target name="init-integration">
+		<exec executable="go" failonerror="on">
+			<arg line="clean -cache"/>
+		</exec>
 		<!-- Copy agent2 configuration file -->
 		<copy overwrite="true" file="src/go/conf/zabbix_agent2.conf" tofile="conf/zabbix_agent2.conf"/>
+	</target>
+
+	<target name="apply-custom-patches">
+		<!-- Reducing the delay for multiselect suggestions -->
+		<exec executable="git" failonerror="on">
+			<arg line="apply"/>
+			<arg line="ui/tests/selenium/patches/ms_delay.patch"/>
+		</exec>
 	</target>
 
 	<target name="init-frontend-modules">
@@ -114,31 +166,90 @@
 	<target name="make-gettext">
 		<!-- Build translation strings -->
 		<exec executable="make" failonerror="on">
-			<arg line="-j4"/>
+			<arg line="-j12"/>
 			<arg line="-s"/>
 			<arg line="gettext"/>
 		</exec>
 	</target>
 
-	<target name="make-binaries-postgresql">
-		<!-- Binaries for integration tests -->
+	<target name="make-binary-agent-3.0">
+		<exec executable="git" outputproperty="git.initial_rev" failonerror="on">
+			<arg value="rev-parse"/>
+			<arg value="--verify"/>
+			<arg value="HEAD"/>
+		</exec>
+		<exec executable="git" failonerror="on">
+			<arg line="checkout"/>
+			<arg line="df9ee823715d4caccf63f402a126d2f039b31057"/>
+		</exec>
 		<exec executable="./bootstrap.sh" failonerror="on"/>
 		<exec executable="./configure" failonerror="on">
+			<arg line="--quiet"/>
+			<arg line="--enable-agent"/>
+			<arg line="--prefix=${basedir}"/>
+		</exec>
+		<exec executable="make" failonerror="on">
+			<arg line="-j12"/>
+			<arg line="-s"/>
+			<arg line="install"/>
+		</exec>
+		<move file="${basedir}/conf/zabbix_agentd.conf" tofile="${basedir}/conf/zabbix_agentd_3.0.conf"/>
+		<move file="${basedir}/sbin/zabbix_agentd" tofile="${basedir}/sbin/zabbix_agentd_3.0"/>
+		<exec executable="git" failonerror="on">
+			<arg line="checkout"/>
+			<arg line="${git.initial_rev}"/>
+		</exec>
+	</target>
+
+	<target name="make-binaries-agent2">
+		<exec executable="./configure" failonerror="on">
+			<arg line="--quiet"/>
+			<arg line="--enable-agent2"/>
+			<arg line="--prefix=${basedir}"/>
+			<arg line="--with-libcurl"/>
+			<arg line="--with-stacksize=128"/>
+			<arg line="--with-openssl"/>
+			<arg line="--with-net-snmp"/>
+			<arg line="--with-ssh2"/>
+		</exec>
+		<exec executable="make" failonerror="on">
+			<arg line="-j12"/>
+			<arg line="-s"/>
+			<arg line="install"/>
+		</exec>
+	</target>
+
+	<target name="make-binaries-postgresql">
+		<exec executable="./bootstrap.sh" failonerror="on"/>
+
+		<antcall target="make-binaries-agent2"/>
+
+		<!-- Binaries for integration tests -->
+		<exec executable="./configure" failonerror="on">
+			<arg line="CONFIG_SITE='share/config.site.d/clang-debug-sanitize'"/>
 			<arg line="--quiet"/>
 			<arg line="--enable-server"/>
 			<arg line="--enable-proxy"/>
 			<arg line="--enable-agent"/>
-			<arg line="--enable-agent2"/>
 			<arg line="--with-postgresql"/>
 			<arg line="--prefix=${basedir}"/>
+			<arg line="--with-libcurl"/>
+			<arg line="--with-stacksize=512"/>
+			<arg line="--with-ares"/>
+			<arg line="${with.encryption}"/>
+			<arg line="--with-ares"/>
+			<arg line="--with-net-snmp"/>
+			<arg line="--with-ssh2"/>
+			<arg line="--enable-java"/>
+			<arg line="--with-apm"/>
 		</exec>
 		<exec executable="make" failonerror="on">
-			<arg line="-j4"/>
+			<arg line="-j12"/>
 			<arg line="-s"/>
 			<arg line="dbschema"/>
 		</exec>
 		<exec executable="make" failonerror="on">
-			<arg line="-j4"/>
+			<arg line="-j12"/>
 			<arg line="-s"/>
 			<arg line="install"/>
 		</exec>
@@ -150,6 +261,7 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="-c 'create database ${dbname} ENCODING = UTF8 TEMPLATE = template0'"/>
@@ -158,6 +270,7 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
@@ -167,6 +280,7 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
@@ -176,9 +290,20 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="${dbname}"/>
+		</exec>
+		<exec executable="psql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="${dbname}"/>
+			<arg line="-c 'VACUUM ANALYZE'"/>
 		</exec>
 	</target>
 
@@ -188,9 +313,33 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="-c 'drop database if exists ${dbname}'"/>
+		</exec>
+	</target>
+
+	<target name="create-db-tsdb" depends="create-db-postgresql">
+		<!-- Create PostgreSQL database with TimescaleDB extension-->
+		<exec executable="psql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-d '${dbname}'"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="-c 'create extension if not exists timescaledb cascade;'"/>
+		</exec>
+		<exec executable="psql" input="database/postgresql/timescaledb/schema.sql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="${dbname}"/>
 		</exec>
 	</target>
 
@@ -200,6 +349,7 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="-c 'drop database if exists ${dbname}_proxy'"/>
@@ -208,6 +358,16 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="-c 'drop database if exists ${dbname}_proxy_ha1'"/>
+		</exec>
+		<exec executable="psql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="-c 'create database ${dbname}_proxy ENCODING = UTF8 TEMPLATE = template0'"/>
@@ -216,18 +376,39 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
 			<arg line="${dbname}_proxy"/>
 		</exec>
+		<exec executable="psql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="-c 'create database ${dbname}_proxy_ha1 ENCODING = UTF8 TEMPLATE = template0'"/>
+		</exec>
+		<exec executable="psql" input="database/postgresql/schema.sql" failonerror="on">
+			<env key="PGPASSWORD" value="${dbpassword}"/>
+			<arg line="-q"/>
+			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
+			<arg line="-U '${dbuser}'"/>
+			<arg line="-1"/>
+			<arg line="--set ON_ERROR_STOP=1"/>
+			<arg line="${dbname}_proxy_ha1"/>
+		</exec>
 	</target>
 
-	<target name="init-frontend-postgresql" depends="create-configs,create-saml-configs,make-dbschema,make-gettext,create-db-postgresql,init-frontend-modules">
+	<target name="init-frontend-postgresql" depends="create-configs,create-saml-configs,create-ldap-configs,make-dbschema,make-gettext,create-db-postgresql,apply-custom-patches,init-frontend-modules">
 		<exec executable="psql" input="ui/tests/selenium/data/data_test.sql" failonerror="on">
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
@@ -240,6 +421,7 @@
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
@@ -247,11 +429,366 @@
 		</exec>
 	</target>
 
-	<target name="init-integration-postgresql" depends="create-configs,init-integration,make-binaries-postgresql,create-db-postgresql,init-proxy-postgresql">
+	<target name="create-frontend-hp-elasticsearch-configs" if="hp-elasticsearch">
+		<property name="hp_elasticsearch_url" value="${HP_ELASTICSEARCH_URL}"/>
+
+		<echo file="ui/conf/zabbix.conf.php" append="true">${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">$HISTORY_PROVIDERS[] = [${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'types' =&gt; ['dbl', 'str', 'log', 'uint', 'text', 'json'],${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'provider' =&gt; 'elasticsearch',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'url' =&gt; '${hp_elasticsearch_url}'${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">];${line.separator}</echo>
+	</target>
+
+	<target name="apply-hp-elasticsearch-patches" if="hp-elasticsearch">
+		<exec executable="git" failonerror="on">
+			<arg line="apply"/>
+			<arg line="ui/tests/integration/patches/elasticsearch.patch"/>
+		</exec>
+		<replace file="ui/include/classes/api/managers/CHistoryManager.php" token="{DBNAME}" value="${dbname}"/>
+		<replace file="src/libs/zbxhistory/history_elastic.c" token="{DBNAME}" value="${dbname}"/>
+	</target>
+
+	<target name="drop-db-hp-elasticsearch" if="hp-elasticsearch">
+		<property name="drop-db-args" value="--silent --request DELETE"/>
+
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_dbl"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_str"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_log"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_uint"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_text"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/${dbname}_json"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${drop-db-args} ${hp_elasticsearch_url}/_ingest/pipeline/${dbname}_json"/>
+		</exec>
+	</target>
+
+	<target name="create-db-hp-elasticsearch" depends="drop-db-hp-elasticsearch" if="hp-elasticsearch">
+		<property name="create-db-args" value="--silent --request PUT --header 'Content-Type: application/json'"/>
+		<property name="index-dbl"><![CDATA[
+{
+   "settings": {
+      "index": {
+         "number_of_replicas": 0,
+         "number_of_shards": 1
+      }
+   },
+   "mappings": {
+      "properties": {
+         "itemid": {
+            "type": "long"
+         },
+         "clock": {
+            "format": "epoch_second",
+            "type": "date"
+         },
+         "value": {
+            "type": "double"
+         }
+      }
+   }
+}
+		]]></property>
+		<property name="index-str"><![CDATA[
+{
+   "settings": {
+      "index": {
+         "number_of_replicas": 0,
+         "number_of_shards": 1
+      }
+   },
+   "mappings": {
+      "properties": {
+         "itemid": {
+            "type": "long"
+         },
+         "clock": {
+            "format": "epoch_second",
+            "type": "date"
+         },
+         "value": {
+            "fields": {
+               "analyzed": {
+                  "index": true,
+                  "type": "text",
+                  "analyzer": "standard"
+               }
+            },
+            "index": false,
+            "type": "text"
+         }
+      }
+   }
+}
+		]]></property>
+		<property name="index-log"><![CDATA[
+{
+   "settings": {
+      "index": {
+         "number_of_replicas": 0,
+         "number_of_shards": 1
+      }
+   },
+   "mappings": {
+      "properties": {
+         "itemid": {
+            "type": "long"
+         },
+         "clock": {
+            "format": "epoch_second",
+            "type": "date"
+         },
+         "value": {
+            "fields": {
+               "analyzed": {
+                  "index": true,
+                  "type": "text",
+                  "analyzer": "standard"
+               }
+            },
+            "index": false,
+            "type": "text"
+         }
+      }
+   }
+}
+		]]></property>
+		<property name="index-uint"><![CDATA[
+{
+   "settings": {
+      "index": {
+         "number_of_replicas": 0,
+         "number_of_shards": 1
+      }
+   },
+   "mappings": {
+      "properties": {
+         "itemid": {
+            "type": "long"
+         },
+         "clock": {
+            "format": "epoch_second",
+            "type": "date"
+         },
+         "value": {
+            "type": "long"
+         }
+      }
+   }
+}
+		]]></property>
+		<property name="index-text" value="${index-str}"/>
+		<property name="index-json"><![CDATA[
+{
+   "settings": {
+      "number_of_replicas": 0,
+      "number_of_shards": 1
+   },
+   "mappings": {
+      "dynamic": false,
+      "properties": {
+         "itemid": {
+            "type": "long"
+         },
+         "clock": {
+            "type": "date",
+            "format": "epoch_second"
+         },
+         "ns": {
+            "type": "long"
+         },
+         "value_parsed": {
+            "type": "flattened"
+         },
+         "value_raw": {
+            "type": "keyword",
+            "ignore_above": 1000000
+         }
+      }
+   }
+}
+		]]></property>
+		<property name="pipeline-json"><![CDATA[
+{
+   "processors": [
+      {
+         "json": {
+            "field": "value",
+            "target_field": "value_parsed",
+            "ignore_failure": true
+         }
+      },
+      {
+         "set": {
+            "if": "ctx.value_parsed == null",
+            "field": "value_raw",
+            "value": "{{{ value }}}"
+         }
+      }
+   ],
+   "on_failure": [
+      {
+         "set": {
+            "field": "value_raw",
+            "value": "{{{ value }}}"
+         }
+      }
+   ]
+}
+		]]></property>
+
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_dbl --data '${index-dbl}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_str --data '${index-str}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_log --data '${index-log}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_uint --data '${index-uint}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_text --data '${index-text}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/${dbname}_json --data '${index-json}'"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="${create-db-args} ${hp_elasticsearch_url}/_ingest/pipeline/${dbname}_json --data '${pipeline-json}'"/>
+		</exec>
+	</target>
+
+	<condition property="hp-elasticsearch">
+		<and>
+			<isset property="HISTORY_PROVIDER"/>
+			<equals arg1="${HISTORY_PROVIDER}" arg2="ES"/>
+		</and>
+	</condition>
+
+	<target name="create-frontend-hp-clickhouse-configs" if="hp-clickhouse">
+		<property name="hp_clickhouse_url" value="${HP_CLICKHOUSE_URL}"/>
+		<property name="hp_clickhouse_user" value="${HP_CLICKHOUSE_USER}"/>
+		<property name="hp_clickhouse_password" value="${HP_CLICKHOUSE_PASSWORD}"/>
+		<property name="hp_clickhouse_dbname" value="${HP_CLICKHOUSE_DBNAME}"/>
+
+		<echo file="ui/conf/zabbix.conf.php" append="true">${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">$HISTORY_PROVIDERS[] = [${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'types' =&gt; ['dbl', 'str', 'log', 'uint', 'text', 'json'],${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'provider' =&gt; 'clickhouse',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'url' =&gt; '${hp_clickhouse_url}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'username' =&gt; '${hp_clickhouse_user}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'password' =&gt; '${hp_clickhouse_password}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'db' =&gt; '${hp_clickhouse_dbname}'${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">];${line.separator}</echo>
+	</target>
+
+	<target name="drop-db-hp-clickhouse" if="hp-clickhouse">
+		<exec executable="curl" failonerror="on">
+			<arg line="--silent"/>
+			<arg line="${hp_clickhouse_url}"/>
+			<arg line="--user ${hp_clickhouse_user}:${hp_clickhouse_password}"/>
+			<arg line="--data 'DROP DATABASE IF EXISTS ${hp_clickhouse_dbname}'"/>
+		</exec>
+	</target>
+
+	<target name="create-db-hp-clickhouse" depends="drop-db-hp-clickhouse" if="hp-clickhouse">
+		<exec executable="date" outputproperty="now">
+			<arg value="+%s"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="--silent"/>
+			<arg line="${hp_clickhouse_url}"/>
+			<arg line="--user ${hp_clickhouse_user}:${hp_clickhouse_password}"/>
+			<arg line="--data &quot;CREATE DATABASE ${hp_clickhouse_dbname} COMMENT '${now}'&quot;"/>
+		</exec>
+		<exec executable="./history_all.sh" dir="database/clickhouse" failonerror="on">
+			<arg line="--server ${hp_clickhouse_url}"/>
+			<arg line="--db ${hp_clickhouse_dbname}"/>
+			<arg line="--user ${hp_clickhouse_user}"/>
+			<arg line="--password ${hp_clickhouse_password}"/>
+		</exec>
+	</target>
+
+	<condition property="hp-clickhouse">
+		<and>
+			<isset property="HISTORY_PROVIDER"/>
+			<equals arg1="${HISTORY_PROVIDER}" arg2="CH"/>
+		</and>
+	</condition>
+
+	<target name="create-frontend-tp-clickhouse-configs" if="tp-clickhouse">
+		<property name="tp_clickhouse_url" value="${TP_CLICKHOUSE_URL}"/>
+		<property name="tp_clickhouse_user" value="${TP_CLICKHOUSE_USER}"/>
+		<property name="tp_clickhouse_password" value="${TP_CLICKHOUSE_PASSWORD}"/>
+		<property name="tp_clickhouse_dbname" value="${TP_CLICKHOUSE_DBNAME}"/>
+
+		<echo file="ui/conf/zabbix.conf.php" append="true">${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">$TELEMETRY_PROVIDERS[] = [${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'provider' =&gt; 'clickhouse',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'url' =&gt; '${tp_clickhouse_url}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'username' =&gt; '${tp_clickhouse_user}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'password' =&gt; '${tp_clickhouse_password}',${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">     'db' =&gt; '${tp_clickhouse_dbname}'${line.separator}</echo>
+		<echo file="ui/conf/zabbix.conf.php" append="true">];${line.separator}</echo>
+	</target>
+
+	<target name="drop-db-tp-clickhouse" if="tp-clickhouse">
+		<exec executable="curl" failonerror="on">
+			<arg line="--silent"/>
+			<arg line="${tp_clickhouse_url}"/>
+			<arg line="--user ${tp_clickhouse_user}:${tp_clickhouse_password}"/>
+			<arg line="--data 'DROP DATABASE IF EXISTS ${tp_clickhouse_dbname}'"/>
+		</exec>
+	</target>
+
+	<target name="create-db-tp-clickhouse" depends="drop-db-tp-clickhouse" if="tp-clickhouse">
+		<exec executable="date" outputproperty="now">
+			<arg value="+%s"/>
+		</exec>
+		<exec executable="curl" failonerror="on">
+			<arg line="--silent"/>
+			<arg line="${tp_clickhouse_url}"/>
+			<arg line="--user ${tp_clickhouse_user}:${tp_clickhouse_password}"/>
+			<arg line="--data &quot;CREATE DATABASE ${tp_clickhouse_dbname} COMMENT '${now}'&quot;"/>
+		</exec>
+		<exec executable="./otel_all.sh" dir="database/clickhouse" failonerror="on">
+			<arg line="--server ${tp_clickhouse_url}"/>
+			<arg line="--db ${tp_clickhouse_dbname}"/>
+			<arg line="--user ${tp_clickhouse_user}"/>
+			<arg line="--password ${tp_clickhouse_password}"/>
+		</exec>
+	</target>
+
+	<condition property="tp-clickhouse">
+		<and>
+			<isset property="TELEMETRY_PROVIDER"/>
+			<equals arg1="${TELEMETRY_PROVIDER}" arg2="CH"/>
+		</and>
+	</condition>
+
+	<target name="create-frontend-nosql-configs" depends="create-frontend-hp-elasticsearch-configs,create-frontend-hp-clickhouse-configs,create-frontend-tp-clickhouse-configs"/>
+	<target name="create-db-nosql" depends="create-db-hp-elasticsearch,create-db-hp-clickhouse,create-db-tp-clickhouse"/>
+
+	<target name="init-integration-postgresql" depends="create-configs,create-hashicorp-configs,create-frontend-nosql-configs,init-integration,make-binary-agent-3.0,apply-hp-elasticsearch-patches,make-binaries-postgresql,create-db-postgresql,create-db-nosql,init-proxy-postgresql">
 		<exec executable="psql" input="ui/tests/integration/data/data_test.sql" failonerror="on">
 			<env key="PGPASSWORD" value="${dbpassword}"/>
 			<arg line="-q"/>
 			<arg line="-h '${dbhost}'"/>
+			<arg line="-p '${dbport}'"/>
 			<arg line="-U '${dbuser}'"/>
 			<arg line="-1"/>
 			<arg line="--set ON_ERROR_STOP=1"/>
@@ -259,55 +796,95 @@
 		</exec>
 	</target>
 
+	<target name="init-integration-tsdb" depends="create-configs,create-hashicorp-configs,create-frontend-nosql-configs,init-integration,make-binary-agent-3.0,apply-hp-elasticsearch-patches,make-binaries-postgresql,create-db-tsdb,create-db-nosql,init-proxy-postgresql"/>
+
 	<target name="init-dast-postgresql" depends="create-frontend-configs,make-dbschema,create-db-postgresql"/>
 
 	<target name="make-binaries-mysql">
-		<!-- Binaries for integration tests -->
 		<exec executable="./bootstrap.sh" failonerror="on"/>
+
+		<antcall target="make-binaries-agent2"/>
+
+		<!-- Binaries for integration tests -->
 		<exec executable="./configure" failonerror="on">
+			<arg line="CONFIG_SITE='share/config.site.d/clang-debug-sanitize'"/>
 			<arg line="--quiet"/>
 			<arg line="--enable-server"/>
 			<arg line="--enable-proxy"/>
 			<arg line="--enable-agent"/>
-			<arg line="--enable-agent2"/>
 			<arg line="--with-mysql"/>
 			<arg line="--prefix=${basedir}"/>
+			<arg line="--with-libcurl"/>
+			<arg line="--with-stacksize=512"/>
+			<arg line="--with-ares"/>
+			<arg line="${with.encryption}"/>
+			<arg line="--with-net-snmp"/>
+			<arg line="--with-ssh2"/>
+			<arg line="--enable-java"/>
+			<arg line="--with-apm"/>
 		</exec>
 		<exec executable="make" failonerror="on">
-			<arg line="-j4"/>
+			<arg line="-j12"/>
 			<arg line="-s"/>
 			<arg line="dbschema"/>
 		</exec>
 		<exec executable="make" failonerror="on">
-			<arg line="-j4"/>
+			<arg line="-j12"/>
 			<arg line="-s"/>
 			<arg line="install"/>
 		</exec>
 	</target>
 
-	<target name="create-db-mysql" depends="drop-db-mysql">
+	<target name="detect-db-check-command">
+		<property environment="env"/>
+
+		<condition property="db-check-command" value="mysqlcheck">
+			<available file="mysqlcheck" filepath="${env.PATH}" type="file"/>
+		</condition>
+
+		<condition property="db-check-command" value="mariadb-check">
+			<available file="mariadb-check" filepath="${env.PATH}" type="file"/>
+		</condition>
+
+		<fail unless="db-check-command" message="Neither mysqlcheck nor mariadb-check was found in PATH."/>
+	</target>
+
+	<target name="create-db-mysql" depends="drop-db-mysql,detect-db-check-command">
 		<!-- Create MySQL database -->
 		<exec executable="mysql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="--execute='create database ${dbname} character set utf8mb4 collate utf8mb4_bin'"/>
 		</exec>
 		<exec executable="mysql" input="database/mysql/schema.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
 		<exec executable="mysql" input="database/mysql/images.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
 		<exec executable="mysql" input="database/mysql/data.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
+			<arg line="--user=${dbuser}"/>
+			<arg line="${dbname}"/>
+		</exec>
+		<exec executable="${db-check-command}" failonerror="on">
+			<env key="MYSQL_PWD" value="${dbpassword}"/>
+			<arg line="--analyze"/>
+			<arg line="--silent"/>
+			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
@@ -318,6 +895,7 @@
 		<exec executable="mysql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="--execute='drop database if exists ${dbname}'"/>
 		</exec>
@@ -328,27 +906,52 @@
 		<exec executable="mysql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="--execute='drop database if exists ${dbname}_proxy'"/>
 		</exec>
 		<exec executable="mysql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
+			<arg line="--user=${dbuser}"/>
+			<arg line="--execute='drop database if exists ${dbname}_proxy_ha1'"/>
+		</exec>
+		<exec executable="mysql" failonerror="on">
+			<env key="MYSQL_PWD" value="${dbpassword}"/>
+			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="--execute='create database ${dbname}_proxy character set utf8mb4 collate utf8mb4_bin'"/>
 		</exec>
 		<exec executable="mysql" input="database/mysql/schema.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}_proxy"/>
 		</exec>
+		<exec executable="mysql" failonerror="on">
+			<env key="MYSQL_PWD" value="${dbpassword}"/>
+			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
+			<arg line="--user=${dbuser}"/>
+			<arg line="--execute='create database ${dbname}_proxy_ha1 character set utf8mb4 collate utf8mb4_bin'"/>
+		</exec>
+		<exec executable="mysql" input="database/mysql/schema.sql" failonerror="on">
+			<env key="MYSQL_PWD" value="${dbpassword}"/>
+			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
+			<arg line="--user=${dbuser}"/>
+			<arg line="${dbname}_proxy_ha1"/>
+		</exec>
 	</target>
 
-	<target name="init-frontend-mysql" depends="create-configs,create-saml-configs,make-dbschema,make-gettext,create-db-mysql,init-frontend-modules">
+	<target name="init-frontend-mysql" depends="create-configs,create-saml-configs,create-ldap-configs,make-dbschema,make-gettext,create-db-mysql,apply-custom-patches,init-frontend-modules">
 		<exec executable="mysql" input="ui/tests/selenium/data/data_test.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
@@ -358,15 +961,17 @@
 		<exec executable="mysql" input="ui/tests/api_json/data/data_test.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
 	</target>
 
-	<target name="init-integration-mysql" depends="create-configs,init-integration,make-binaries-mysql,create-db-mysql,init-proxy-mysql">
+	<target name="init-integration-mysql" depends="create-configs,create-hashicorp-configs,create-frontend-nosql-configs,init-integration,make-binary-agent-3.0,apply-hp-elasticsearch-patches,make-binaries-mysql,create-db-mysql,create-db-nosql,init-proxy-mysql">
 		<exec executable="mysql" input="ui/tests/integration/data/data_test.sql" failonerror="on">
 			<env key="MYSQL_PWD" value="${dbpassword}"/>
 			<arg line="--host=${dbhost}"/>
+			<arg line="--port=${dbport}"/>
 			<arg line="--user=${dbuser}"/>
 			<arg line="${dbname}"/>
 		</exec>
@@ -406,24 +1011,41 @@
 
 	<target name="test-integration">
 		<exec executable="phpunit" dir="ui/tests" failonerror="off">
+			<env key="UBSAN_OPTIONS" value="print_stacktrace=1:suppressions=../tests/ubsan.supp"/>
+			<env key="LSAN_OPTIONS" value="suppressions=${basedir}/tests/lsan.supp"/>
 			<arg line="--log-junit=${basedir}/build/logs/phpunit.xml"/>
 			<arg line="--bootstrap=bootstrap.php"/>
 			<arg line="--do-not-cache-result"/>
+			<arg line="--dont-report-useless-tests"/>
+			<arg line="--testdox"/>
+			<arg line="--verbose"/>
 			<arg line="${phpunit_filter}"/>
 			<arg line="integration/IntegrationTests.php"/>
+		</exec>
+
+		<exec executable="bash" failonerror="off">
+			<arg value="-c"/>
+			<arg value="
+				echo '=== Test suite durations (seconds) ===';
+				grep '&lt;testsuite .*file=' ${basedir}/build/logs/phpunit.xml |
+				sed -E 's/.*name=&quot;([^&quot;]+)&quot;.*time=&quot;([^&quot;]+)&quot;.*/\2 \1/' |
+				sort -nr
+			"/>
+			<redirector output="phpunit_summary.log" append="false" alwaysLog="true"/>
 		</exec>
 	</target>
 
 	<target name="build-phpunit" depends="test-phpunit"/>
-	<target name="build-mysql" depends="init-frontend-mysql,test-frontend"/>
-	<target name="build-postgresql" depends="init-frontend-postgresql,test-frontend"/>
+	<target name="build-mysql" depends="init-frontend-mysql,show-browser-info,test-frontend"/>
+	<target name="build-postgresql" depends="init-frontend-postgresql,show-browser-info,test-frontend"/>
 	<target name="build-api-mysql" depends="init-api-mysql,test-api"/>
 	<target name="build-api-postgresql" depends="init-api-postgresql,test-api"/>
 	<target name="build-integration-mysql" depends="init-integration-mysql,test-integration"/>
 	<target name="build-integration-postgresql" depends="init-integration-postgresql,test-integration"/>
+	<target name="build-integration-tsdb" depends="init-integration-tsdb,test-integration"/>
 	<target name="build-dast-mysql" depends="init-dast-mysql"/>
 	<target name="build-dast-postgresql" depends="init-dast-postgresql"/>
 
 	<!-- Default target -->
-	<target name="build" depends="build-phpunit,build-mysql,build-postgresql,build-integration-mysql,build-integration-postgresql"/>
+	<target name="build" depends="build-phpunit,build-mysql,build-postgresql,build-integration-mysql,build-integration-postgresql,build-integration-tsdb"/>
 </project>

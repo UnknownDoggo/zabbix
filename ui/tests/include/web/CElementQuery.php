@@ -1,61 +1,60 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/CElement.php';
-require_once dirname(__FILE__).'/CElementCollection.php';
-require_once dirname(__FILE__).'/CElementFilter.php';
-require_once dirname(__FILE__).'/elements/CNullElement.php';
-require_once dirname(__FILE__).'/elements/CFormElement.php';
-require_once dirname(__FILE__).'/elements/CGridFormElement.php';
-require_once dirname(__FILE__).'/elements/CCheckboxFormElement.php';
-require_once dirname(__FILE__).'/elements/CTableElement.php';
-require_once dirname(__FILE__).'/elements/CTableRowElement.php';
-require_once dirname(__FILE__).'/elements/CWidgetElement.php';
-require_once dirname(__FILE__).'/elements/CDashboardElement.php';
-require_once dirname(__FILE__).'/elements/CListElement.php';
-require_once dirname(__FILE__).'/elements/CDropdownElement.php';
-require_once dirname(__FILE__).'/elements/CCheckboxElement.php';
-require_once dirname(__FILE__).'/elements/COverlayDialogElement.php';
-require_once dirname(__FILE__).'/elements/CMainMenuElement.php';
-require_once dirname(__FILE__).'/elements/CMessageElement.php';
-require_once dirname(__FILE__).'/elements/CMultiselectElement.php';
-require_once dirname(__FILE__).'/elements/CSegmentedRadioElement.php';
-require_once dirname(__FILE__).'/elements/CCheckboxListElement.php';
-require_once dirname(__FILE__).'/elements/CMultifieldTableElement.php';
-require_once dirname(__FILE__).'/elements/CMultilineElement.php';
-require_once dirname(__FILE__).'/elements/CColorPickerElement.php';
-require_once dirname(__FILE__).'/elements/CCompositeInputElement.php';
-require_once dirname(__FILE__).'/elements/CPopupMenuElement.php';
-require_once dirname(__FILE__).'/elements/CPopupButtonElement.php';
-require_once dirname(__FILE__).'/elements/CInputGroupElement.php';
-require_once dirname(__FILE__).'/elements/CHostInterfaceElement.php';
-require_once dirname(__FILE__).'/elements/CFilterTabElement.php';
+require_once __DIR__.'/CElement.php';
+require_once __DIR__.'/CElementCollection.php';
+require_once __DIR__.'/CElementFilter.php';
+require_once __DIR__.'/elements/CNullElement.php';
+require_once __DIR__.'/elements/CFormElement.php';
+require_once __DIR__.'/elements/CGridFormElement.php';
+require_once __DIR__.'/elements/CCheckboxFormElement.php';
+require_once __DIR__.'/elements/CTableElement.php';
+require_once __DIR__.'/elements/CTableRowElement.php';
+require_once __DIR__.'/elements/CWidgetElement.php';
+require_once __DIR__.'/elements/CDashboardElement.php';
+require_once __DIR__.'/elements/CListElement.php';
+require_once __DIR__.'/elements/CDropdownElement.php';
+require_once __DIR__.'/elements/CCheckboxElement.php';
+require_once __DIR__.'/elements/COverlayDialogElement.php';
+require_once __DIR__.'/elements/CMainMenuElement.php';
+require_once __DIR__.'/elements/CMessageElement.php';
+require_once __DIR__.'/elements/CMultiselectElement.php';
+require_once __DIR__.'/elements/CSegmentedRadioElement.php';
+require_once __DIR__.'/elements/CCheckboxListElement.php';
+require_once __DIR__.'/elements/CMultifieldTableElement.php';
+require_once __DIR__.'/elements/CMultilineElement.php';
+require_once __DIR__.'/elements/CColorPickerElement.php';
+require_once __DIR__.'/elements/CCompositeInputElement.php';
+require_once __DIR__.'/elements/CPopupMenuElement.php';
+require_once __DIR__.'/elements/CPopupButtonElement.php';
+require_once __DIR__.'/elements/CInputGroupElement.php';
+require_once __DIR__.'/elements/CHostInterfaceElement.php';
+require_once __DIR__.'/elements/CFilterElement.php';
+require_once __DIR__.'/elements/CFieldsetElement.php';
+require_once __DIR__.'/elements/CTextareaFlexibleElement.php';
+require_once __DIR__.'/elements/CDatatableElement.php';
 
-require_once dirname(__FILE__).'/IWaitable.php';
-require_once dirname(__FILE__).'/WaitableTrait.php';
-require_once dirname(__FILE__).'/CastableTrait.php';
+require_once __DIR__.'/IWaitable.php';
+require_once __DIR__.'/WaitableTrait.php';
+require_once __DIR__.'/CastableTrait.php';
 
 use Facebook\WebDriver\WebDriverBy;
 use Facebook\WebDriver\Exception\NoSuchElementException;
+use Facebook\WebDriver\Exception\WebDriverException;
 
 /**
  * Element selection query.
@@ -76,6 +75,11 @@ class CElementQuery implements IWaitable {
 	 * Wait iteration step duration.
 	 */
 	const WAIT_ITERATION = 50;
+
+	/**
+	 * Timeout in seconds.
+	 */
+	const WAIT_TIMEOUT = 20;
 
 	/**
 	 * Element selector.
@@ -156,12 +160,14 @@ class CElementQuery implements IWaitable {
 
 		if ($locator === null) {
 			if (!is_array($type)) {
-				$parts = explode(':', $type, 2);
-				if (count($parts) !== 2) {
-					throw new Exception('Element selector "'.$type.'" is not well formatted.');
-				}
+				if ($type !== 'button') {
+					$parts = explode(':', $type, 2);
+					if (count($parts) !== 2) {
+						throw new Exception('Element selector "'.$type.'" is not well formatted.');
+					}
 
-				list($type, $locator) = $parts;
+					list($type, $locator) = $parts;
+				}
 			}
 			else {
 				$selectors = [];
@@ -188,6 +194,10 @@ class CElementQuery implements IWaitable {
 			'tag' => 'tagName',
 			'link' => 'linkText',
 			'button' => function () use ($locator) {
+				if ($locator === null) {
+					return WebDriverBy::tagName('button');
+				}
+
 				return WebDriverBy::xpath('.//button[normalize-space(text())='.CXPathHelper::escapeQuotes($locator).']');
 			}
 		];
@@ -312,12 +322,15 @@ class CElementQuery implements IWaitable {
 	 *
 	 * @return WebDriverWait
 	 */
-	public static function wait($timeout = 20, $iteration = null) {
+	public static function wait($timeout = null, $iteration = null) {
 		if ($iteration === null) {
 			$iteration = self::WAIT_ITERATION;
 		}
+		if ($timeout === null) {
+			$timeout = self::WAIT_TIMEOUT;
+		}
 
-		return static::getDriver()->wait($timeout, self::WAIT_ITERATION);
+		return static::getDriver()->wait($timeout, $iteration);
 	}
 
 	/**
@@ -326,15 +339,16 @@ class CElementQuery implements IWaitable {
 	 * @param IWaitable $target       target for wait operation
 	 * @param string    $condition    condition to be waited for
 	 * @param array     $params       condition params
+	 * @param integer   $timeout	  timeout in seconds
 	 */
-	public static function waitUntil($target, $condition, $params = []) {
+	public static function waitUntil($target, $condition, $params = [], $timeout = null) {
 		$selector = $target->getSelectorAsText();
 		if ($selector !== null) {
 			$selector = ' located by '.$selector;
 		}
 
 		$callable = call_user_func_array([$target, CElementFilter::getConditionCallable($condition)], $params);
-		self::wait()->until($callable, 'Failed to wait for element'.$selector.' to be '.$condition.'.');
+		self::wait($timeout)->until($callable, 'Failed to wait for element'.$selector.' to be '.$condition.'.');
 	}
 
 	/**
@@ -348,25 +362,29 @@ class CElementQuery implements IWaitable {
 		$class = $this->class;
 		$parent = ($this->context !== static::getDriver()) ? $this->context : null;
 
-		try {
-			if (!$this->reverse_order) {
-				$element = $this->context->findElement($this->by);
-			}
-			else {
-				$elements = $this->context->findElements($this->by);
-				if (!$elements) {
-					throw new NoSuchElementException(null);
+		for ($i = 0; $i < 2; $i++) {
+			try {
+				if (!$this->reverse_order) {
+					$element = $this->context->findElement($this->by);
+				}
+				else {
+					$elements = $this->context->findElements($this->by);
+					if (!$elements) {
+						throw new NoSuchElementException('No such element.');
+					}
+
+					$element = end($elements);
 				}
 
-				$element = end($elements);
+				break;
 			}
-		}
-		catch (NoSuchElementException $exception) {
-			if (!$should_exist) {
-				return new CNullElement(array_merge($this->options, ['parent' => $parent, 'by' => $this->by]));
-			}
+			catch (NoSuchElementException $exception) {
+				if (!$should_exist) {
+					return new CNullElement(array_merge($this->options, ['parent' => $parent, 'by' => $this->by]));
+				}
 
-			throw $exception;
+				throw $exception;
+			}
 		}
 
 		return call_user_func([$class, 'createInstance'], $element, array_merge($this->options, [
@@ -384,6 +402,7 @@ class CElementQuery implements IWaitable {
 		$class = $this->class;
 
 		$elements = $this->context->findElements($this->by);
+
 		if ($this->reverse_order) {
 			$elements = array_reverse($elements);
 		}
@@ -436,6 +455,17 @@ class CElementQuery implements IWaitable {
 	/**
 	 * @inheritdoc
 	 */
+	public function getEnabledCondition() {
+		$target = $this;
+
+		return function () use ($target) {
+			return $target->one(false)->isEnabled();
+		};
+	}
+
+	/**
+	 * @inheritdoc
+	 */
 	public function getReadyCondition() {
 		$driver = static::getDriver();
 
@@ -479,20 +509,22 @@ class CElementQuery implements IWaitable {
 
 		return function () use ($target, $attributes) {
 			$element = $target->one(false);
-			if (!$element->isValid()) {
+			if (!$element->isValid() || !$element->isAttributePresent($attributes)) {
 				return false;
 			}
 
-			foreach ($attributes as $key => $value) {
-				if (is_numeric($key) && $element->getAttribute($value) === null) {
-					return false;
-				}
-				elseif ($element->getAttribute($key) !== $value) {
-					return false;
-				}
-			}
-
 			return true;
+		};
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	public function getClassesPresentCondition($classes) {
+		$target = $this;
+
+		return function () use ($target, $classes) {
+			return $target->one(false)->hasClass($classes);
 		};
 	}
 
@@ -515,6 +547,17 @@ class CElementQuery implements IWaitable {
 
 		return function () use ($target) {
 			return $target->one(false)->isSelected();
+		};
+	}
+
+	/**
+	 * @inheritdoc
+	 */
+	public function getCountCondition($count) {
+		$target = $this;
+
+		return function () use ($target, $count) {
+			return $target->count() === $count;
 		};
 	}
 
@@ -543,44 +586,43 @@ class CElementQuery implements IWaitable {
 				'/input[@name][not(@type) or @type="text" or @type="password"][not(@style) or not(contains(@style,"display: none"))]',
 				'/textarea[@name]'
 			],
-			'CListElement'				=> '/select[@name]',
-			'CDropdownElement'			=> '/z-select[@name]',
-			'CCheckboxElement'			=> '/input[@name][@type="checkbox" or @type="radio"]',
+			'CListElement'				=> ['/select[@name]'],
+			'CDropdownElement'			=> ['/z-select[@name]'],
+			'CCheckboxElement'			=> ['/input[@name][@type="checkbox" or @type="radio"]'],
 			'CMultiselectElement'		=> [
 				'/div[contains(@class, "multiselect-control")]',
-				'/div/div[contains(@class, "multiselect-control")]' // TODO: remove after fix DEV-1071.
+				'/div/div[contains(@class, "multiselect-control")]'
 			],
 			'CSegmentedRadioElement'	=> [
 				'/ul[contains(@class, "radio-list-control")]',
-				'/ul/li/ul[contains(@class, "radio-list-control")]',
-				'/div/ul[contains(@class, "radio-list-control")]' // TODO: remove after fix DEV-1071.
+				'/ul/li/ul[contains(@class, "radio-list-control")]'
 			],
 			'CCheckboxListElement'		=> [
-				'/div/div[@class="columns-wrapper columns-3"]', // TODO: fix after DEV-1859.
 				'/ul[contains(@class, "checkbox-list")]',
 				'/ul[contains(@class, "list-check-radio")]'
 			],
 			'CHostInterfaceElement'		=> [
-				'/div/div[contains(@class, "interface-container")]/../..'
+				'/div/div/div[contains(@class, "interface-container")]/../../..'
 			],
 			'CMultifieldTableElement'	=> [
 				'/table',
-				'/div/table', // TODO: remove after fix DEV-1071.
 				'/*[contains(@class, "table-forms-separator")]/table'
 			],
 			'CCompositeInputElement'	=> [
 				'/div[contains(@class, "range-control")]',
-				'/div[contains(@class, "calendar-control")]'
+				'/div[contains(@class, "date-selector")]'
 			],
-			'CColorPickerElement'		=> '/div[contains(@class, "color-picker")]',
-			'CMultilineElement'			=> '/div[contains(@class, "multilineinput-control")]',
-			'CInputGroupElement'		=> '/div[contains(@class, "macro-input-group")]'
+			'CColorPickerElement'		=> [
+				'/z-color-picker'
+			],
+			'CMultilineElement'			=> ['/div[contains(@class, "multilineinput-control")]'],
+			'CInputGroupElement'		=> ['/div[contains(@class, "macro-input-group")]'],
+			'CFieldsetElement'			=> ['/fieldset'],
+			'CTextareaFlexibleElement'	=> ['/z-textarea-flexible[@name]']
 		];
 
 		if ($class !== null) {
-			if (!is_array($class)) {
-				$class = [$class];
-			}
+			$class = (array) $class;
 
 			foreach (array_keys($classes) as $name) {
 				if (!in_array($name, $class)) {
@@ -589,24 +631,144 @@ class CElementQuery implements IWaitable {
 			}
 		}
 
-		foreach ($classes as $class => $selectors) {
-			if (!is_array($selectors)) {
-				$selectors = [$selectors];
+		// CHostInterfaceElement is located via a nested marker, but the match resolves to an ancestor of it,
+		// so the found element carries no attribute of its own to classify it by - it has to stay a separate query.
+		$host_interface = null;
+
+		if (array_key_exists('CHostInterfaceElement', $classes)) {
+			$host_interface = $classes['CHostInterfaceElement'];
+			unset($classes['CHostInterfaceElement']);
+		}
+
+		if ($classes) {
+			static::$selector = 'xpath:'.$prefix.implode('|'.$prefix, array_merge(...array_values($classes)));
+			$collection = $target->query(static::$selector)->all();
+
+			$found = null;
+			$element = null;
+
+			if (!$collection->isEmpty()) {
+				if (count($classes) === 1) {
+					$found = array_key_first($classes);
+					$element = $collection->first();
+				}
+				else {
+					$nodes = array_values($collection->asArray());
+
+					$attributes = CElementQuery::getDriver()->executeScript(
+						'return arguments[0].map(function (node) {'.
+								'return [node.tagName.toLowerCase(), node.getAttribute("class") || "",'.
+									'node.getAttribute("type") || ""];'.
+							'});',
+						[$nodes]
+					);
+
+					$matches = [];
+					foreach ($nodes as $i => $node) {
+						$node_class = self::resolveInputElementClass($attributes[$i][0], $attributes[$i][1],
+							$attributes[$i][2]
+						);
+
+						if ($node_class !== null && array_key_exists($node_class, $classes)
+								&& !array_key_exists($node_class, $matches)) {
+							$matches[$node_class] = $node;
+						}
+					}
+
+					foreach (array_keys($classes) as $name) {
+						if (array_key_exists($name, $matches)) {
+							$found = $name;
+							$element = $matches[$name];
+							break;
+						}
+					}
+				}
 			}
 
-			$xpaths = [];
-			foreach ($selectors as $selector) {
-				$xpaths[] = $prefix.$selector;
-			}
+			if ($found !== null) {
+				static::$selector = 'xpath:'.$prefix.implode('|'.$prefix, $classes[$found]);
 
-			static::$selector = 'xpath:'.implode('|', $xpaths);
-			$element = $target->query(static::$selector)->cast($class)->one(false);
+				return call_user_func([$found, 'createInstance'], $element, [
+					'parent' => ($target !== static::getDriver()) ? $target : null,
+					'by' => static::getSelector('xpath', $prefix.implode('|'.$prefix, $classes[$found]))
+				]);
+			}
+		}
+
+		if ($host_interface !== null) {
+			static::$selector = 'xpath:'.$prefix.implode('|'.$prefix, $host_interface);
+			$element = $target->query(static::$selector)->cast('CHostInterfaceElement')->one(false);
 			if ($element->isValid()) {
 				return $element;
 			}
 		}
 
 		static::$selector = null;
+
 		return new CNullElement(['locator' => 'input element']);
+	}
+
+	/**
+	 * Determine element class based on tag name and attributes of an already located element.
+	 * Mirrors the matching rules encoded in the xpath selectors built by self::getInputElement().
+	 *
+	 * @param string $tag      lower-cased tag name
+	 * @param string $class    "class" attribute value ('' if absent)
+	 * @param string $type     "type" attribute value, relevant for <input> only ('' if absent)
+	 *
+	 * @return string|null
+	 */
+	protected static function resolveInputElementClass($tag, $class, $type) {
+		switch ($tag) {
+			case 'textarea':
+				return 'CElement';
+
+			case 'select':
+				return 'CListElement';
+
+			case 'z-select':
+				return 'CDropdownElement';
+
+			case 'z-color-picker':
+				return 'CColorPickerElement';
+
+			case 'z-textarea-flexible':
+				return 'CTextareaFlexibleElement';
+
+			case 'table':
+				return 'CMultifieldTableElement';
+
+			case 'fieldset':
+				return 'CFieldsetElement';
+
+			case 'input':
+				return in_array($type, ['checkbox', 'radio']) ? 'CCheckboxElement' : 'CElement';
+		}
+
+		if (strpos($class, 'multiselect-control') !== false || strpos($class, 'multiselect') !== false) {
+			return 'CMultiselectElement';
+		}
+
+		if (strpos($class, 'radio-list-control') !== false) {
+			return 'CSegmentedRadioElement';
+		}
+
+		if (strpos($class, 'checkbox-list') !== false || strpos($class, 'list-check-radio') !== false) {
+			return 'CCheckboxListElement';
+		}
+
+		if (strpos($class, 'range-control') !== false || strpos($class, 'date-selector') !== false) {
+			return 'CCompositeInputElement';
+		}
+
+		if (strpos($class, 'multilineinput-control') !== false) {
+			return 'CMultilineElement';
+		}
+
+		if (strpos($class, 'macro-input-group') !== false) {
+			return 'CInputGroupElement';
+		}
+
+		return null;
 	}
 }

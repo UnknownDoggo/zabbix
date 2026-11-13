@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 package resultcache
 
@@ -25,9 +20,9 @@ import (
 	"testing"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/log"
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"zabbix.com/internal/agent"
+	"golang.zabbix.com/agent2/internal/agent"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/plugin"
 )
 
 type mockWriter struct {
@@ -36,7 +31,7 @@ type mockWriter struct {
 	t       *testing.T
 }
 
-func (w *mockWriter) Write(data []byte, timeout time.Duration) (err []error) {
+func (w *mockWriter) Write(data []byte, timeout time.Duration) (upload bool, err []error) {
 	log.Debugf("%s", string(data))
 	if w.counter&1 != 0 {
 		err = []error{errors.New("mock error")}
@@ -51,7 +46,7 @@ func (w *mockWriter) Write(data []byte, timeout time.Duration) (err []error) {
 			w.lastid++
 		}
 	}
-
+	upload = true
 	w.counter++
 	return
 }
@@ -68,10 +63,14 @@ func (w *mockWriter) Hostname() string {
 	return ""
 }
 
+func (w *mockWriter) Session() string {
+	return ""
+}
+
 func TestResultCache(t *testing.T) {
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 
 	writer := mockWriter{lastid: 1, t: t}
 	c := New(&agent.Options, 0, nil)
@@ -96,21 +95,6 @@ func TestResultCache(t *testing.T) {
 	cache.write(&result)
 	cache.write(&result)
 	cache.flushOutput(&writer)
-}
-
-func TestToken(t *testing.T) {
-	tokens := make(map[string]bool)
-	for i := 0; i < 100000; i++ {
-		token := newToken()
-		if len(token) != 32 {
-			t.Errorf("Expected token length 32 while got %d", len(token))
-			return
-		}
-		if _, ok := tokens[token]; ok {
-			t.Errorf("Duplicated token detected")
-		}
-		tokens[token] = true
-	}
 }
 
 func checkBuffer(t *testing.T, c *MemoryCache, input []*plugin.Result, expected []*AgentData) {
@@ -157,7 +141,7 @@ func TestBuffer(t *testing.T) {
 		{Id: 10, Itemid: 10},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -197,7 +181,7 @@ func TestBufferFull5(t *testing.T) {
 		{Id: 15, Itemid: 15},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -237,7 +221,7 @@ func TestBufferFull5ReplaceFirst(t *testing.T) {
 		{Id: 15, Itemid: 5},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -277,7 +261,7 @@ func TestBufferFull5ReplaceLast(t *testing.T) {
 		{Id: 15, Itemid: 10},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -317,7 +301,7 @@ func TestBufferFull5ReplacInterleaved(t *testing.T) {
 		{Id: 15, Itemid: 9},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -357,7 +341,7 @@ func TestBufferFull5OneItem(t *testing.T) {
 		{Id: 15, Itemid: 1},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -396,7 +380,7 @@ func TestBufferFull4OneItemPersistent(t *testing.T) {
 		{Id: 14, Itemid: 1, persistent: true},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -437,7 +421,7 @@ func TestBufferFull5OneItemPersistent(t *testing.T) {
 		{Id: 15, Itemid: 1, persistent: true},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)
@@ -483,7 +467,7 @@ func TestBufferFull10PersistentAndNormal(t *testing.T) {
 		{Id: 20, Itemid: 13},
 	}
 
-	_ = log.Open(log.Console, log.Debug, "", 0)
+	_ = log.NewWithOptions(log.NewOptions().WithLogType(log.Console).WithLevel(log.Debug))
 	agent.Options.BufferSize = 10
 	agent.Options.EnablePersistentBuffer = 0
 	c := New(&agent.Options, 0, nil)

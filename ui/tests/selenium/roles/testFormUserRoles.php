@@ -1,46 +1,45 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CWebTest.php';
-require_once dirname(__FILE__).'/../behaviors/CMessageBehavior.php';
-require_once dirname(__FILE__).'/../../include/helpers/CDataHelper.php';
-require_once dirname(__FILE__).'/../traits/TableTrait.php';
+require_once __DIR__.'/../../include/CWebTest.php';
+require_once __DIR__.'/../behaviors/CMessageBehavior.php';
+require_once __DIR__.'/../behaviors/CTableBehavior.php';
+require_once __DIR__.'/../../include/helpers/CDataHelper.php';
 
 /**
+ * @dataSource EntitiesTags, Services
+ *
  * @backup role, module, users
- * @onBefore prepareRoleData
- * @onBefore prepareUserData
- * @onBefore prepareServiceData
+ *
+ * @onBefore prepareRoleData, prepareUserData
  */
 class testFormUserRoles extends CWebTest {
 
-	use TableTrait;
-
-	const ROLE_SQL = 'SELECT * FROM role r INNER JOIN role_rule rr ON rr.roleid = r.roleid ORDER BY r.roleid, rr.role_ruleid';
-
 	/**
-	 * Attach MessageBehavior to the test.
+	 * Attach MessageBehavior and TableBehavior to the test.
+	 *
+	 * @return array
 	 */
 	public function getBehaviors() {
-		return [CMessageBehavior::class];
+		return [
+			CMessageBehavior::class,
+			CTableBehavior::class
+		];
 	}
+
+	const ROLE_SQL = 'SELECT * FROM role r INNER JOIN role_rule rr ON rr.roleid = r.roleid ORDER BY r.roleid, rr.role_ruleid';
 
 	/**
 	 * Id of role that created for future update.
@@ -72,6 +71,7 @@ class testFormUserRoles extends CWebTest {
 				'name' => 'role_for_update',
 				'type' => 1,
 				'rules' => [
+					'api.access' => ZBX_ROLE_RULE_ENABLED,
 					'api' => [
 						'*.create',
 						'host.*',
@@ -81,7 +81,10 @@ class testFormUserRoles extends CWebTest {
 			],
 			[
 				'name' => 'super_role',
-				'type' => 3
+				'type' => 3,
+				'rules' => [
+					'api.access' => ZBX_ROLE_RULE_ENABLED
+				]
 			],
 			[
 				'name' => 'role_for_delete',
@@ -109,60 +112,9 @@ class testFormUserRoles extends CWebTest {
 		]);
 	}
 
-	public function prepareServiceData() {
-		CDataHelper::call('service.create', [
-			[
-				'name' => 'Service_1',
-				'algorithm' => 1,
-				'sortorder' => 1
-			],
-			[
-				'name' => 'Service_2',
-				'algorithm' => 2,
-				'sortorder' => 2,
-				'problem_tags' => [
-					[
-						'tag' => 'tag1',
-						'value' => 'value1'
-					],
-					[
-						'tag' => 'tag2',
-						'value' => 'value2'
-					],
-					[
-						'tag' => 'tag3',
-						'value' => 'value3'
-					],
-					[
-						'tag' => 'tag4',
-						'value' => 'value4'
-					]
-				],
-				'tags' => [
-					[
-						'tag' => 'Service_tag1',
-						'value' => 'value1s'
-					],
-					[
-						'tag' => 'Service_tag2',
-						'value' => 'value2s'
-					],
-					[
-						'tag' => 'Service_tag3',
-						'value' => 'value3s'
-					],
-					[
-						'tag' => 'Service_tag4',
-						'value' => 'value4s'
-					]
-				]
-			]
-		]);
-	}
-
 	public static function getCreateData() {
 		return [
-			// Same name for 3 types of roles.
+			// #0 Same name for 3 types of roles.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -170,10 +122,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => 'User role',
 						'User type' => 'User'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'User role "User role" already exists.'
+					'inline_errors' => [
+						'Name' => 'This object already exists.'
+					]
 				]
 			],
+			// #1.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -181,10 +135,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => 'Admin role',
 						'User type' => 'Admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'User role "Admin role" already exists.'
+					'inline_errors' => [
+						'Name' => 'This object already exists.'
+					]
 				]
 			],
+			// #2.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -192,11 +148,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => 'Super admin role',
 						'User type' => 'Super admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'User role "Super admin role" already exists.'
+					'inline_errors' => [
+						'Name' => 'This object already exists.'
+					]
 				]
 			],
-			// Empty name field.
+			// #3 Empty name field.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -204,10 +161,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => '',
 						'User type' => 'User'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Incorrect value for field "name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
+			// #4.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -215,10 +174,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => '',
 						'User type' => 'Admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Incorrect value for field "name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
+			// #5.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -226,11 +187,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => '',
 						'User type' => 'Super admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Incorrect value for field "name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Empty space in name field.
+			// #6 Empty space in name field.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -238,10 +200,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => ' ',
 						'User type' => 'User'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Invalid parameter "/1/name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
+			// #7.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -249,10 +213,12 @@ class testFormUserRoles extends CWebTest {
 						'Name' => ' ',
 						'User type' => 'Admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Invalid parameter "/1/name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
+			// #8.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -260,73 +226,93 @@ class testFormUserRoles extends CWebTest {
 						'Name' => ' ',
 						'User type' => 'Super admin'
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Invalid parameter "/1/name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// All UI elements unchecked.
+			// #9 All UI elements unchecked.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'user_ui_checked_out',
 						'User type' => 'User',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => []
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "user_ui_checked_out".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
+			// #10.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'admin_ui_checked_out',
 						'User type' => 'Admin',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => []
+						'Data collection' => [],
+						'Alerts' => []
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "admin_ui_checked_out".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
+			// #11.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'super_admin_ui_checked_out',
 						'User type' => 'Super admin',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => [],
+						'Data collection' => [],
+						'Alerts' => [],
+						'Users' => [],
 						'Administration' => []
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "super_admin_ui_checked_out".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
-			// Remove everything.
+			// #12 Remove everything.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'user_everything_removed',
 						'User type' => 'User',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => [],
 						'Default access to new UI elements' => false,
 						'Default access to new modules' => false,
-						'Enabled' => false,
+						// The field ID is used here and throughout, as the user role form contains two "Enabled" labels, which causes phpunit warnings.
+						'id:api-access' => false,
+						'id:devices.access' => false,
+						'Default access to new device actions' => false,
 						'Create and edit dashboards' => false,
 						'Create and edit maps' => false,
 						'Add problem comments' => false,
@@ -337,24 +323,31 @@ class testFormUserRoles extends CWebTest {
 						'Manage API tokens' => false,
 						'Default access to new actions' => false
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "user_everything_removed".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
+			// #13.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'admin_everything_removed',
 						'User type' => 'Admin',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => [],
+						'Data collection' => [],
+						'Alerts' => [],
 						'Default access to new UI elements' => false,
 						'Default access to new modules' => false,
-						'Enabled' => false,
+						'id:api-access' => false,
+						'id:devices.access' => false,
+						'Default access to new device actions' => false,
 						'Create and edit dashboards' => false,
 						'Create and edit maps' => false,
 						'Create and edit maintenance' => false,
@@ -368,25 +361,33 @@ class testFormUserRoles extends CWebTest {
 						'Manage SLA' => false,
 						'Default access to new actions' => false
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "admin_everything_removed".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
+			// #14.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'super_admin_everything_removed',
 						'User type' => 'Super admin',
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => [],
+						'Data collection' => [],
+						'Alerts' => [],
+						'Users' => [],
 						'Administration' => [],
 						'Default access to new UI elements' => false,
 						'Default access to new modules' => false,
-						'Enabled' => false,
+						'id:api-access' => false,
+						'id:devices.access' => false,
+						'Default access to new device actions' => false,
 						'Create and edit dashboards' => false,
 						'Create and edit maps' => false,
 						'Create and edit maintenance' => false,
@@ -400,11 +401,12 @@ class testFormUserRoles extends CWebTest {
 						'Manage SLA' => false,
 						'Default access to new actions' => false
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'At least one UI element must be enabled for user role "super_admin_everything_removed".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
-			// Read-write service tag name not specified.
+			// #15 Read-write service tag name not specified.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -418,12 +420,12 @@ class testFormUserRoles extends CWebTest {
 							'service_write_tag_value' => 'value'
 						]
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Cannot have non-empty tag value while having empty tag in rule "services.write.tag"'
-							.' for user role "Missing Read-write service tag name".'
+					'inline_errors' => [
+						'id:service-write-tag-tag' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Read-only service tag name not specified.
+			// #16 Read-only service tag name not specified.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -437,12 +439,12 @@ class testFormUserRoles extends CWebTest {
 							'service_read_tag_value' => 'value'
 						]
 					],
-					'message_header' => 'Cannot create user role',
-					'message_details' => 'Cannot have non-empty tag value while having empty tag in rule "services.read.tag"'
-							.' for user role "Missing Read-write service tag name".'
+					'inline_errors' => [
+						'id:service-read-tag-tag' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Special symbols in the name.
+			// #17 Special symbols in the name.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -453,6 +455,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #18.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -463,6 +466,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #19.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -473,7 +477,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// A lot of spaces in the name.
+			// #20 A lot of spaces in the name.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -484,6 +488,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #21.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -494,6 +499,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #22.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -504,7 +510,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// Trailing, leading space in name.
+			// #23 Trailing, leading space in name.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -516,13 +522,16 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// All UI elements unchecked except one.
+			// #24 All UI elements unchecked except one.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'user_ui_one_left',
 						'User type' => 'User',
+						'Dashboards' => false,
+						'Monitoring' => [],
+						'APM' => [],
 						'Services' => ['Services'],
 						'Inventory' => [],
 						'Reports' => []
@@ -530,36 +539,47 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #25.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'admin_ui_one_left',
 						'User type' => 'Admin',
+						'Dashboards' => false,
+						'Monitoring' => [],
+						'APM' => [],
 						'Services' => ['Services'],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => []
+						'Data collection' => [],
+						'Alerts' => []
 					],
 					'message_header' => 'User role created'
 				]
 			],
+			// #26.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'super_admin_ui_one_left',
 						'User type' => 'Super admin',
+						'Dashboards' => false,
+						'Monitoring' => [],
+						'APM' => [],
 						'Services' => ['Services'],
 						'Inventory' => [],
 						'Reports' => [],
-						'Configuration' => [],
+						'Data collection' => [],
+						'Alerts' => [],
+						'Users' => [],
 						'Administration' => []
 					],
 					'message_header' => 'User role created'
 				]
 			],
-			// Remove all Access to actions.
+			// #27 Remove all Access to actions.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -580,6 +600,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			//#28.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -603,6 +624,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #29.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -625,13 +647,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// API methods deny list.
+			// #30 API methods deny list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'user_ui_api_deny',
-						'User type' => 'User'
+						'User type' => 'User',
+						'id:api-access' => true
 					],
 					'api_methods' => [
 						'dashboard.create',
@@ -641,12 +664,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #31.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'admin_ui_api_deny',
-						'User type' => 'Admin'
+						'User type' => 'Admin',
+						'id:api-access' => true
 					],
 					'api_methods' => [
 						'dashboard.create',
@@ -656,12 +681,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #32.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'super_admin_ui_api_deny',
-						'User type' => 'Super admin'
+						'User type' => 'Super admin',
+						'id:api-access' => true
 					],
 					'api_methods' => [
 						'dashboard.create',
@@ -671,13 +698,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// API methods allow list.
+			// #33 API methods allow list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'user_ui_api_allow',
 						'User type' => 'User',
+						'id:api-access' => true,
 						'API methods' => 'Allow list'
 					],
 					'api_methods' => [
@@ -688,12 +716,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #34.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'admin_ui_api_allow',
 						'User type' => 'Admin',
+						'id:api-access' => true,
 						'API methods' => 'Allow list'
 					],
 					'api_methods' => [
@@ -704,12 +734,14 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #35.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'super_admin_ui_api_allow',
 						'User type' => 'Super admin',
+						'id:api-access' => true,
 						'API methods' => 'Allow list'
 					],
 					'api_methods' => [
@@ -720,6 +752,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
+			// #36.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -735,7 +768,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// Access to services set to None.
+			// #37 Access to services set to None.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -748,7 +781,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// Access to services set to All in both cases.
+			// #38 Access to services set to All in both cases.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -761,7 +794,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// Access to services set to Service list.
+			// #39 Access to services set to Service list.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -772,14 +805,14 @@ class testFormUserRoles extends CWebTest {
 						'Read-only access to services' => 'Service list'
 					],
 					'write_services' => [
-						'xpath:(//div[@class="multiselect-control"])[1]' => 'Service_1',
+						'xpath:(//div[@class="multiselect-control"])[1]' => 'Update service',
 						'Read-write access to services with tag' => [
 							'service-write-tag-tag' => 'tag-write',
 							'service_write_tag_value' => 'value-write'
 						]
 					],
 					'read_services' => [
-						'xpath:(//div[@class="multiselect-control"])[2]' => ['Service_1', 'Service_2'],
+						'xpath:(//div[@class="multiselect-control"])[2]' => ['Update service', 'Service for delete 2'],
 						'Read-only access to services with tag' => [
 							'service-read-tag-tag' => 'tag-read',
 							'service_read_tag_value' => 'value-read'
@@ -788,22 +821,24 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role created'
 				]
 			],
-			// Access to services set to Service list.
+			// #40 Access to services set to Service list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Name' => 'Only read-only services',
 						'User type' => 'Super admin',
-						'Read-only access to services' => 'Service list'
+						'Read-only access to services' => 'Service list',
+						// added element 'API methods' with default value for page scroll
+						'API methods' => 'Deny list'
 					],
 					'read_services' => [
-						'xpath:(//div[@class="multiselect-control"])[2]' => ['Service_1', 'Service_2']
+						'xpath:(//div[@class="multiselect-control"])[2]' => ['Update service', 'Service for delete 2']
 					],
 					'message_header' => 'User role created'
 				]
 			],
-			// Access to services set to Service list but the list is empty.
+			// #41 Access to services set to Service list but the list is empty.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -836,12 +871,22 @@ class testFormUserRoles extends CWebTest {
 		$form = $this->query('id:userrole-form')->waitUntilPresent()->asForm()->one();
 		$this->assertEquals(255, $form->getField('Name')->getAttribute('maxlength'));
 		$this->assertEquals($roles, $this->query('id:user-type')->one()->asDropdown()->getOptions()->asText());
+		$form->checkValue(['id:api-access' => false]);
 
-		// Unchecking API, button and radio button becomes disabled.
-		$form->fill(['Enabled' => false]);
+		// The API method buttons are disabled by default.
 		$this->assertFalse($form->getField('API methods')->isEnabled());
-		$this->assertFalse($this->query('button:Select')->one()->isClickable());
+		$selector = 'xpath://div[@id="api_methods_"]/following::button[text()="Select"]';
+		$this->assertFalse($this->query($selector)->one()->isClickable());
 		$this->assertTrue($this->query('xpath://div[@id="api_methods_" and @aria-disabled="true"]')->exists());
+
+		// After enabling API access again, API methods controls become active.
+		$form->fill(['id:api-access' => true]);
+		$this->assertTrue($form->getField('API methods')->isEnabled());
+		$this->assertTrue($this->query($selector)->one()->isClickable());
+		$this->assertTrue($this->query('xpath://div[@id="api_methods_" and not(@aria-disabled)]')->exists());
+		$this->query($selector)->one()->click();
+		COverlayDialogElement::find()->one()->waitUntilReady()->close();
+
 		$this->page->refresh()->waitUntilReady();
 		$this->assertEquals(4, $form->query('button', ['Update', 'Clone', 'Delete', 'Cancel'])->all()
 				->filter(new CElementFilter(CElementFilter::CLICKABLE))->count());
@@ -859,14 +904,17 @@ class testFormUserRoles extends CWebTest {
 				foreach (['Read-write access to services', 'Read-only access to services'] as $field) {
 					$form->getField($field)->fill('Service list');
 				}
+
+				// Scroll up after filling the form to take the correct screenshot.
+				$this->page->scrollToTop();
 			}
-			$this->assertScreenshotExcept($screenshot_area, ['query' => 'xpath://input[@id="name"]'], $role);
+
+			$this->assertScreenshotExcept($screenshot_area, ['query' => 'xpath://z-textarea-flexible[@id="name"]'], $role);
 		}
 
-		// Screens for super admin.
+		// Screen for the existing super admin role.
 		$this->page->open('zabbix.php?action=userrole.edit&roleid=3');
-		$this->page->removeFocus();
-		$this->assertScreenshotExcept($screenshot_area, ['query' => 'xpath://input[@id="name"]']);
+		$this->assertScreenshotExcept($screenshot_area, ['query' => 'xpath://z-textarea-flexible[@id="name"]']);
 		foreach (['Clone' => true, 'Cancel' => true, 'Update' => false, 'Delete' => false] as $button => $clickable) {
 			$this->assertEquals($clickable, $this->query('button', $button)->one()->isClickable());
 		}
@@ -874,113 +922,134 @@ class testFormUserRoles extends CWebTest {
 
 	public static function getApiListData() {
 		return [
-			// User role.
+			// #0 User role.
 			[
 				[
 					'fields' => [
 						'Name' => 'user_api',
-						'User type' => 'User'
+						'User type' => 'User',
+						'id:api-access' => true
 					],
 					'api_list' => [
-						'action.get', 'alert.get', 'configuration.export', 'configuration.import', 'configuration.importcompare',
+						'action.get', 'alert.get', 'apmlog.get', 'apmmetric.get', 'apmspan.get', 'apmtrace.get',
+						'ceprule.get', 'configuration.export', 'configuration.import', 'configuration.importcompare',
 						'correlation.get', 'dashboard.create', 'dashboard.delete', 'dashboard.get', 'dashboard.update',
-						'dcheck.get', 'dhost.get', 'discoveryrule.get', 'drule.get', 'dservice.get', 'event.acknowledge',
-						'event.get', 'graph.get', 'graphitem.get', 'graphprototype.get', 'hanode.get', 'history.get', 'host.get',
-						'hostgroup.get', 'hostinterface.get', 'hostprototype.get', 'housekeeping.get', 'httptest.get',
-						'iconmap.get', 'image.get', 'item.get', 'itemprototype.get', 'maintenance.get', 'map.create',
-						'map.delete', 'map.get', 'map.update', 'mediatype.get', 'module.get', 'problem.get', 'proxy.get',
-						'role.get', 'script.execute', 'script.get', 'script.getscriptsbyhosts', 'service.create',
+						'dcheck.get', 'device.get', 'device.init', 'device.offboard', 'dhost.get', 'discoveryrule.get',
+						'discoveryruleprototype.get', 'drule.get', 'dservice.get', 'event.acknowledge', 'event.get',
+						'graph.get', 'graphitem.get', 'graphprototype.get', 'hanode.get', 'history.get', 'history.push',
+						'host.get', 'hostdashboard.get', 'hostgroup.get', 'hostinterface.get', 'hostprototype.get',
+						'housekeeping.get', 'httptest.get', 'iconmap.get', 'image.get', 'item.get', 'itemprototype.get',
+						'maintenance.get', 'map.create', 'map.delete', 'map.get', 'map.update', 'mediatype.get',
+						'module.get', 'problem.get', 'proxy.get', 'proxygroup.get', 'role.get', 'script.execute',
+						'script.get', 'script.getscriptsbyevents', 'script.getscriptsbyhosts', 'service.create',
 						'service.delete', 'service.get', 'service.update', 'settings.get', 'sla.get', 'sla.getsli',
-						'template.get', 'templatedashboard.get', 'token.create', 'token.delete', 'token.generate', 'token.get',
-						'token.update', 'trend.get', 'trigger.get', 'triggerprototype.get',
-						'user.get', 'user.logout', 'user.update', 'usergroup.get', 'usermacro.get', 'valuemap.get'
+						'task.create', 'template.get', 'templatedashboard.get', 'templategroup.get', 'token.create',
+						'token.delete', 'token.generate', 'token.get', 'token.update', 'trend.get', 'trigger.get',
+						'triggerprototype.get', 'user.get', 'user.logout', 'user.update', 'usergroup.get','usermacro.get',
+						'valuemap.get'
 					]
 				]
 			],
-			// Admin role.
+			// #1 Admin role.
 			[
 				[
 					'fields' => [
 						'Name' => 'admin_api',
-						'User type' => 'Admin'
+						'User type' => 'Admin',
+						'id:api-access' => true
 					],
 					'api_list' => [
-						'action.create', 'action.delete', 'action.get', 'action.update', 'alert.get', 'configuration.export',
-						'configuration.import', 'configuration.importcompare', 'correlation.get', 'dashboard.create', 'dashboard.delete',
-						'dashboard.get', 'dashboard.update', 'dcheck.get', 'dhost.get', 'discoveryrule.copy', 'discoveryrule.create',
-						'discoveryrule.delete', 'discoveryrule.get', 'discoveryrule.update', 'drule.create', 'drule.delete', 'drule.get',
-						'drule.update', 'dservice.get', 'event.acknowledge', 'event.get', 'graph.create', 'graph.delete', 'graph.get',
-						'graph.update', 'graphitem.get', 'graphprototype.create', 'graphprototype.delete', 'graphprototype.get',
-						'graphprototype.update', 'hanode.get', 'history.clear', 'history.get', 'host.create', 'host.delete', 'host.get', 'host.massadd', 'host.massremove',
-						'host.massupdate', 'host.update', 'hostgroup.delete', 'hostgroup.get', 'hostgroup.massadd', 'hostgroup.massremove',
-						'hostgroup.massupdate', 'hostgroup.update', 'hostinterface.create', 'hostinterface.delete', 'hostinterface.get',
-						'hostinterface.massadd', 'hostinterface.massremove', 'hostinterface.replacehostinterfaces', 'hostinterface.update',
-						'hostprototype.create', 'hostprototype.delete', 'hostprototype.get', 'hostprototype.update', 'housekeeping.get',
-						'httptest.create', 'httptest.delete', 'httptest.get', 'httptest.update', 'iconmap.get', 'image.get', 'item.create',
-						'item.delete', 'item.get', 'item.update', 'itemprototype.create', 'itemprototype.delete', 'itemprototype.get',
-						'itemprototype.update', 'maintenance.create', 'maintenance.delete', 'maintenance.get', 'maintenance.update',
-						'map.create', 'map.delete', 'map.get', 'map.update', 'mediatype.get', 'module.get', 'problem.get', 'proxy.get',
-						'report.create', 'report.delete', 'report.get', 'report.update', 'role.get', 'script.execute', 'script.get',
-						'script.getscriptsbyhosts', 'service.create', 'service.delete', 'service.get', 'service.update',
-						'settings.get', 'sla.create', 'sla.delete', 'sla.get', 'sla.getsli', 'sla.update', 'template.create',
-						'template.delete', 'template.get', 'template.massadd', 'template.massremove', 'template.massupdate',
-						'template.update', 'templatedashboard.create', 'templatedashboard.delete', 'templatedashboard.get',
-						'templatedashboard.update', 'token.create', 'token.delete', 'token.generate', 'token.get',
-						'token.update', 'trend.get', 'trigger.adddependencies', 'trigger.create', 'trigger.delete', 'trigger.deletedependencies',
-						'trigger.get', 'trigger.update', 'triggerprototype.create', 'triggerprototype.delete', 'triggerprototype.get',
-						'triggerprototype.update', 'user.get', 'user.logout', 'user.update', 'usergroup.get', 'usermacro.create',
-						'usermacro.delete', 'usermacro.get', 'usermacro.update', 'valuemap.create', 'valuemap.delete', 'valuemap.get',
-						'valuemap.update'
+						'action.create', 'action.delete', 'action.get', 'action.update', 'alert.get', 'apmlog.get',
+						'apmmetric.get', 'apmspan.get', 'apmtrace.get', 'ceprule.get', 'configuration.export',
+						'configuration.import', 'configuration.importcompare', 'correlation.get', 'dashboard.create',
+						'dashboard.delete', 'dashboard.get', 'dashboard.update', 'dcheck.get', 'device.get', 'device.init',
+						'device.offboard','dhost.get','discoveryrule.create', 'discoveryrule.delete', 'discoveryrule.get',
+						'discoveryrule.update', 'discoveryruleprototype.create', 'discoveryruleprototype.delete',
+						'discoveryruleprototype.get','discoveryruleprototype.update', 'drule.create', 'drule.delete',
+						'drule.get', 'drule.update', 'dservice.get', 'event.acknowledge', 'event.get', 'graph.create',
+						'graph.delete', 'graph.get', 'graph.update', 'graphitem.get', 'graphprototype.create',
+						'graphprototype.delete', 'graphprototype.get', 'graphprototype.update', 'hanode.get', 'history.clear',
+						'history.get', 'history.push', 'host.create', 'host.delete', 'host.get', 'host.massadd', 'host.massremove',
+						'host.update', 'hostdashboard.get', 'hostgroup.delete','hostgroup.get', 'hostgroup.massadd',
+						'hostgroup.massremove', 'hostgroup.update', 'hostinterface.get', 'hostprototype.create',
+						'hostprototype.delete', 'hostprototype.get', 'hostprototype.update',
+						'housekeeping.get', 'httptest.create', 'httptest.delete', 'httptest.get', 'httptest.update',
+						'iconmap.get', 'image.get', 'item.create', 'item.delete', 'item.get', 'item.update',
+						'itemprototype.create', 'itemprototype.delete', 'itemprototype.get', 'itemprototype.update',
+						'maintenance.create', 'maintenance.delete', 'maintenance.get', 'maintenance.update','map.create',
+						'map.delete', 'map.get', 'map.update', 'mediatype.get', 'module.get', 'problem.get', 'proxy.get',
+						'proxygroup.get', 'report.create', 'report.delete', 'report.get', 'report.update', 'role.get',
+						'script.execute', 'script.get', 'script.getscriptsbyevents', 'script.getscriptsbyhosts',
+						'service.create', 'service.delete', 'service.get', 'service.update', 'settings.get', 'sla.create',
+						'sla.delete', 'sla.get', 'sla.getsli', 'sla.update', 'task.create','template.create',
+						'template.delete', 'template.get', 'template.massadd', 'template.massremove', 'template.update',
+						'templatedashboard.create', 'templatedashboard.delete', 'templatedashboard.get',
+						'templatedashboard.update', 'templategroup.delete', 'templategroup.get', 'templategroup.massadd',
+						'templategroup.massremove', 'templategroup.update', 'token.create', 'token.delete', 'token.generate',
+						'token.get', 'token.update', 'trend.get', 'trigger.create', 'trigger.delete', 'trigger.get',
+						'trigger.update', 'triggerprototype.create', 'triggerprototype.delete', 'triggerprototype.get',
+						'triggerprototype.update', 'user.get', 'user.logout', 'user.update', 'usergroup.get',
+						'usermacro.create', 'usermacro.delete', 'usermacro.get', 'usermacro.update', 'valuemap.create',
+						'valuemap.delete', 'valuemap.get', 'valuemap.update'
 					]
 				]
 			],
-			// Super Admin role.
+			// #2 Super Admin role.
 			[
 				[
 					'fields' => [
 						'Name' => 'super_admin_api',
-						'User type' => 'Super admin'
+						'User type' => 'Super admin',
+						'id:api-access' => true
 					],
 					'api_list' => [
-						'action.create', 'action.delete', 'action.get', 'action.update', 'alert.get', 'auditlog.get',
-						'authentication.get', 'authentication.update', 'autoregistration.get', 'autoregistration.update',
-						'configuration.export', 'configuration.import', 'configuration.importcompare', 'correlation.create',
-						'correlation.delete', 'correlation.get', 'correlation.update', 'dashboard.create', 'dashboard.delete',
-						'dashboard.get', 'dashboard.update', 'dcheck.get', 'dhost.get', 'discoveryrule.copy',
-						'discoveryrule.create', 'discoveryrule.delete', 'discoveryrule.get', 'discoveryrule.update',
+						'action.create', 'action.delete', 'action.get', 'action.update', 'alert.get', 'apmlog.get',
+						'apmmetric.get', 'apmspan.get', 'apmtrace.get', 'auditlog.get', 'authentication.get',
+						'authentication.update', 'autoregistration.get', 'autoregistration.update', 'ceprule.create',
+						'ceprule.delete', 'ceprule.get', 'ceprule.resettimewindows', 'ceprule.update', 'configuration.export',
+						'configuration.import', 'configuration.importcompare', 'connector.create', 'connector.delete',
+						'connector.get', 'connector.update', 'correlation.create', 'correlation.delete', 'correlation.get',
+						'correlation.update', 'dashboard.create', 'dashboard.delete', 'dashboard.get', 'dashboard.update',
+						'dcheck.get', 'device.get', 'device.init', 'device.offboard', 'dhost.get', 'discoveryrule.create',
+						'discoveryrule.delete', 'discoveryrule.get','discoveryrule.update', 'discoveryruleprototype.create',
+						'discoveryruleprototype.delete', 'discoveryruleprototype.get', 'discoveryruleprototype.update',
 						'drule.create', 'drule.delete', 'drule.get', 'drule.update', 'dservice.get', 'event.acknowledge',
 						'event.get', 'graph.create', 'graph.delete', 'graph.get', 'graph.update', 'graphitem.get',
 						'graphprototype.create', 'graphprototype.delete', 'graphprototype.get', 'graphprototype.update',
-						'hanode.get', 'history.clear', 'history.get', 'host.create', 'host.delete', 'host.get', 'host.massadd',
-						'host.massremove', 'host.massupdate', 'host.update', 'hostgroup.create', 'hostgroup.delete',
-						'hostgroup.get', 'hostgroup.massadd', 'hostgroup.massremove', 'hostgroup.massupdate', 'hostgroup.update',
-						'hostinterface.create', 'hostinterface.delete', 'hostinterface.get', 'hostinterface.massadd',
-						'hostinterface.massremove', 'hostinterface.replacehostinterfaces', 'hostinterface.update',
-						'hostprototype.create', 'hostprototype.delete', 'hostprototype.get', 'hostprototype.update',
+						'hanode.get', 'history.clear', 'history.get', 'history.push', 'host.create', 'host.delete', 'host.get',
+						'host.massadd', 'host.massremove', 'host.update', 'hostdashboard.get', 'hostgroup.create',
+						'hostgroup.delete', 'hostgroup.get', 'hostgroup.massadd', 'hostgroup.massremove',
+						'hostgroup.propagate', 'hostgroup.update', 'hostinterface.get', 'hostprototype.create',
+						'hostprototype.delete', 'hostprototype.get', 'hostprototype.update',
 						'housekeeping.get', 'housekeeping.update', 'httptest.create', 'httptest.delete', 'httptest.get',
 						'httptest.update', 'iconmap.create', 'iconmap.delete', 'iconmap.get', 'iconmap.update',
 						'image.create', 'image.delete', 'image.get', 'image.update', 'item.create', 'item.delete',
 						'item.get', 'item.update', 'itemprototype.create', 'itemprototype.delete', 'itemprototype.get',
 						'itemprototype.update', 'maintenance.create', 'maintenance.delete', 'maintenance.get',
 						'maintenance.update', 'map.create', 'map.delete', 'map.get', 'map.update', 'mediatype.create',
-						'mediatype.delete', 'mediatype.get', 'mediatype.update', 'module.create', 'module.delete', 'module.get',
-						'module.update', 'problem.get', 'proxy.create', 'proxy.delete', 'proxy.get', 'proxy.update', 'regexp.create',
-						'regexp.delete', 'regexp.get', 'regexp.update', 'report.create', 'report.delete', 'report.get',
-						'report.update', 'role.create', 'role.delete', 'role.get', 'role.update', 'script.create',
-						'script.delete', 'script.execute', 'script.get', 'script.getscriptsbyhosts', 'script.update',
-						'service.create', 'service.delete', 'service.get', 'service.update', 'settings.get', 'settings.update',
-						'sla.create', 'sla.delete', 'sla.get', 'sla.getsli', 'sla.update', 'task.create', 'task.get',
-						'template.create', 'template.delete', 'template.get', 'template.massadd', 'template.massremove',
-						'template.massupdate', 'template.update', 'templatedashboard.create', 'templatedashboard.delete',
-						'templatedashboard.get', 'templatedashboard.update', 'token.create', 'token.delete', 'token.generate',
-						'token.get', 'token.update', 'trend.get', 'trigger.adddependencies', 'trigger.create', 'trigger.delete',
-						'trigger.deletedependencies', 'trigger.get', 'trigger.update', 'triggerprototype.create',
+						'mediatype.delete', 'mediatype.get', 'mediatype.update', 'mfa.create', 'mfa.delete', 'mfa.get',
+						'mfa.update', 'module.create', 'module.delete', 'module.get', 'module.update', 'problem.get',
+						'proxy.create', 'proxy.delete', 'proxy.get', 'proxy.update', 'proxygroup.create',
+						'proxygroup.delete', 'proxygroup.get', 'proxygroup.update', 'regexp.create', 'regexp.delete',
+						'regexp.get', 'regexp.update', 'report.create', 'report.delete', 'report.get', 'report.update',
+						'role.create', 'role.delete', 'role.get', 'role.update', 'script.create', 'script.delete',
+						'script.execute', 'script.get', 'script.getscriptsbyevents', 'script.getscriptsbyhosts',
+						'script.update', 'service.create', 'service.delete', 'service.get', 'service.update',
+						'settings.get', 'settings.update', 'sla.create', 'sla.delete', 'sla.get', 'sla.getsli',
+						'sla.update', 'task.create', 'task.get', 'template.create', 'template.delete', 'template.get',
+						'template.massadd', 'template.massremove','template.update', 'templatedashboard.create',
+						'templatedashboard.delete', 'templatedashboard.get', 'templatedashboard.update',
+						'templategroup.create', 'templategroup.delete', 'templategroup.get', 'templategroup.massadd',
+						'templategroup.massremove', 'templategroup.propagate', 'templategroup.update', 'token.create',
+						'token.delete', 'token.generate', 'token.get', 'token.update', 'trend.get', 'trigger.create',
+						'trigger.delete', 'trigger.get', 'trigger.update', 'triggerprototype.create',
 						'triggerprototype.delete', 'triggerprototype.get', 'triggerprototype.update', 'user.create',
-						'user.delete', 'user.get', 'user.logout', 'user.unblock', 'user.update', 'userdirectory.create',
-						'userdirectory.delete', 'userdirectory.get', 'userdirectory.test', 'userdirectory.update', 'usergroup.create',
-						'usergroup.delete', 'usergroup.get', 'usergroup.update', 'usermacro.create', 'usermacro.createglobal',
-						'usermacro.delete', 'usermacro.deleteglobal', 'usermacro.get', 'usermacro.update', 'usermacro.updateglobal',
-						'valuemap.create', 'valuemap.delete', 'valuemap.get', 'valuemap.update'
+						'user.delete', 'user.get', 'user.logout', 'user.provision', 'user.resettotp', 'user.unblock',
+						'user.update', 'userdirectory.create', 'userdirectory.delete', 'userdirectory.get',
+						'userdirectory.test', 'userdirectory.update', 'usergroup.create', 'usergroup.delete',
+						'usergroup.get', 'usergroup.update', 'usermacro.create', 'usermacro.createglobal',
+						'usermacro.delete', 'usermacro.deleteglobal', 'usermacro.get', 'usermacro.update',
+						'usermacro.updateglobal', 'valuemap.create', 'valuemap.delete', 'valuemap.get', 'valuemap.update'
 					]
 				]
 			]
@@ -1011,8 +1080,16 @@ class testFormUserRoles extends CWebTest {
 		$overlay->close();
 
 		$form->submit();
-		$sql_api = 'SELECT * FROM role_rule WHERE type=1 and roleid in (SELECT roleid FROM role WHERE name='
-				.zbx_dbstr($data['fields']['Name']).')'.' ORDER BY value_str ASC';
+		$this->assertMessage(TEST_GOOD, 'User role created');
+		$sql_api =
+			'SELECT value_str'.
+			' FROM role_rule'.
+			' WHERE type=1'.
+				' AND name LIKE '.zbx_dbstr('api.method%').
+				' AND roleid in ('.
+					'SELECT roleid FROM role WHERE name='.zbx_dbstr($data['fields']['Name']).
+				')'.
+			' ORDER BY value_str ASC';
 		$role_rules = CDBHelper::getColumn($sql_api, 'value_str');
 		sort($role_rules);
 		$this->assertEquals($data['api_list'], $role_rules);
@@ -1029,54 +1106,60 @@ class testFormUserRoles extends CWebTest {
 
 	public static function getUpdateData() {
 		return [
-			// Empty name.
+			// #0 Empty name.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => ''
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'Incorrect value for field "name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Empty space.
+			// #1 Empty space.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => ' '
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'Invalid parameter "/1/name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Existing name.
+			// #2 Existing name.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
 						'Name' => 'User role '
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'User role "User role" already exists.'
+					'inline_errors' => [
+						'Name' => 'This object already exists.'
+					]
 				]
 			],
-			// All UI elements disabled.
+			// #3 All UI elements disabled.
 			[
 				[
 					'expected' => TEST_BAD,
 					'fields' => [
+						'Dashboards' => false,
 						'Monitoring' => [],
+						'APM' => [],
 						'Services' => [],
 						'Inventory' => [],
 						'Reports' => []
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'At least one UI element must be enabled for user role "role_for_update".'
+					'inline_errors' => [
+						'xpath://div[@data-field-name="ui"]' => 'At least one UI element must be checked.'
+					]
 				]
 			],
-			// Read-write service tag name not specified.
+			// #4 Read-write service tag name not specified.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1088,12 +1171,12 @@ class testFormUserRoles extends CWebTest {
 							'service_write_tag_value' => 'value'
 						]
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'Cannot have non-empty tag value while having empty tag in rule "services.write.tag"'
-							.' for user role "role_for_update".'
+					'inline_errors' => [
+						'id:service-write-tag-tag' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Read-only service tag name not specified.
+			// #5 Read-only service tag name not specified.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1105,12 +1188,12 @@ class testFormUserRoles extends CWebTest {
 							'service_read_tag_value' => 'value'
 						]
 					],
-					'message_header' => 'Cannot update user role',
-					'message_details' => 'Cannot have non-empty tag value while having empty tag in rule "services.read.tag"'
-							.' for user role "role_for_update".'
+					'inline_errors' => [
+						'id:service-read-tag-tag' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Change name.
+			// #6 Change name.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1121,7 +1204,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Change type to admin.
+			// #7 Change type to admin.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1131,7 +1214,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Change type to super admin.
+			// #8 Change type to super admin.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1141,38 +1224,40 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Change type to user.
+			// #9 Change type to user.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'to_user' => true,
 					'fields' => [
-						'User type' => 'User'
+						'User type' => 'User',
+						'id:api-access' => true
 					],
 					'message_header' => 'User role updated'
 				]
 			],
-			// Remove all API methods.
+			// #10 Remove all API methods.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [],
-					'api_methods' => [],
+					'api_methods' => '',
 					'message_header' => 'User role updated'
 				]
 			],
-			// Allow API list.
+			// #11 Allow API list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
+						'id:api-access' => true,
 						'API methods' => 'Allow list'
 					],
 					'api_methods' => ['*.create'],
 					'message_header' => 'User role updated'
 				]
 			],
-			// Deny API list.
+			// #12 Deny API list.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1182,7 +1267,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to actions removed.
+			// #13 Access to actions removed.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1201,7 +1286,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to services set to None.
+			// #14 Access to services set to None.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1212,7 +1297,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to services set to All in both cases.
+			// #15 Access to services set to All in both cases.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1223,7 +1308,7 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to services set to Service list but the list is empty.
+			// #16 Access to services set to Service list but the list is empty.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1235,36 +1320,40 @@ class testFormUserRoles extends CWebTest {
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to services set to Service list.
+			// #17 Access to services set to Service list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
-						'Read-only access to services' => 'Service list'
+						'Read-only access to services' => 'Service list',
+						// added element 'API methods' with default value for page scroll
+						'API methods' => 'Deny list'
 					],
 					'read_services' => [
-						'xpath:(//div[@class="multiselect-control"])[2]' => ['Service_1', 'Service_2']
+						'xpath:(//div[@class="multiselect-control"])[2]' => ['Update service', 'Service for delete 2']
 					],
 					'message_header' => 'User role updated'
 				]
 			],
-			// Access to services set to Service list.
+			// #18 Access to services set to Service list.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'fields' => [
 						'Read-write access to services' => 'Service list',
-						'Read-only access to services' => 'Service list'
+						'Read-only access to services' => 'Service list',
+						// added element 'API methods' with default value for page scroll
+						'API methods' => 'Deny list'
 					],
 					'write_services' => [
-						'xpath:(//div[@class="multiselect-control"])[1]' => ['Service_1', 'Service_2'],
+						'xpath:(//div[@class="multiselect-control"])[1]' => ['Update service', 'Service for delete 2'],
 						'Read-write access to services with tag' => [
 							'service-write-tag-tag' => 'tag-write',
 							'service_write_tag_value' => 'value-write'
 						]
 					],
 					'read_services' => [
-						'xpath:(//div[@class="multiselect-control"])[2]' => 'Service_1',
+						'xpath:(//div[@class="multiselect-control"])[2]' => 'Update service',
 						'Read-only access to services with tag' => [
 							'service-read-tag-tag' => 'tag-read',
 							'service_read_tag_value' => 'value-read'
@@ -1362,22 +1451,33 @@ class testFormUserRoles extends CWebTest {
 	 */
 	public function testFormUserRoles_Modules() {
 		$this->page->login();
+
 		foreach ([true, false] as $enable_modules) {
 			$modules = ['4th Module', '5th Module'];
 			$this->page->open('zabbix.php?action=userrole.edit&roleid=2')->waitUntilReady();
 			$form = $this->query('id:userrole-form')->waitUntilPresent()->asForm()->one();
+
 			if ($enable_modules === true) {
-				$this->assertTrue($form->query('xpath://label[text()="No enabled modules found."]')->one()->isDisplayed());
+				foreach ($modules as $module) {
+					$this->assertFalse($form->query("xpath:.//label[text()=".CXPathHelper::escapeQuotes($module)."]")
+							->one(false)->isValid()
+					);
+				}
+
 				$this->page->open('zabbix.php?action=module.list')->waitUntilReady();
 				$this->query('button:Scan directory')->one()->click();
+				$this->page->waitUntilReady();
+				CMessageElement::find()->one()->close();
 				$table = $this->query('class:list-table')->asTable()->one();
 				$table->findRows('Name', $modules)->select();
 				$this->query('button:Enable')->one()->click();
 				$this->page->acceptAlert();
 				$this->page->waitUntilReady();
+
+				$this->assertMessage(TEST_GOOD, 'Modules enabled');
+				CMessageElement::find()->one()->close();
 			}
 			else {
-				$this->assertFalse($form->query('xpath://label[text()="No enabled modules found."]')->one($enable_modules)->isDisplayed());
 				foreach ($modules as $module) {
 					$form->getField($module)->isChecked();
 				}
@@ -1391,37 +1491,19 @@ class testFormUserRoles extends CWebTest {
 	public function testFormUserRoles_ServicesLayout() {
 		$services_table = [
 			[
-				'Name' => 'Service with tags for updating',
-				'Tags' => ['action: update', 'tag without value', 'test: update'],
-				'Problem tags' => ['problem action: problem update', 'problem tag without value', 'problem test: problem update']
-			],
-			[
-				'Name' => 'Service with tags for cloning',
-				'Tags' => ['a: :a', 'action: clone', 'common tag on host and element: common value'],
-				'Problem tags' => [
-						'problem a: :problem a',
-						'problem action: problem clone',
-						'problem common tag on host and element: problem common value'
-				]
-			],
-			[
-				'Name' => 'Service for removing tags',
-				'Tags' => ['action: remove', 'tag', 'tag: remove'],
-				'Problem tags' => [
-						'problem remove: problem remove',
-						'problem tag',
-						'problem tag: problem remove'
-				]
-			],
-			[
-				'Name' => 'Service_1',
+				'Name' => 'Service for delete by checkbox',
 				'Tags' => '',
 				'Problem tags' => ''
 			],
 			[
-				'Name' => 'Service_2',
-				'Tags' => ['Service_tag1: value1s', 'Service_tag2: value2s', 'Service_tag3: value3s', 'Service_tag4: value4s'],
-				'Problem tags' => ['tag1: value1', 'tag2: value2', 'tag3: value3', 'tag4: value4']
+				'Name' => 'Service for delete',
+				'Tags' => ['remove_tag_2: remove_value_2'],
+				'Problem tags' => ''
+			],
+			[
+				'Name' => 'Service for delete 2',
+				'Tags' => ["3rd_tag: 3rd_value\n", "4th_tag: 4th_value\n", 'remove_tag_1: remove_value_1', 'remove_tag_2: remove_value_2'],
+				'Problem tags' => ["tag1: value1\n", "tag2: value2\n", 'tag3: value3', 'tag4: value4']
 			]
 		];
 
@@ -1441,7 +1523,8 @@ class testFormUserRoles extends CWebTest {
 			// Check filter form.
 			$filter_form = $dialog->query('name:services_filter_form')->one();
 			$this->assertEquals('Name', $filter_form->query('xpath:.//label')->one()->getText());
-			$this->assertEquals(255, $filter_form->query('name:filter_name')->one()->getAttribute('maxlength'));
+			$filter_input = $filter_form->query('name:filter_name')->one();
+			$this->assertEquals(255, $filter_input->getAttribute('maxlength'));
 			$this->assertEquals(4, $dialog->query('button', ['Filter', 'Reset', 'Select', 'Cancel'])->all()
 					->filter(new CElementFilter(CElementFilter::CLICKABLE))->count());
 
@@ -1454,14 +1537,18 @@ class testFormUserRoles extends CWebTest {
 					if (is_array($tags)) {
 						if (count($tags) > 3) {
 							$table->findRow('Name', $service['Name'])->getColumn($tag_type)
-									->query('class:icon-wizard-action')->one()->click();
+									->query('class:zi-more')->one()->click();
 							$popup = $this->query('xpath://div[@data-hintboxid]')->one()->waitUntilReady();
-							foreach ($tags as $tag) {
-								$this->assertTrue($popup->query("xpath:.//div[text()=".CXPathHelper::escapeQuotes($tag)."]")
+
+							// Create a temporary array without newlines for checking if tag exists.
+							$expected_tags = str_replace("\n", '', $tags);
+
+							foreach ($expected_tags as $tag) {
+								$this->assertTrue($popup->query("xpath:.//span[text()=".CXPathHelper::escapeQuotes($tag)."]")
 										->one(false)->isValid()
 								);
 							}
-							$popup->query('class:overlay-close-btn')->one()->click();
+							$popup->query('class:btn-overlay-close')->one()->click();
 
 							// Leave only 3 tags in array as it is the maximal number of tags displayed in table per row.
 							array_splice($tags, 3);
@@ -1473,16 +1560,22 @@ class testFormUserRoles extends CWebTest {
 				unset($tags);
 			}
 
+			// Filter out all unwanted services before checking table content.
+			$filter_input->fill('Service for delete');
+			$filter_button = $dialog->query('button:Filter')->one();
+			$filter_button->click();
+			$dialog->waitUntilReady();
+
 			// Check the content of the services list with modified expected value in tags column.
 			$this->assertTableData($services_table);
 
 			// Check filtering of services by name.
 			$searches = [
-				'ice_' => ['Service_1', 'Service_2'],
-				'1' => ['Service_1'],
-				'Service_123' => null
+				'child 1' => ['Child 1', 'Clone child 1'],
+				' 2 ' => ['Parent for 2 levels of child services'],
+				'empty result' => null
 			];
-			$filter_button = $filter_form->query('button:Filter')->one();
+
 			foreach ($searches as $string => $result) {
 				$filter_form->query('name:filter_name')->one()->fill($string);
 				$filter_button->click();
@@ -1490,7 +1583,7 @@ class testFormUserRoles extends CWebTest {
 
 				/**
 				 * After the filter is submitted, check that the expected services are returned in the list,
-				 * or that 'No data found.' message is returned.
+				 * or that 'No data found' message is returned.
 				 */
 				if ($result !== null) {
 					$this->assertTableDataColumn($result);
@@ -1503,20 +1596,26 @@ class testFormUserRoles extends CWebTest {
 			// Select one of the Services and make sure its not displayed in the list anymore.
 			$filter_form->query('button:Reset')->one()->click();
 			$dialog->invalidate();
-			$dialog->query('link:Service_1')->waitUntilClickable()->one()->click();
+			$dialog->query('link:Service for delete by checkbox')->waitUntilClickable()->one()->click();
 			$dialog->ensureNotPresent();
 
 			$multiselect->edit();
 			$dialog->invalidate();
-			$this->assertTableDataColumn(['Service with tags for updating', 'Service with tags for cloning',
-					'Service for removing tags', 'Service_2']
-			);
+
+			// Filter out all unwanted services before checking table content.
+			$dialog->query('name:filter_name')->one()->fill('Service for delete');
+			$dialog->query('button:Filter')->one()->click();
+			$dialog->waitUntilReady();
+
+			$this->assertTableDataColumn(['Service for delete', 'Service for delete 2']);
 			$dialog->close();
 
 			// Check the layout of tag related fields in Service section of user role config form.
 			$tag_field = $form->getField($field.' access to services with tag');
 			foreach (['tag', 'value'] as $input_type) {
-				$input = $tag_field->query('xpath:.//input[contains(@name, '.CXPathHelper::escapeQuotes('tag_'.$input_type).')]')->one();
+				$input = $tag_field->query('xpath:.//z-textarea-flexible[contains(@name, '.
+						CXPathHelper::escapeQuotes('tag_'.$input_type).')]'
+				)->one();
 				$this->assertEquals($input_type, $input->getAttribute('placeholder'));
 				$this->assertEquals(255, $input->getAttribute('maxlength'));
 			}
@@ -1552,8 +1651,7 @@ class testFormUserRoles extends CWebTest {
 		$form->submit();
 
 		if ($data['expected'] === TEST_BAD) {
-			$this->assertMessage(TEST_BAD, $data['message_header'], $data['message_details']);
-
+			$this->assertInlineError($form, $data['inline_errors']);
 			// TODO: remove if ($action === 'create'), after ZBX-19246 fix
 			if ($action === 'create') {
 				$this->assertEquals($hash_before, CDBHelper::getHash(self::ROLE_SQL));
@@ -1592,7 +1690,9 @@ class testFormUserRoles extends CWebTest {
 
 			if (array_key_exists('api_methods', $data)) {
 				$api_methods = $this->query('xpath:(//div[@class="multiselect-control"])[3]')->asMultiselect()->one()->getValue();
-				rsort($api_methods);
+				if (is_array($api_methods)) {
+					rsort($api_methods);
+				}
 				$this->assertEquals($data['api_methods'], $api_methods);
 			}
 		}

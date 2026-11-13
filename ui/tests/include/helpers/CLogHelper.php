@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 /**
@@ -50,16 +45,33 @@ class CLogHelper {
 	}
 
 	/**
+	 * Set log offset to the end of file.
+	 *
+	 * @param string $path    log file path
+	 */
+	public static function skipLog($path) {
+		if (($file = fopen($path, 'rb')) === false) {
+			throw new Exception('Failed to open log "'.$path.'".');
+		}
+
+		fseek($file, 0, SEEK_END);
+		self::$log_offsets[$path] = ftell($file);
+		fclose($file);
+	}
+
+	/**
 	 * Read content of the log.
 	 *
-	 * @param string  $path          log file path
-	 * @param boolean $incremental   flag to be used to enable incremental read
+	 * @param string  $path         log file path
+	 * @param boolean $incremental  flag to be used to enable incremental read
+	 * @param boolean $truncate     truncate lines from the middle of the returned string if its length exceeds 768
+	 *                              lines
 	 *
 	 * @return string
 	 *
 	 * @throws Exception    on cases when log is not available
 	 */
-	public static function readLog($path, $incremental = false) {
+	public static function readLog($path, $incremental = false, $truncate = false) {
 		$offset = ($incremental && array_key_exists($path, self::$log_offsets))
 				? self::$log_offsets[$path] : 0;
 
@@ -74,6 +86,36 @@ class CLogHelper {
 			}
 
 			self::$log_offsets[$path] = $offset + $pos;
+		}
+
+		if ($truncate) {
+			$head = [];
+			$tail = [];
+			$head_len = 128; // output the first N lines
+			$tail_len = 640; // output the last N lines
+			$truncated_lines = 0;
+
+			for ($n = 0, $lpos = 0, $rpos = strpos($content, "\n", $lpos); $n < $head_len && $rpos !== false;
+					$n++, $lpos = $rpos, $rpos = strpos($content, "\n", $lpos + 1)) {
+				$head[] = substr($content, $lpos + 1, $rpos - $lpos);
+			}
+
+
+			for ($n = 0, $lpos = $rpos, $rpos = strpos($content, "\n", $lpos); $rpos !== false;
+					$lpos = $rpos, $rpos = strpos($content, "\n", $lpos + 1)) {
+				$tail[] = substr($content, $lpos + 1, $rpos - $lpos);
+
+				if (count($tail) > $tail_len) {
+					$truncated_lines++;
+					array_shift($tail);
+				}
+			}
+
+			if ($truncated_lines != 0) {
+				$head[] = '...'."\n".'truncated '.$truncated_lines.' lines'."\n".'...'."\n";
+			}
+
+			$content = implode("", array_merge($head, $tail));
 		}
 
 		return $content;
@@ -149,11 +191,14 @@ class CLogHelper {
 		// "2022/01/12 23:23:19.550415 ..."
 		$log2_pattern = '[0-9]+\/[0-9]+\/[0-9]+ [0-9]+:[0-9]+:[0-9]+\.[0-9]+';
 
+		// "2026-09-17 10:10:39.175 ..." - java gateway pattern
+		$log3_pattern = '[0-9]+-[0-9]+-[0-9]+ [0-9]+:[0-9]+:[0-9]+\.[0-9]+';
+
 		if ($match_regex === false) {
-			$pattern = '/^('.$log_pattern.'|'.$log2_pattern.') .*'.preg_quote($line, '/').'.*$/m';
+			$pattern = '/^('.$log_pattern.'|'.$log2_pattern.'|'.$log3_pattern.') .*'.preg_quote($line, '/').'.*$/m';
 		}
 		else {
-			$pattern = '/^('.$log_pattern.'|'.$log2_pattern.') .*'.$line.'.*$/m';
+			$pattern = '/^('.$log_pattern.'|'.$log2_pattern.'|'.$log3_pattern.') .*'.$line.'.*$/m';
 		}
 
 		if (preg_match($pattern, $content, $matches, PREG_OFFSET_CAPTURE) === 1) {

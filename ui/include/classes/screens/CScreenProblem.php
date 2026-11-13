@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -62,13 +57,11 @@ class CScreenProblem extends CScreenBase {
 	 * @param array       $options['tags']            (optional)
 	 * @param int         $options['limit']
 	 *
-	 * @static
-	 *
-	 * @return array
+	 * @return array|string
 	 */
-	private static function getDataEvents(array $options) {
+	private static function getDataEvents(array $options): array|string {
 		return API::Event()->get([
-			'output' => ['eventid', 'objectid', 'clock', 'ns', 'name', 'severity'],
+			'output' => ['eventid', 'objectid', 'clock', 'ns', 'name', 'severity', 'cause_eventid', 'cep_ruleid'],
 			'source' => EVENT_SOURCE_TRIGGERS,
 			'object' => EVENT_OBJECT_TRIGGER,
 			'value' => TRIGGER_VALUE_TRUE,
@@ -93,13 +86,13 @@ class CScreenProblem extends CScreenBase {
 	 * @param array       $options['tags']            (optional)
 	 * @param int         $options['limit']
 	 *
-	 * @static
-	 *
-	 * @return array
+	 * @return array|string
 	 */
-	private static function getDataProblems(array $options) {
+	private static function getDataProblems(array $options): array|string {
 		return API::Problem()->get([
-			'output' => ['eventid', 'objectid', 'clock', 'ns', 'name', 'severity'],
+			'output' => [
+				'eventid', 'objectid', 'clock', 'ns', 'name', 'severity', 'cause_eventid', 'cep_ruleid', 'flags'
+			],
 			'source' => EVENT_SOURCE_TRIGGERS,
 			'object' => EVENT_OBJECT_TRIGGER,
 			'sortfield' => ['eventid'],
@@ -116,37 +109,42 @@ class CScreenProblem extends CScreenBase {
 	 * ]
 	 *
 	 * @param array  $filter
-	 * @param array  $filter['groupids']              (optional)
-	 * @param array  $filter['exclude_groupids']      (optional)
-	 * @param array  $filter['hostids']               (optional)
-	 * @param array  $filter['triggerids']            (optional)
-	 * @param array  $filter['inventory']             (optional)
-	 * @param string $filter['inventory'][]['field']
-	 * @param string $filter['inventory'][]['value']
-	 * @param string $filter['name']                  (optional)
-	 * @param int    $filter['show']                  TRIGGERS_OPTION_*
-	 * @param int    $filter['from']                  (optional) usable together with 'to' and only for
+	 *        array  $filter['groupids']              (optional)
+	 *        array  $filter['exclude_groupids']      (optional)
+	 *        array  $filter['hostids']               (optional)
+	 *        array  $filter['triggerids']            (optional)
+	 *        array  $filter['inventory']             (optional)
+	 *        string $filter['inventory'][]['field']
+	 *        string $filter['inventory'][]['value']
+	 *        string $filter['name']                  (optional)
+	 *        int    $filter['show']                  TRIGGERS_OPTION_*
+	 *        int    $filter['from']                  (optional) usable together with 'to' and only for
 	 *                                                           TRIGGERS_OPTION_ALL, timestamp.
-	 * @param int    $filter['to']                    (optional) usable together with 'from' and only for
+	 *        int    $filter['to']                    (optional) usable together with 'from' and only for
 	 *                                                           TRIGGERS_OPTION_ALL, timestamp.
-	 * @param int    $filter['age_state']             (optional) usable together with 'age' and only for
+	 *        int    $filter['age_state']             (optional) usable together with 'age' and only for
 	 *                                                           TRIGGERS_OPTION_(RECENT|IN)_PROBLEM
-	 * @param int    $filter['age']                   (optional) usable together with 'age_state' and only for
+	 *        int    $filter['age']                   (optional) usable together with 'age_state' and only for
 	 *                                                           TRIGGERS_OPTION_(RECENT|IN)_PROBLEM
-	 * @param array  $filter['severities']            (optional)
-	 * @param int    $filter['unacknowledged']        (optional)
-	 * @param array  $filter['tags']                  (optional)
-	 * @param string $filter['tags'][]['tag']
-	 * @param string $filter['tags'][]['value']
-	 * @param int    $filter['show_suppressed']       (optional)
-	 * @param int    $filter['show_opdata']           (optional)
+	 *        array  $filter['severities']            (optional)
+	 *        int    $filter['acknowledgement_status'] (optional)
+	 *        array  $filter['tags']                  (optional)
+	 *        string $filter['tags'][]['tag']
+	 *        string $filter['tags'][]['value']
+	 *        int    $filter['show_symptoms']         (optional)
+	 *        int    $filter['show_suppressed']       (optional)
+	 *        array  $filter['cause_eventid']         (optional)
+	 * @param array  $column_options
+	 *        int    $column_options ['show_opdata']  (optional)
+	 *        int    $column_options ['details']      (optional)
+	 * @param int    $limit
 	 * @param bool   $resolve_comments
-	 *
-	 * @static
 	 *
 	 * @return array
 	 */
-	public static function getData(array $filter, bool $resolve_comments = false) {
+	public static function getData(array $filter, array $column_options, int $limit,
+			bool $resolve_comments = false): array {
+
 		$filter_groupids = array_key_exists('groupids', $filter) && $filter['groupids']
 			? getSubGroups($filter['groupids'])
 			: null;
@@ -154,7 +152,8 @@ class CScreenProblem extends CScreenBase {
 		$filter_triggerids = array_key_exists('triggerids', $filter) && $filter['triggerids']
 			? $filter['triggerids']
 			: null;
-		$show_opdata = array_key_exists('show_opdata', $filter) && $filter['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE;
+		$show_opdata = array_key_exists('show_opdata', $column_options)
+			&& $column_options['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE;
 
 		if (array_key_exists('exclude_groupids', $filter) && $filter['exclude_groupids']) {
 			$exclude_groupids = getSubGroups($filter['exclude_groupids']);
@@ -164,7 +163,7 @@ class CScreenProblem extends CScreenBase {
 				if ($filter_groupids === null) {
 					$filter_groupids = array_keys(API::HostGroup()->get([
 						'output' => [],
-						'real_hosts' => true,
+						'with_hosts' => true,
 						'preservekeys' => true
 					]));
 				}
@@ -219,7 +218,8 @@ class CScreenProblem extends CScreenBase {
 				'objectids' => $filter_triggerids,
 				'eventid_till' => $eventid_till,
 				'suppressed' => false,
-				'limit' => CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT) + 1
+				'symptom' => false,
+				'limit' => $limit + 1
 			];
 
 			if (array_key_exists('name', $filter) && $filter['name'] !== '') {
@@ -239,16 +239,8 @@ class CScreenProblem extends CScreenBase {
 					$options['time_from'] = time() - $filter['age'] * SEC_PER_DAY + 1;
 				}
 			}
-			if (array_key_exists('severities', $filter)) {
-				$filter_severities = implode(',', $filter['severities']);
-				$all_severities = implode(',', range(TRIGGER_SEVERITY_NOT_CLASSIFIED, TRIGGER_SEVERITY_COUNT - 1));
-
-				if ($filter_severities !== '' && $filter_severities !== $all_severities) {
-					$options['severities'] = $filter['severities'];
-				}
-			}
-			if (array_key_exists('unacknowledged', $filter) && $filter['unacknowledged']) {
-				$options['acknowledged'] = false;
+			if (array_key_exists('severities', $filter) && $filter['severities']) {
+				$options['severities'] = $filter['severities'];
 			}
 			if (array_key_exists('evaltype', $filter)) {
 				$options['evaltype'] = $filter['evaltype'];
@@ -258,22 +250,45 @@ class CScreenProblem extends CScreenBase {
 			}
 			if (array_key_exists('show_suppressed', $filter) && $filter['show_suppressed']) {
 				unset($options['suppressed']);
-				$options['selectSuppressionData'] = ['maintenanceid', 'suppress_until'];
 			}
 
-			$problems = ($filter['show'] == TRIGGERS_OPTION_ALL)
+			// Show both cause and symptom problems or only cause problems depending on filter setting in view/widget.
+			if (array_key_exists('show_symptoms', $filter) && $filter['show_symptoms']) {
+				unset($options['symptom']);
+			}
+
+			if (array_key_exists('cause_eventid', $filter) && $filter['cause_eventid']) {
+				$options['filter']['cause_eventid'] = $filter['cause_eventid'];
+			}
+
+			if (array_key_exists('acknowledgement_status', $filter)) {
+				switch ($filter['acknowledgement_status']) {
+					case ZBX_ACK_STATUS_UNACK:
+						$options['acknowledged'] = false;
+						break;
+
+					case ZBX_ACK_STATUS_ACK:
+						$options['acknowledged'] = true;
+
+						if (array_key_exists('acknowledged_by_me', $filter) && $filter['acknowledged_by_me'] == 1) {
+							$options += [
+								'action' => ZBX_PROBLEM_UPDATE_ACKNOWLEDGE,
+								'action_userids' => CUser::$userData['userid']
+							];
+						}
+						break;
+				}
+			}
+
+			$problems = $filter['show'] == TRIGGERS_OPTION_ALL
 				? self::getDataEvents($options)
 				: self::getDataProblems($options);
 
-			$end_of_data = (count($problems) < CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT) + 1);
+			$end_of_data = (count($problems) < $limit + 1);
 
 			if ($problems) {
 				$eventid_till = end($problems)['eventid'] - 1;
 				$triggerids = [];
-
-				if (array_key_exists('show_suppressed', $filter) && $filter['show_suppressed']) {
-					self::addMaintenanceNames($problems);
-				}
 
 				foreach ($problems as $problem) {
 					if (!array_key_exists($problem['objectid'], $seen_triggerids)) {
@@ -289,18 +304,19 @@ class CScreenProblem extends CScreenBase {
 						'selectHosts' => ['hostid'],
 						'triggerids' => array_keys($triggerids),
 						'monitored' => true,
-						'skipDependent' => ($filter['show'] == TRIGGERS_OPTION_ALL) ? null : true,
+						'skipDependent' => $filter['show'] == TRIGGERS_OPTION_ALL ? null : true,
 						'preservekeys' => true
 					];
 
-					$details = (array_key_exists('details', $filter) && $filter['details'] == 1);
+					$details = array_key_exists('details', $column_options) && $column_options['details'] == 1;
+					$custom_text = array_key_exists('custom_text', $column_options);
 
 					if ($show_opdata) {
 						$options['output'][] = 'opdata';
 						$options['selectFunctions'] = ['itemid'];
 					}
 
-					if ($resolve_comments || $show_opdata || $details) {
+					if ($resolve_comments || $show_opdata || $details || $custom_text) {
 						$options['output'][] = 'expression';
 					}
 
@@ -324,20 +340,18 @@ class CScreenProblem extends CScreenBase {
 				$data['problems'] += $problems;
 			}
 		}
-		while (count($data['problems']) < CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT) + 1 && !$end_of_data);
+		while (count($data['problems']) < $limit + 1 && !$end_of_data);
 
-		$data['problems'] = array_slice($data['problems'], 0, CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT) + 1,
-			true
-		);
+		$data['problems'] = array_slice($data['problems'], 0, $limit + 1, true);
 
 		if ($show_opdata && $data['triggers']) {
-			$items = API::Item()->get([
-				'output' => ['itemid', 'name', 'value_type', 'units'],
+			$items = CArrayHelper::renameObjectsKeys(API::Item()->get([
+				'output' => ['itemid', 'name_resolved', 'value_type', 'units'],
 				'selectValueMap' => ['mappings'],
 				'triggerids' => array_keys($data['triggers']),
 				'webitems' => true,
 				'preservekeys' => true
-			]);
+			]), ['name_resolved' => 'name']);
 
 			foreach ($data['triggers'] as &$trigger) {
 				foreach ($trigger['functions'] as $function) {
@@ -352,21 +366,28 @@ class CScreenProblem extends CScreenBase {
 	}
 
 	/**
-	 * Adds maintenance names of suppressed problems.
+	 * Adds a user or maintenance names of suppressed problems.
 	 *
 	 * @param array $problems
 	 * @param array $problems[]['suppression_data']
 	 * @param int   $problems[]['suppression_data'][]['maintenanceid']
-	 *
-	 * @static
+	 * @param int   $problems[]['suppression_data'][]['userid']
 	 */
-	public static function addMaintenanceNames(array &$problems) {
+	public static function addSuppressionNames(array &$problems) {
 		$maintenanceids = [];
+		$userids = [];
+		$cepruleids = [];
 
 		foreach ($problems as $problem) {
-			if (array_key_exists('suppression_data', $problem) && $problem['suppression_data']) {
-				foreach ($problem['suppression_data'] as $data) {
+			foreach ($problem['suppression_data'] as $data) {
+				if ($data['maintenanceid'] != 0) {
 					$maintenanceids[] = $data['maintenanceid'];
+				}
+				elseif ($data['userid'] != 0) {
+					$userids[] = $data['userid'];
+				}
+				elseif ($data['cep_ruleid'] != 0) {
+					$cepruleids[] = $data['cep_ruleid'];
 				}
 			}
 		}
@@ -377,41 +398,68 @@ class CScreenProblem extends CScreenBase {
 				'maintenanceids' => $maintenanceids,
 				'preservekeys' => true
 			]);
+		}
 
-			foreach ($problems as &$problem) {
-				if (array_key_exists('suppression_data', $problem) && $problem['suppression_data']) {
-					foreach ($problem['suppression_data'] as &$data) {
-						$data['maintenance_name'] = array_key_exists($data['maintenanceid'], $maintenances)
-							? $maintenances[$data['maintenanceid']]['name']
-							: _('Inaccessible maintenance');
-					}
-					unset($data);
+		if ($userids) {
+			$users = API::User()->get([
+				'output' => ['username', 'name', 'surname'],
+				'userids' => $userids,
+				'preservekeys' => true
+			]);
+		}
+
+		if ($cepruleids) {
+			$ceprules = API::CEPRule()->get([
+				'output' => ['name'],
+				'cep_ruleids' => $cepruleids,
+				'preservekeys' => true
+			]);
+		}
+
+		foreach ($problems as &$problem) {
+			foreach ($problem['suppression_data'] as &$data) {
+				if ($data['maintenanceid'] != 0) {
+					$data['maintenance_name'] = array_key_exists($data['maintenanceid'], $maintenances)
+						? $maintenances[$data['maintenanceid']]['name']
+						: _('Inaccessible maintenance');
+				}
+
+				if ($data['userid'] != 0) {
+					$data['username'] = array_key_exists($data['userid'], $users)
+						? getUserFullname($users[$data['userid']])
+						: _('Inaccessible user');
+				}
+
+				if ($data['cep_ruleid'] != 0) {
+					$data['ceprule_name'] = array_key_exists($data['cep_ruleid'], $ceprules)
+						? $ceprules[$data['cep_ruleid']]['name']
+						: _('Inaccessible complex event processing rule');
 				}
 			}
-			unset($problem);
+			unset($data);
 		}
+		unset($problem);
 	}
 
 	/**
-	 * @param array  $data
-	 * @param array  $data['problems']
-	 * @param array  $data['triggers']
-	 * @param string $sort
-	 * @param string $sortorder
+	 * Sort the problem list.
 	 *
-	 * @static
+	 * @param array  $data              Problems and triggers data.
+	 * @param array  $data['problems']  List of problems.
+	 * @param array  $data['triggers']  List of triggers.
+	 * @param int    $limit             Global search limit.
+	 * @param string $sort              Sort field.
+	 * @param string $sortorder         Sort order.
 	 *
 	 * @return array
 	 */
-	public static function sortData(array $data, $sort, $sortorder) {
+	public static function sortData(array $data, int $limit, $sort, $sortorder): array {
 		if (!$data['problems']) {
 			return $data;
 		}
 
 		$last_problem = end($data['problems']);
-		$data['problems'] = array_slice($data['problems'], 0, CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT),
-			true
-		);
+		$data['problems'] = array_slice($data['problems'], 0, $limit, true);
 
 		switch ($sort) {
 			case 'host':
@@ -465,15 +513,16 @@ class CScreenProblem extends CScreenBase {
 	/**
 	 * @param array $eventids
 	 *
-	 * @static
-	 *
 	 * @return array
 	 */
 	private static function getExDataEvents(array $eventids) {
 		$events = API::Event()->get([
-			'output' => ['eventid', 'r_eventid', 'acknowledged'],
+			'output' => ['eventid', 'r_eventid', 'acknowledged', 'cep_ruleid'],
+			'selectAcknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity',
+				'suppress_until', 'taskid'
+			],
+			'selectSuppressionData' => ['maintenanceid', 'userid', 'suppress_until', 'cep_ruleid'],
 			'selectTags' => ['tag', 'value'],
-			'select_acknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity'],
 			'source' => EVENT_SOURCE_TRIGGERS,
 			'object' => EVENT_OBJECT_TRIGGER,
 			'eventids' => $eventids,
@@ -489,7 +538,7 @@ class CScreenProblem extends CScreenBase {
 
 		$r_events = $r_eventids
 			? API::Event()->get([
-				'output' => ['clock', 'ns', 'correlationid', 'userid'],
+				'output' => ['clock', 'ns', 'correlationid', 'userid', 'cep_ruleid'],
 				'source' => EVENT_SOURCE_TRIGGERS,
 				'object' => EVENT_OBJECT_TRIGGER,
 				'eventids' => array_keys($r_eventids),
@@ -503,12 +552,14 @@ class CScreenProblem extends CScreenBase {
 				$event['r_ns'] = $r_events[$event['r_eventid']]['ns'];
 				$event['correlationid'] = $r_events[$event['r_eventid']]['correlationid'];
 				$event['userid'] = $r_events[$event['r_eventid']]['userid'];
+				$event['cep_ruleid'] = $r_events[$event['r_eventid']]['cep_ruleid'];
 			}
 			else {
 				$event['r_clock'] = 0;
 				$event['r_ns'] = 0;
 				$event['correlationid'] = 0;
 				$event['userid'] = 0;
+				$event['cep_ruleid'] = '0';
 			}
 		}
 		unset($event);
@@ -519,15 +570,18 @@ class CScreenProblem extends CScreenBase {
 	/**
 	 * @param array $eventids
 	 *
-	 * @static
-	 *
 	 * @return array
 	 */
 	private static function getExDataProblems(array $eventids) {
 		return API::Problem()->get([
-			'output' => ['eventid', 'r_eventid', 'r_clock', 'r_ns', 'correlationid', 'userid', 'acknowledged'],
+			'output' => ['eventid', 'r_eventid', 'r_clock', 'r_ns', 'correlationid', 'userid', 'acknowledged',
+				'cep_ruleid'
+			],
+			'selectAcknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity',
+				'suppress_until', 'taskid'
+			],
+			'selectSuppressionData' => ['maintenanceid', 'userid', 'suppress_until', 'cep_ruleid'],
 			'selectTags' => ['tag', 'value'],
-			'selectAcknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity'],
 			'source' => EVENT_SOURCE_TRIGGERS,
 			'object' => EVENT_OBJECT_TRIGGER,
 			'eventids' => $eventids,
@@ -538,19 +592,20 @@ class CScreenProblem extends CScreenBase {
 
 	/**
 	 * @param array $data
-	 * @param array $data['problems']
-	 * @param array $data['triggers']
+	 *        array $data['problems']
+	 *        array $data['triggers']
 	 * @param array $filter
-	 * @param int   $filter['details']
-	 * @param int   $filter['show']
-	 * @param int   $filter['show_opdata']
+	 *        int   $filter['show']
+	 * @param array $column_options
+	 *        int   $column_options['details']
+	 *        int   $column_options['show_opdata']
 	 * @param bool  $resolve_comments
-	 *
-	 * @static
 	 *
 	 * @return array
 	 */
-	public static function makeData(array $data, array $filter, bool $resolve_comments = false) {
+	public static function makeData(array $data, array $filter, array $column_options = [],
+			bool $resolve_comments = false): array {
+
 		// unset unused triggers
 		$triggerids = [];
 
@@ -568,8 +623,11 @@ class CScreenProblem extends CScreenBase {
 			return $data;
 		}
 
+		$show_opdata = array_key_exists('show_opdata', $column_options)
+			&& $column_options['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE;
+
 		// resolve macros
-		if ($filter['details'] == 1 || $filter['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE) {
+		if ((array_key_exists('details', $column_options) && $column_options['details'] == 1) || $show_opdata) {
 			foreach ($data['triggers'] as &$trigger) {
 				$trigger['expression_html'] = $trigger['expression'];
 				$trigger['recovery_expression_html'] = $trigger['recovery_expression'];
@@ -584,40 +642,46 @@ class CScreenProblem extends CScreenBase {
 			]);
 
 			// Sort items.
-			if ($filter['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE) {
+			if ($show_opdata) {
 				$data['triggers'] = CMacrosResolverHelper::sortItemsByExpressionOrder($data['triggers']);
 			}
 		}
 
 		if ($resolve_comments) {
-			foreach ($data['problems'] as &$problem) {
+			$events = [];
+
+			foreach ($data['problems'] as $problem) {
 				$trigger = $data['triggers'][$problem['objectid']];
-				$problem['comments'] = CMacrosResolverHelper::resolveTriggerDescription(
-					[
-						'triggerid' => $problem['objectid'],
-						'expression' => $trigger['expression'],
-						'comments' => $trigger['comments'],
-						'clock' => $problem['clock'],
-						'ns' => $problem['ns']
-					],
-					['events' => true]
-				);
+
+				$events[$problem['eventid']] = [
+					'triggerid' => $problem['objectid'],
+					'expression' => $trigger['expression'],
+					'comments' => $trigger['comments'],
+					'clock' => $problem['clock'],
+					'ns' => $problem['ns']
+				];
 			}
-			unset($problem);
+			$events = CMacrosResolverHelper::resolveEventDescriptions($events);
 
 			foreach ($data['triggers'] as &$trigger) {
 				unset($trigger['comments']);
 			}
 			unset($trigger);
+
+			foreach ($data['problems'] as &$problem) {
+				$problem['comments'] = $events[$problem['eventid']]['comments'];
+			}
+			unset($problem);
 		}
 
 		// get additional data
 		$eventids = array_keys($data['problems']);
 
-		$problems_data = ($filter['show'] == TRIGGERS_OPTION_ALL)
+		$problems_data = $filter['show'] == TRIGGERS_OPTION_ALL
 			? self::getExDataEvents($eventids)
 			: self::getExDataProblems($eventids);
 
+		$cep_ruleids = [];
 		$correlationids = [];
 		$userids = [];
 
@@ -625,6 +689,7 @@ class CScreenProblem extends CScreenBase {
 			if (array_key_exists($eventid, $problems_data)) {
 				$problem_data = $problems_data[$eventid];
 
+				$problem['cep_ruleid'] = $problem_data['cep_ruleid'];
 				$problem['r_eventid'] = $problem_data['r_eventid'];
 				$problem['r_clock'] = $problem_data['r_clock'];
 				$problem['r_ns'] = $problem_data['r_ns'];
@@ -633,7 +698,11 @@ class CScreenProblem extends CScreenBase {
 				$problem['correlationid'] = $problem_data['correlationid'];
 				$problem['userid'] = $problem_data['userid'];
 				$problem['acknowledged'] = $problem_data['acknowledged'];
+				$problem['suppression_data'] = $problem_data['suppression_data'];
 
+				if ($problem['cep_ruleid'] != 0) {
+					$cep_ruleids[$problem['cep_ruleid']] = true;
+				}
 				if ($problem['correlationid'] != 0) {
 					$correlationids[$problem['correlationid']] = true;
 				}
@@ -647,9 +716,19 @@ class CScreenProblem extends CScreenBase {
 		}
 		unset($problem);
 
+		self::addSuppressionNames($data['problems']);
+
 		// Possible performance improvement: one API call may be saved, if r_clock for problem will be used.
 		$actions = getEventsActionsIconsData($data['problems'], $data['triggers']);
 		$data['actions'] = $actions['data'];
+
+		$data['cep_rules'] = $cep_ruleids
+			? API::CepRule()->get([
+				'output' => ['name'],
+				'cep_ruleids' => array_keys($cep_ruleids),
+				'preservekeys' => true
+			])
+			: [];
 
 		$data['correlations'] = $correlationids
 			? API::Correlation()->get([
@@ -675,15 +754,21 @@ class CScreenProblem extends CScreenBase {
 	 * Add timeline breakpoint to a table if needed.
 	 *
 	 * @param CTableInfo $table
-	 * @param int        $last_clock  timestamp of the previous record
-	 * @param int        $clock       timestamp of the current record
-	 * @param string     $sortorder
-	 *
-	 * @static
+	 * @param array  $data                        Various table data.
+	 * @param int    $data['last_clock']          Timestamp of the previous record.
+	 * @param string $data['sortorder']           Order by which column is sorted.
+	 * @param bool   $data['show_three_columns']  True if 3 columns should be displayed.
+	 * @param bool   $data['show_two_columns']    True if 2 columns should be displayed.
+	 * @param array  $problem                     Problem data.
+	 * @param int    $problem['clock']            Timestamp of the current record.
+	 * @param int    $problem['symptom_count']    Problem symptom count.
+	 * @param bool   $nested                      True if this is a nested block.
+	 * @param bool   $has_checkboxes              True if this is block is represented in Problem view with checkboxes.
+	 *                                            It will add additional colspan for timeline breakpoint.
 	 */
-	public static function addTimelineBreakpoint(CTableInfo $table, $last_clock, $clock, $sortorder) {
-		if ($sortorder === ZBX_SORT_UP) {
-			list($clock, $last_clock) = [$last_clock, $clock];
+	public static function addTimelineBreakpoint(CTableInfo $table, $data, $problem, $nested, $has_checkboxes): void {
+		if ($data['sortorder'] === ZBX_SORT_UP) {
+			[$problem['clock'], $data['last_clock']] = [$data['last_clock'], $problem['clock']];
 		}
 
 		$breakpoint = null;
@@ -691,567 +776,133 @@ class CScreenProblem extends CScreenBase {
 		$yesterday = strtotime('yesterday');
 		$this_year = strtotime('first day of January '.date('Y', $today));
 
-		if ($last_clock >= $today) {
-			if ($clock < $today) {
+		if ($data['last_clock'] >= $today) {
+			if ($problem['clock'] < $today) {
 				$breakpoint = _('Today');
 			}
-			elseif (date('H', $last_clock) != date('H', $clock)) {
-				$breakpoint = date('H:00', $last_clock);
+			elseif (date('H', $data['last_clock']) != date('H', $problem['clock'])) {
+				$breakpoint = date('H:00', $data['last_clock']);
 			}
 		}
-		elseif ($last_clock >= $yesterday) {
-			if ($clock < $yesterday) {
+		elseif ($data['last_clock'] >= $yesterday) {
+			if ($problem['clock'] < $yesterday) {
 				$breakpoint = _('Yesterday');
 			}
 		}
-		elseif ($last_clock >= $this_year && $clock < $this_year) {
-			$breakpoint = date('Y', $last_clock);
+		elseif ($data['last_clock'] >= $this_year && $problem['clock'] < $this_year) {
+			$breakpoint = date('Y', $data['last_clock']);
 		}
-		elseif (date('Ym', $last_clock) != date('Ym', $clock)) {
-			$breakpoint = getMonthCaption(date('m', $last_clock));
+		elseif (date('Ym', $data['last_clock']) != date('Ym', $problem['clock'])) {
+			$breakpoint = getMonthCaption(date('m', $data['last_clock']));
 		}
 
 		if ($breakpoint !== null) {
-			$table->addRow((new CRow([
-				(new CCol(new CTag('h4', true, $breakpoint)))->addClass(ZBX_STYLE_TIMELINE_DATE),
+			$colspan = 1;
+
+			if ($data['show_three_columns']) {
+				// Checkbox, symptom count, collapse/expand button and date column.
+				$colspan = 3;
+			}
+			elseif ($data['show_two_columns']) {
+				// Checkbox, symptom icon and date column.
+				$colspan = 2;
+			}
+
+			if ($has_checkboxes) {
+				$colspan++;
+			}
+
+			$breakpoint_col = (new CCol(new CTag('h4', true, $breakpoint)))->addClass(ZBX_STYLE_TIMELINE_DATE);
+
+			if ($colspan > 1) {
+				$breakpoint_col->setColSpan($colspan);
+			}
+
+			$row = (new CRow([
+				$breakpoint_col,
 				(new CCol())
 					->addClass(ZBX_STYLE_TIMELINE_AXIS)
 					->addClass(ZBX_STYLE_TIMELINE_DOT_BIG),
 				(new CCol())->addClass(ZBX_STYLE_TIMELINE_TD),
-				(new CCol())->setColSpan($table->getNumCols() - 3)
-			]))->addClass(ZBX_STYLE_HOVER_NOBG));
+				(new CCol())->setColSpan($table->getNumCols() - $colspan - 2)
+			]))->addClass(ZBX_STYLE_HOVER_NOBG);
+
+			// Hide row and show when expanded for nested symptom problems.
+			if ($nested && $problem['cause_eventid'] != 0) {
+				$row
+					->addClass('hidden')
+					->setAttribute('data-cause-eventid', $problem['cause_eventid']);
+			}
+
+			$table->addRow($row);
 		}
 	}
 
 	/**
-	 * Process screen.
+	 * Add symptom limit row at the end of symptom block.
 	 *
-	 * @return string|CDiv (screen inside container)
+	 * @param CTableInfo $table                                 Table object to which problems are added to.
+	 * @param array      $problem                               Problem data.
+	 * @param string     $problem['eventid']                    Problem ID.
+	 * @param int        $problem['symptom_count']              Problem symptom count.
+	 * @param array      $data                                  Additional data.
+	 * @param bool       $data['show_timeline']                 "Show timeline" filter option.
+	 * @param bool       $data['show_three_columns']            True if 3 columns should be displayed.
+	 * @param bool       $data['show_two_columns']              True if 2 columns should be displayed.
 	 */
-	public function get() {
-		$this->dataId = 'problem';
+	public static function addSymptomLimitToTable(CTableInfo $table, array $problem, array $data): void {
+		if ($problem['symptom_count'] > ZBX_PROBLEM_SYMPTOM_LIMIT) {
+			$row = (new CRow())
+				->addClass(ZBX_STYLE_NO_HOVER_PROBLEM_NESTED)
+				->addClass('hidden')
+				->setAttribute('data-cause-eventid', $problem['eventid']);
 
-		$url = (new CUrl('zabbix.php'))->setArgument('action', 'problem.view');
-		$args = [
-			'sort' => $this->data['sort'],
-			'sortorder' => $this->data['sortorder']
-		] + $this->data['filter'];
+			$symptom_limit_col = (new CCol(
+				(new CDiv(
+					(new CDiv(
+						_s('Displaying %1$s of %2$s found', ZBX_PROBLEM_SYMPTOM_LIMIT, $problem['symptom_count'])
+					))->addClass(ZBX_STYLE_TABLE_STATS)
+				))->addClass(ZBX_STYLE_PAGER_CONTAINER)
+			))->addClass(ZBX_STYLE_PROBLEM_NESTED_SMALL);
 
-		if ($this->data['filter']['show'] == TRIGGERS_OPTION_ALL) {
-			$args['from'] = $this->timeline['from'];
-			$args['to'] = $this->timeline['to'];
-		}
-
-		if (array_key_exists('severities', $args)) {
-			$args['severities'] = array_combine($args['severities'], $args['severities']);
-		}
-
-		array_map([$url, 'setArgument'], array_keys($args), $args);
-
-		$data = self::getData($this->data['filter'], true);
-		$data = self::sortData($data, $this->data['sort'], $this->data['sortorder']);
-
-		if ($this->data['action'] === 'problem.view') {
-			$paging = CPagerHelper::paginate($this->page, $data['problems'], ZBX_SORT_UP, $url);
-		}
-
-		$data = self::makeData($data, $this->data['filter'], true);
-
-		if ($data['triggers']) {
-			$triggerids = array_keys($data['triggers']);
-
-			$db_triggers = API::Trigger()->get([
-				'output' => [],
-				'selectDependencies' => ['triggerid'],
-				'triggerids' => $triggerids,
-				'preservekeys' => true
-			]);
-
-			foreach ($data['triggers'] as $triggerid => &$trigger) {
-				$trigger['dependencies'] = array_key_exists($triggerid, $db_triggers)
-					? $db_triggers[$triggerid]['dependencies']
-					: [];
-			}
-			unset($trigger);
-		}
-
-		if ($data['problems']) {
-			$triggers_hosts = getTriggersHostsList($data['triggers']);
-		}
-
-		$show_opdata = $this->data['filter']['compact_view']
-			? OPERATIONAL_DATA_SHOW_NONE
-			: $this->data['filter']['show_opdata'];
-
-		if ($this->data['action'] === 'problem.view') {
-			$form = (new CForm('post', 'zabbix.php'))
-				->setId('problem_form')
-				->setName('problem')
-				->cleanItems();
-
-			$header_check_box = (new CColHeader(
-				(new CCheckBox('all_eventids'))
-					->onClick("checkAll('".$form->getName()."', 'all_eventids', 'eventids');")
-			));
-
-			$this->data['filter']['compact_view']
-				? $header_check_box->addStyle('width: 20px;')
-				: $header_check_box->addClass(ZBX_STYLE_CELL_WIDTH);
-
-			$link = $url->getUrl();
-
-			$show_timeline = ($this->data['sort'] === 'clock' && !$this->data['filter']['compact_view']
-				&& $this->data['filter']['show_timeline']);
-
-			$show_recovery_data = in_array($this->data['filter']['show'], [
-				TRIGGERS_OPTION_RECENT_PROBLEM,
-				TRIGGERS_OPTION_ALL
-			]);
-			$header_clock =
-				make_sorting_header(_('Time'), 'clock', $this->data['sort'], $this->data['sortorder'], $link);
-
-			$this->data['filter']['compact_view']
-				? $header_clock->addStyle('width: 115px;')
-				: $header_clock->addClass(ZBX_STYLE_CELL_WIDTH);
-
-			if ($show_timeline) {
-				$header = [
-					$header_clock->addClass(ZBX_STYLE_RIGHT),
-					(new CColHeader())->addClass(ZBX_STYLE_TIMELINE_TH),
-					(new CColHeader())->addClass(ZBX_STYLE_TIMELINE_TH)
-				];
-			}
-			else {
-				$header = [$header_clock];
-			}
-
-			// Create table.
-			if ($this->data['filter']['compact_view']) {
-				if ($this->data['filter']['show_tags'] == SHOW_TAGS_NONE) {
-					$tags_header = null;
+			if ($data['show_timeline']) {
+				$colspan = 1;
+				if ($data['show_three_columns']) {
+					$colspan = 3;
 				}
-				else {
-					$tags_header = (new CColHeader(_('Tags')));
-
-					switch ($this->data['filter']['show_tags']) {
-						case SHOW_TAGS_1:
-							$tags_header->addClass(ZBX_STYLE_COLUMN_TAGS_1);
-							break;
-						case SHOW_TAGS_2:
-							$tags_header->addClass(ZBX_STYLE_COLUMN_TAGS_2);
-							break;
-						case SHOW_TAGS_3:
-							$tags_header->addClass(ZBX_STYLE_COLUMN_TAGS_3);
-							break;
-					}
+				elseif ($data['show_two_columns']) {
+					$colspan = 3;
 				}
 
-				$table = (new CTableInfo())
-					->setHeader(array_merge($header, [
-						$header_check_box,
-						make_sorting_header(_('Severity'), 'severity', $this->data['sort'], $this->data['sortorder'],
-							$link
-						)->addStyle('width: 120px;'),
-						$show_recovery_data ? (new CColHeader(_('Recovery time')))->addStyle('width: 115px;') : null,
-						$show_recovery_data ? (new CColHeader(_('Status')))->addStyle('width: 70px;') : null,
-						(new CColHeader(_('Info')))->addStyle('width: 24px;'),
-						make_sorting_header(_('Host'), 'host', $this->data['sort'], $this->data['sortorder'], $link)
-							->addStyle('width: 42%;'),
-						make_sorting_header(_('Problem'), 'name', $this->data['sort'], $this->data['sortorder'], $link)
-							->addStyle('width: 58%;'),
-						(new CColHeader(_('Duration')))->addStyle('width: 73px;'),
-						(new CColHeader(_('Ack')))->addStyle('width: 36px;'),
-						(new CColHeader(_('Actions')))->addStyle('width: 64px;'),
-						$tags_header
-					]))
-						->addClass(ZBX_STYLE_COMPACT_VIEW)
-						->addClass(ZBX_STYLE_OVERFLOW_ELLIPSIS);
+				if (!($table instanceof widgets\problems\includes\WidgetProblems)) {
+					$colspan++;
+				}
+
+				$empty_col = (new CCol())->addClass(ZBX_STYLE_PROBLEM_EXPAND_TD);
+
+				if ($colspan > 1) {
+					$empty_col->setColSpan($colspan);
+				}
+
+				$row->addItem([
+					$empty_col,
+					(new CCol())->addClass(ZBX_STYLE_TIMELINE_AXIS),
+					(new CCol())->addClass(ZBX_STYLE_TIMELINE_TD),
+					$symptom_limit_col->setColSpan($table->getNumCols() - $colspan - 2)
+				]);
 			}
 			else {
-				$table = (new CTableInfo())
-					->setHeader(array_merge($header, [
-						$header_check_box,
-						make_sorting_header(_('Severity'), 'severity', $this->data['sort'], $this->data['sortorder'],
-							$link
-						),
-						$show_recovery_data
-							? (new CColHeader(_('Recovery time')))->addClass(ZBX_STYLE_CELL_WIDTH)
-							: null,
-						$show_recovery_data ? _('Status') : null,
-						_('Info'),
-						make_sorting_header(_('Host'), 'host', $this->data['sort'], $this->data['sortorder'], $link),
-						make_sorting_header(_('Problem'), 'name', $this->data['sort'], $this->data['sortorder'], $link),
-						($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY)
-							? _('Operational data')
-							: null,
-						_('Duration'),
-						_('Ack'),
-						_('Actions'),
-						$this->data['filter']['show_tags'] ? _('Tags') : null
-					]));
-			}
-
-			if ($this->data['filter']['show_tags']) {
-				$tags = makeTags($data['problems'], true, 'eventid', $this->data['filter']['show_tags'],
-					array_key_exists('tags', $this->data['filter']) ? $this->data['filter']['tags'] : [], null,
-					$this->data['filter']['tag_name_format'], $this->data['filter']['tag_priority']
+				$row->addItem(
+					$symptom_limit_col->setColSpan($table->getNumCols())
 				);
 			}
 
-			if ($data['problems']) {
-				$triggers_hosts = makeTriggersHostsList($triggers_hosts);
-			}
-
-			$last_clock = 0;
-			$today = strtotime('today');
-
-			// Make trigger dependencies.
-			if ($data['triggers']) {
-				$dependencies = getTriggerDependencies($data['triggers']);
-			}
-
-			$allowed = [
-				'add_comments' => CWebUser::checkAccess(CRoleHelper::ACTIONS_ADD_PROBLEM_COMMENTS),
-				'change_severity' => CWebUser::checkAccess(CRoleHelper::ACTIONS_CHANGE_SEVERITY),
-				'acknowledge' => CWebUser::checkAccess(CRoleHelper::ACTIONS_ACKNOWLEDGE_PROBLEMS),
-				'close' => CWebUser::checkAccess(CRoleHelper::ACTIONS_CLOSE_PROBLEMS)
-			];
-
-			// Add problems to table.
-			foreach ($data['problems'] as $eventid => $problem) {
-				$trigger = $data['triggers'][$problem['objectid']];
-
-				$cell_clock = ($problem['clock'] >= $today)
-					? zbx_date2str(TIME_FORMAT_SECONDS, $problem['clock'])
-					: zbx_date2str(DATE_TIME_FORMAT_SECONDS, $problem['clock']);
-				$cell_clock = new CCol(new CLink($cell_clock,
-					(new CUrl('tr_events.php'))
-						->setArgument('triggerid', $problem['objectid'])
-						->setArgument('eventid', $problem['eventid'])
-				));
-
-				if ($problem['r_eventid'] != 0) {
-					$cell_r_clock = ($problem['r_clock'] >= $today)
-						? zbx_date2str(TIME_FORMAT_SECONDS, $problem['r_clock'])
-						: zbx_date2str(DATE_TIME_FORMAT_SECONDS, $problem['r_clock']);
-					$cell_r_clock = (new CCol(new CLink($cell_r_clock,
-						(new CUrl('tr_events.php'))
-							->setArgument('triggerid', $problem['objectid'])
-							->setArgument('eventid', $problem['eventid'])
-					)))
-						->addClass(ZBX_STYLE_NOWRAP)
-						->addClass(ZBX_STYLE_RIGHT);
-				}
-				else {
-					$cell_r_clock = '';
-				}
-
-				$can_be_closed = ($trigger['manual_close'] == ZBX_TRIGGER_MANUAL_CLOSE_ALLOWED && $allowed['close']);
-
-				if ($problem['r_eventid'] != 0) {
-					$value = TRIGGER_VALUE_FALSE;
-					$value_str = _('RESOLVED');
-					$value_clock = $problem['r_clock'];
-					$can_be_closed = false;
-				}
-				else {
-					$in_closing = false;
-
-					foreach ($problem['acknowledges'] as $acknowledge) {
-						if (($acknowledge['action'] & ZBX_PROBLEM_UPDATE_CLOSE) == ZBX_PROBLEM_UPDATE_CLOSE) {
-							$in_closing = true;
-							$can_be_closed = false;
-							break;
-						}
-					}
-
-					$value = $in_closing ? TRIGGER_VALUE_FALSE : TRIGGER_VALUE_TRUE;
-					$value_str = $in_closing ? _('CLOSING') : _('PROBLEM');
-					$value_clock = $in_closing ? time() : $problem['clock'];
-				}
-
-				$is_acknowledged = ($problem['acknowledged'] == EVENT_ACKNOWLEDGED);
-				$cell_status = new CSpan($value_str);
-
-				// Add colors and blinking to span depending on configuration and trigger parameters.
-				addTriggerValueStyle($cell_status, $value, $value_clock, $is_acknowledged);
-
-				// Info.
-				$info_icons = [];
-				if ($problem['r_eventid'] != 0) {
-					if ($problem['correlationid'] != 0) {
-						$info_icons[] = makeInformationIcon(
-							array_key_exists($problem['correlationid'], $data['correlations'])
-								? _s('Resolved by correlation rule "%1$s".',
-									$data['correlations'][$problem['correlationid']]['name']
-								)
-								: _('Resolved by correlation rule.')
-						);
-					}
-					elseif ($problem['userid'] != 0) {
-						$info_icons[] = makeInformationIcon(
-							array_key_exists($problem['userid'], $data['users'])
-								? _s('Resolved by user "%1$s".', getUserFullname($data['users'][$problem['userid']]))
-								: _('Resolved by inaccessible user.')
-						);
-					}
-				}
-
-				if (array_key_exists('suppression_data', $problem) && $problem['suppression_data']) {
-					$info_icons[] = makeSuppressedProblemIcon($problem['suppression_data']);
-				}
-
-				if ($this->data['filter']['compact_view'] && $this->data['filter']['show_suppressed']
-						&& count($info_icons) > 1) {
-					$cell_info = (new CButton(null))
-						->addClass(ZBX_STYLE_ICON_WIZARD_ACTION)
-						->addStyle('margin-left: -3px;')
-						->setHint(makeInformationList($info_icons));
-				}
-				else {
-					$cell_info = makeInformationList($info_icons);
-				}
-
-				$description = array_key_exists($trigger['triggerid'], $dependencies)
-					? makeTriggerDependencies($dependencies[$trigger['triggerid']])
-					: [];
-				$description[] = (new CLinkAction($problem['name']))
-					->addClass(ZBX_STYLE_WORDWRAP)
-					->setMenuPopup(CMenuPopupHelper::getTrigger($trigger['triggerid'], $problem['eventid']));
-
-				$opdata = null;
-
-				if ($show_opdata != OPERATIONAL_DATA_SHOW_NONE) {
-					if ($trigger['opdata'] === '') {
-						if ($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) {
-							$opdata = (new CCol(self::getLatestValues($trigger['items'])))->addClass('latest-values');
-						}
-					}
-					else {
-						$opdata = (new CSpan(CMacrosResolverHelper::resolveTriggerOpdata(
-							[
-								'triggerid' => $trigger['triggerid'],
-								'expression' => $trigger['expression'],
-								'opdata' => $trigger['opdata'],
-								'clock' => ($problem['r_eventid'] != 0) ? $problem['r_clock'] : $problem['clock'],
-								'ns' => ($problem['r_eventid'] != 0) ? $problem['r_ns'] : $problem['ns']
-							],
-							[
-								'events' => true,
-								'html' => true
-							]
-						)))
-							->addClass('opdata')
-							->addClass(ZBX_STYLE_WORDWRAP);
-
-						if ($show_opdata == OPERATIONAL_DATA_SHOW_WITH_PROBLEM) {
-							$description[] = ' (';
-							$description[] = $opdata;
-							$description[] = ')';
-						}
-					}
-				}
-
-				$description[] = ($problem['comments'] !== '') ? makeDescriptionIcon($problem['comments']) : null;
-
-				if ($this->data['filter']['details'] == 1) {
-					$description[] = BR();
-
-					if ($trigger['recovery_mode'] == ZBX_RECOVERY_MODE_RECOVERY_EXPRESSION) {
-						$description[] = [_('Problem'), ': ', (new CDiv($trigger['expression_html']))->addClass(ZBX_STYLE_WORDWRAP), BR()];
-						$description[] = [_('Recovery'), ': ', (new CDiv($trigger['recovery_expression_html']))->addClass(ZBX_STYLE_WORDWRAP)];
-					}
-					else {
-						$description[] = (new CDiv($trigger['expression_html']))->addClass(ZBX_STYLE_WORDWRAP);
-					}
-				}
-
-				if ($show_timeline) {
-					if ($last_clock != 0) {
-						self::addTimelineBreakpoint($table, $last_clock, $problem['clock'], $this->data['sortorder']);
-					}
-					$last_clock = $problem['clock'];
-
-					$row = [
-						$cell_clock->addClass(ZBX_STYLE_TIMELINE_DATE),
-						(new CCol())
-							->addClass(ZBX_STYLE_TIMELINE_AXIS)
-							->addClass(ZBX_STYLE_TIMELINE_DOT),
-						(new CCol())->addClass(ZBX_STYLE_TIMELINE_TD)
-					];
-				}
-				else {
-					$row = [
-						$cell_clock
-							->addClass(ZBX_STYLE_NOWRAP)
-							->addClass(ZBX_STYLE_RIGHT)
-					];
-				}
-
-				// Create acknowledge link.
-				$problem_update_link = ($allowed['add_comments'] || $allowed['change_severity']
-						|| $allowed['acknowledge'] || $can_be_closed)
-					? (new CLink($is_acknowledged ? _('Yes') : _('No')))
-						->addClass($is_acknowledged ? ZBX_STYLE_GREEN : ZBX_STYLE_RED)
-						->addClass(ZBX_STYLE_LINK_ALT)
-						->setAttribute('data-eventid', $problem['eventid'])
-						->onClick('acknowledgePopUp({eventids: [this.dataset.eventid]}, this);')
-					: (new CSpan($is_acknowledged ? _('Yes') : _('No')))->addClass(
-						$is_acknowledged ? ZBX_STYLE_GREEN : ZBX_STYLE_RED
-					);
-
-				// Add table row.
-				$table->addRow(array_merge($row, [
-					new CCheckBox('eventids['.$problem['eventid'].']', $problem['eventid']),
-					CSeverityHelper::makeSeverityCell((int) $problem['severity'], null, $value == TRIGGER_VALUE_FALSE),
-					$show_recovery_data ? $cell_r_clock : null,
-					$show_recovery_data ? $cell_status : null,
-					$cell_info,
-					$this->data['filter']['compact_view']
-						? (new CDiv($triggers_hosts[$trigger['triggerid']]))->addClass(ZBX_STYLE_ACTION_CONTAINER)
-						: $triggers_hosts[$trigger['triggerid']],
-					$this->data['filter']['compact_view']
-						? (new CDiv($description))->addClass(ZBX_STYLE_ACTION_CONTAINER)
-						: $description,
-					($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) ? $opdata : null,
-					($problem['r_eventid'] != 0)
-						? zbx_date2age($problem['clock'], $problem['r_clock'])
-						: zbx_date2age($problem['clock']),
-					$problem_update_link,
-					makeEventActionsIcons($problem['eventid'], $data['actions'], $data['users']),
-					$this->data['filter']['show_tags'] ? $tags[$problem['eventid']] : null
-				]), ($this->data['filter']['highlight_row'] && $value == TRIGGER_VALUE_TRUE)
-					? self::getSeverityFlhStyle($problem['severity'])
-					: null
-				);
-			}
-
-			$footer = new CActionButtonList('action', 'eventids', [
-				'popup.acknowledge.edit' => [
-					'name' => _('Mass update'),
-					'disabled' => !($allowed['add_comments'] || $allowed['change_severity'] || $allowed['acknowledge']
-							|| $allowed['close']
-					)
-				]
-			], 'problem');
-
-			return $this->getOutput($form->addItem([$table, $paging, $footer]), true, $this->data);
+			$table->addRow($row);
 		}
-
-		/*
-		 * Search limit performs +1 selection to know if limit was exceeded, this will assure that csv has
-		 * "search_limit" records at most.
-		 */
-		array_splice($data['problems'], CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT));
-
-		$csv = [];
-
-		$csv[] = array_filter([
-			_('Severity'),
-			_('Time'),
-			_('Recovery time'),
-			_('Status'),
-			_('Host'),
-			_('Problem'),
-			($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) ? _('Operational data') : null,
-			_('Duration'),
-			_('Ack'),
-			_('Actions'),
-			_('Tags')
-		]);
-
-		$tags = makeTags($data['problems'], false);
-
-		foreach ($data['problems'] as $problem) {
-			$trigger = $data['triggers'][$problem['objectid']];
-
-			if ($problem['r_eventid'] != 0) {
-				$value_str = _('RESOLVED');
-			}
-			else {
-				$in_closing = false;
-
-				foreach ($problem['acknowledges'] as $acknowledge) {
-					if (($acknowledge['action'] & ZBX_PROBLEM_UPDATE_CLOSE) == ZBX_PROBLEM_UPDATE_CLOSE) {
-						$in_closing = true;
-						break;
-					}
-				}
-
-				$value_str = $in_closing ? _('CLOSING') : _('PROBLEM');
-			}
-
-			$hosts = [];
-			foreach ($triggers_hosts[$trigger['triggerid']] as $trigger_host) {
-				$hosts[] = $trigger_host['name'];
-			}
-
-			// operational data
-			$opdata = null;
-			if ($show_opdata != OPERATIONAL_DATA_SHOW_NONE) {
-				if ($trigger['opdata'] === '') {
-					if ($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) {
-						$opdata = self::getLatestValues($trigger['items'], false);
-					}
-				}
-				else {
-					$opdata = CMacrosResolverHelper::resolveTriggerOpdata(
-						[
-							'triggerid' => $trigger['triggerid'],
-							'expression' => $trigger['expression'],
-							'opdata' => $trigger['opdata'],
-							'clock' => ($problem['r_eventid'] != 0) ? $problem['r_clock'] : $problem['clock'],
-							'ns' => ($problem['r_eventid'] != 0) ? $problem['r_ns'] : $problem['ns']
-						],
-						['events' => true]
-					);
-				}
-			}
-
-			$actions_performed = [];
-			if ($data['actions']['messages'][$problem['eventid']]['count'] > 0) {
-				$actions_performed[] = _('Messages').
-					' ('.$data['actions']['messages'][$problem['eventid']]['count'].')';
-			}
-			if ($data['actions']['severities'][$problem['eventid']]['count'] > 0) {
-				$actions_performed[] = _('Severity changes');
-			}
-			if ($data['actions']['actions'][$problem['eventid']]['count'] > 0) {
-				$actions_performed[] = _('Actions').' ('.$data['actions']['actions'][$problem['eventid']]['count'].')';
-			}
-
-			$row = [];
-
-			$row[] = CSeverityHelper::getName((int) $problem['severity']);
-			$row[] = zbx_date2str(DATE_TIME_FORMAT_SECONDS, $problem['clock']);
-			$row[] = ($problem['r_eventid'] != 0) ? zbx_date2str(DATE_TIME_FORMAT_SECONDS, $problem['r_clock']) : '';
-			$row[] = $value_str;
-			$row[] = implode(', ', $hosts);
-			$row[] = ($show_opdata == OPERATIONAL_DATA_SHOW_WITH_PROBLEM && $trigger['opdata'] !== '')
-				? $problem['name'].' ('.$opdata.')'
-				: $problem['name'];
-
-			if ($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) {
-				$row[] = $opdata;
-			}
-
-			$row[] = ($problem['r_eventid'] != 0)
-				? zbx_date2age($problem['clock'], $problem['r_clock'])
-				: zbx_date2age($problem['clock']);
-			$row[] = ($problem['acknowledged'] == EVENT_ACKNOWLEDGED) ? _('Yes') : _('No');
-			$row[] = implode(', ', $actions_performed);
-			$row[] = implode(', ', $tags[$problem['eventid']]);
-
-			$csv[] = $row;
-		}
-
-		return zbx_toCSV($csv);
 	}
 
 	/**
 	 * Get item latest values.
-	 *
-	 * @static
 	 *
 	 * @param array $items    An array of trigger items.
 	 * @param bool  $html
@@ -1267,60 +918,75 @@ class CScreenProblem extends CScreenBase {
 		)));
 
 		if ($html) {
-			$hint_table = (new CTable())->addClass('list-table');
+			$hint_table = (new CTable())->addClass(ZBX_STYLE_LIST_TABLE);
 		}
 
 		foreach ($items as $itemid => $item) {
 			if (array_key_exists($itemid, $history_values)) {
 				$last_value = reset($history_values[$itemid]);
-				$last_value['value'] = formatHistoryValue(str_replace(["\r\n", "\n"], [" "], $last_value['value']),
-					$item
-				);
+				$last_value['original_value'] = $last_value['value'];
+
+				if ($item['value_type'] != ITEM_VALUE_TYPE_BINARY) {
+					$last_value['value'] = formatHistoryValue(str_replace(["\r\n", "\n"], [" "], $last_value['value']),
+						$item
+					);
+				}
 			}
 			else {
 				$last_value = [
 					'itemid' => null,
 					'clock' => null,
 					'value' => UNRESOLVED_MACRO_STRING,
+					'original_value' => UNRESOLVED_MACRO_STRING,
 					'ns' => null
 				];
 			}
 
 			if ($html) {
 				$hint_table->addRow([
-					new CCol($item['name']),
-					new CCol(
+					(new CCol($item['name']))->addStyle('max-width: '.ZBX_OPDATA_HINTBOX_COLUMN_MAX_WIDTH.'px'),
+					(new CCol(
 						($last_value['clock'] !== null)
 							? zbx_date2str(DATE_TIME_FORMAT_SECONDS, $last_value['clock'])
 							: UNRESOLVED_MACRO_STRING
-					),
-					new CCol($last_value['value']),
-					new CCol(
+					))->addClass(ZBX_STYLE_NOWRAP),
+					(new CCol($item['value_type'] == ITEM_VALUE_TYPE_BINARY
+						? italic(_('binary value'))->addClass(ZBX_STYLE_GREY)
+						: $last_value['original_value']
+					))->addStyle('max-width: '.ZBX_OPDATA_HINTBOX_COLUMN_MAX_WIDTH.'px'),
+					(new CCol(
 						($item['value_type'] == ITEM_VALUE_TYPE_FLOAT || $item['value_type'] == ITEM_VALUE_TYPE_UINT64)
 							? (CWebUser::checkAccess(CRoleHelper::UI_MONITORING_LATEST_DATA)
-								? new CLink(_('Graph'), (new CUrl('history.php'))
-									->setArgument('action', HISTORY_GRAPH)
-									->setArgument('itemids[]', $itemid)
-									->getUrl()
-								)
-								: _('Graph'))
+							? new CLink(_('Graph'), (new CUrl('history.php'))
+								->setArgument('action', HISTORY_GRAPH)
+								->setArgument('itemids[]', $itemid)
+								->getUrl()
+							)
+							: _('Graph'))
 							: (CWebUser::checkAccess(CRoleHelper::UI_MONITORING_LATEST_DATA)
-								? new CLink(_('History'), (new CUrl('history.php'))
-									->setArgument('action', HISTORY_VALUES)
-									->setArgument('itemids[]', $itemid)
-									->getUrl()
-								)
-								: _('History'))
-					)
+							? new CLink(_('History'), (new CUrl('history.php'))
+								->setArgument('action', HISTORY_VALUES)
+								->setArgument('itemids[]', $itemid)
+								->getUrl()
+							)
+							: _('History'))
+					))->addClass(ZBX_STYLE_NOWRAP)
 				]);
 
-				$latest_values[] = (new CLinkAction($last_value['value']))
+				$latest_values[] = (new CLinkAction(
+					$item['value_type'] == ITEM_VALUE_TYPE_BINARY
+						? _('binary value')
+						: $last_value['value']
+				))
 					->addClass('hint-item')
-					->setAttribute('data-hintbox', '1');
+					->setAttribute('data-hintbox', '1')
+					->addClass(ZBX_STYLE_NO_INDENT);
 				$latest_values[] = ', ';
 			}
 			else {
-				$latest_values[] = $last_value['value'];
+				$latest_values[] = $item['value_type'] == ITEM_VALUE_TYPE_BINARY
+					? UNRESOLVED_MACRO_STRING
+					: $last_value['original_value'];
 			}
 		}
 
@@ -1330,36 +996,9 @@ class CScreenProblem extends CScreenBase {
 				->addClass('main-hint')
 				->setHint($hint_table)
 			);
-
 			return $latest_values;
 		}
 
 		return implode(', ', $latest_values);
-	}
-
-	/**
-	 * Get trigger severity full line height css style name.
-	 *
-	 * @param int $severity  Trigger severity.
-	 *
-	 * @return string|null
-	 */
-	private static function getSeverityFlhStyle($severity) {
-		switch ($severity) {
-			case TRIGGER_SEVERITY_DISASTER:
-				return ZBX_STYLE_FLH_DISASTER_BG;
-			case TRIGGER_SEVERITY_HIGH:
-				return ZBX_STYLE_FLH_HIGH_BG;
-			case TRIGGER_SEVERITY_AVERAGE:
-				return ZBX_STYLE_FLH_AVERAGE_BG;
-			case TRIGGER_SEVERITY_WARNING:
-				return ZBX_STYLE_FLH_WARNING_BG;
-			case TRIGGER_SEVERITY_INFORMATION:
-				return ZBX_STYLE_FLH_INFO_BG;
-			case TRIGGER_SEVERITY_NOT_CLASSIFIED:
-				return ZBX_STYLE_FLH_NA_BG;
-			default:
-				return null;
-		}
 	}
 }

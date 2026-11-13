@@ -1,27 +1,22 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/CElementQuery.php';
-require_once dirname(__FILE__).'/CommandExecutor.php';
+require_once __DIR__.'/CElementQuery.php';
+require_once __DIR__.'/CommandExecutor.php';
 
 use Facebook\WebDriver\Remote\DesiredCapabilities;
 use Facebook\WebDriver\Chrome\ChromeOptions;
@@ -96,16 +91,33 @@ class CPage {
 
 		if (!defined('PHPUNIT_BROWSER_NAME') || PHPUNIT_BROWSER_NAME === 'chrome') {
 			$options = new ChromeOptions();
+
+			$prefs = [
+				'profile.password_manager_leak_detection' => false
+			];
+			$options->setExperimentalOption('prefs', $prefs);
+
 			$options->addArguments([
 				'--no-sandbox',
 				'--enable-font-antialiasing=false',
 				'--window-size='.self::DEFAULT_PAGE_WIDTH.','.self::DEFAULT_PAGE_HEIGHT,
-				'--disable-dev-shm-usage'
+				'--disable-dev-shm-usage',
+				'--autoplay-policy=no-user-gesture-required',
+				'--remote-debugging-pipe'
 			]);
+
+			if (defined('PHPUNIT_BROWSER_LOG_DIR')) {
+				$options->addArguments([
+					'--enable-logging',
+					'--log-file='.PHPUNIT_BROWSER_LOG_DIR.'/'.microtime(true).'.log',
+					'--log-level=0'
+				]);
+			}
 
 			$capabilities->setCapability(ChromeOptions::CAPABILITY, $options);
 		}
 
+		$capabilities->setCapability('unhandledPromptBehavior', 'ignore');
 		$phpunit_driver_address = PHPUNIT_DRIVER_ADDRESS;
 
 		if (strpos($phpunit_driver_address, ':') === false) {
@@ -113,6 +125,7 @@ class CPage {
 		}
 
 		$this->driver = RemoteWebDriver::create('http://'.$phpunit_driver_address.'/wd/hub', $capabilities);
+		$this->driver->setCommandExecutor(new CommandExecutor($this->driver->getCommandExecutor()));
 
 		$this->driver->manage()->window()->setSize(
 				new WebDriverDimension(self::DEFAULT_PAGE_WIDTH, self::DEFAULT_PAGE_HEIGHT)
@@ -125,6 +138,7 @@ class CPage {
 	 */
 	public function cleanup() {
 		$this->resetViewport();
+		CommandExecutor::setAlertStrategy(CommandExecutor::STRATEGY_DEFAULT);
 
 		if (self::$cookie !== null) {
 			foreach ($this->driver->manage()->getCookies() as $cookie) {
@@ -137,8 +151,8 @@ class CPage {
 			}
 		}
 
-		$this->driver->manage()->deleteAllCookies();
 		try {
+			$this->logout();
 			$this->driver->executeScript('sessionStorage.clear();');
 		} catch (Exception $exception) {
 			// Code is not missing here.
@@ -195,11 +209,14 @@ class CPage {
 	 *
 	 * @return $this
 	 */
-	public function login($sessionid = '09e7d4286dfdca4ba7be15e0f3b2b55a', $userid = 1) {
+	public function login(string $sessionid = '09e7d4286dfdca4ba7be15e0f3b2b55a', $userid = 1) {
 		$session = CDBHelper::getRow('SELECT status FROM sessions WHERE sessionid='.zbx_dbstr($sessionid));
 
 		if (!$session) {
-			DBexecute('INSERT INTO sessions (sessionid,userid) VALUES ('.zbx_dbstr($sessionid).','.$userid.')');
+			$secret = bin2hex(random_bytes(16));
+			DBexecute('INSERT INTO sessions (sessionid,userid,lastaccess,secret)'.
+				' VALUES ('.zbx_dbstr($sessionid).','.$userid.','.time().','.zbx_dbstr($secret).')'
+			);
 		}
 		elseif ($session['status'] != 0) {	/* ZBX_SESSION_ACTIVE */
 			DBexecute('UPDATE sessions SET status=0 WHERE sessionid='.zbx_dbstr($sessionid));
@@ -212,14 +229,13 @@ class CPage {
 		if (self::$cookie === null || $sessionid !== $cookie['sessionid']) {
 			$data = ['sessionid' => $sessionid];
 
-			$config = CDBHelper::getRow('SELECT session_key FROM config WHERE configid=1');
-			$data['sign'] = hash_hmac('sha256', json_encode($data), $config['session_key'], false);
+			$session_key = CDBHelper::getValue('SELECT value_str FROM settings WHERE name=\'session_key\'');
+			$data['sign'] = hash_hmac('sha256', json_encode($data), $session_key, false);
 
 			$path = parse_url(PHPUNIT_URL, PHP_URL_PATH);
 			self::$cookie = [
 				'name' => 'zbx_session',
 				'value' => base64_encode(json_encode($data)),
-				'domain' => parse_url(PHPUNIT_URL, PHP_URL_HOST),
 				'path' => rtrim(substr($path, 0, strrpos($path, '/')), '/')
 			];
 
@@ -237,7 +253,7 @@ class CPage {
 	public function logout() {
 		try {
 			// Before logout open page without any scripts, otherwise session might be restored and logout won't work.
-			$this->open('setup.php');
+			$this->open('setup.php')->waitUntilReady();
 
 			$session = null;
 
@@ -254,7 +270,9 @@ class CPage {
 			}
 
 			if ($session !== null) {
-				DBExecute('DELETE FROM sessions WHERE sessionid='.zbx_dbstr($session));
+				DBExecute('DELETE FROM sessions WHERE sessionid='.zbx_dbstr(
+						CTestArrayHelper::get(json_decode(base64_decode(urldecode($session)), true), 'sessionid')
+				));
 			}
 
 			$this->driver->manage()->deleteAllCookies();
@@ -446,9 +464,20 @@ class CPage {
 
 	/**
 	 * Wait until page is ready.
+	 *
+	 * @param integer $timeout    timeout in seconds
 	 */
-	public function waitUntilReady() {
-		return (new CElementQuery(null))->waitUntilReady();
+	public function waitUntilReady($timeout = null) {
+		return (new CElementQuery(null))->waitUntilReady($timeout);
+	}
+
+	/**
+	 * Wait until alert is present.
+	 */
+	public function waitUntilAlertIsPresent($timeout = null) {
+		CElementQuery::wait($timeout)->until(WebDriverExpectedCondition::alertIsPresent(),
+				'Failed to wait for alert to be present.'
+		);
 	}
 
 	/**
@@ -478,7 +507,7 @@ class CPage {
 	 * Wait until alert is present and accept it.
 	 */
 	public function acceptAlert() {
-		CElementQuery::wait()->until(WebDriverExpectedCondition::alertIsPresent());
+		$this->waitUntilAlertIsPresent();
 		$this->driver->switchTo()->alert()->accept();
 	}
 
@@ -486,7 +515,7 @@ class CPage {
 	 * Wait until alert is present and dismiss it.
 	 */
 	public function dismissAlert() {
-		CElementQuery::wait()->until(WebDriverExpectedCondition::alertIsPresent());
+		$this->waitUntilAlertIsPresent();
 		$this->driver->switchTo()->alert()->dismiss();
 	}
 
@@ -586,28 +615,52 @@ class CPage {
 	/**
 	 * Allows to login with user credentials.
 	 *
-	 * @param string $alias     Username on login screen
-	 * @param string $password  Password on login screen
+	 * @param string $alias          Username on login screen
+	 * @param string $password       Password on login screen
+	 * @param int $scenario  	     TEST_BAD - expected bad credentials, TEST_GOOD - user successfully logged in
+	 * @param string $url		     Direct link to certain Zabbix page
+	 * @param bool $check_logged_in  Check if the user is logged in
+	 *
+	 * @return $this
 	 */
-	public function userLogin($alias, $password) {
+	public function userLogin($alias, $password, $scenario = TEST_GOOD, $url = 'index.php', $check_logged_in = true) {
 		if (self::$cookie === null) {
 			$this->driver->get(PHPUNIT_URL);
+			$this->waitUntilReady();
 		}
 
 		$this->logout();
-		$this->open('index.php');
+		$this->open($url);
 		$this->query('id:name')->waitUntilVisible()->one()->fill($alias);
 		$this->query('id:password')->one()->fill($password);
-		$this->query('id:enter')->one()->click();
+		$this->query('id:enter')->one()->click()->waitUntilStalled();
 		$this->waitUntilReady();
 
-		// Make sure that logged in page is opened.
-		try {
-			$this->query('xpath://aside[@class="sidebar"]//a[text()="User settings"]')->exists();
+		if ($check_logged_in) {
+			$this->assertUserIsLoggedIn($scenario);
 		}
-		catch (\Exception $ex) {
-			throw new \Exception('"User settings" menu is not found on page. Probably user is not logged in.');
+
+		return $this;
+	}
+
+	/**
+	 * Checks if currently any user is logged in.
+	 *
+	 * @param int $scenario  TEST_BAD - it is expected to not be logged in, TEST_GOOD - expected to be logged in
+	 *
+	 * @return $this
+	 */
+	public function assertUserIsLoggedIn($scenario = TEST_GOOD) {
+		$sign_out = $this->query('class:zi-sign-out')->exists();
+
+		if ($scenario === TEST_GOOD && !$sign_out) {
+			throw new \Exception('"Sign out" button is not found on the page. Probably user is not logged in.');
 		}
+		elseif ($scenario === TEST_BAD && $sign_out) {
+			throw new \Exception('"Sign out" button is found on the page. Probably user is logged in, but shouldn\'t.');
+		}
+
+		return $this;
 	}
 
 	/**
@@ -638,7 +691,7 @@ class CPage {
 	 * @throws Exception
 	 */
 	public function assertHeader($header) {
-		$text = $this->query('xpath://h1[@id="page-title-general"]')->one()->getText();
+		$text = $this->query('xpath://h1[@id="page-title-general"]')->waitUntilVisible(3)->one()->getText();
 
 		if ($text !== $header) {
 			throw new \Exception('Header of the page "'.$text.'" is not equal to "'.$header.'".');
@@ -650,5 +703,33 @@ class CPage {
 	 */
 	public function scrollToTop() {
 		$this->getDriver()->executeScript('document.getElementsByClassName(\'wrapper\')[0].scrollTo(0, 0)');
+	}
+
+	/**
+	 * Scroll down to the bottom of the page.
+	 */
+	public function scrollDown() {
+		$this->getDriver()->executeScript('document.getElementsByClassName(\'wrapper\')[0].scrollTo(0,'.
+				' document.body.scrollHeight)');
+	}
+
+	/**
+	 * Navigates back to the previous page.
+	 */
+	public function navigateBack() {
+		$this->driver->navigate()->back();
+	}
+
+	/**
+	 * Switch browser window by index number.
+	 *
+	 * @param int $window		array element index number.
+	 *
+	 * @return $this
+	 */
+	public function switchBrowserWindow($window) {
+		$this->driver->switchTo()->window($this->driver->getWindowHandles()[$window]);
+
+		return $this;
 	}
 }

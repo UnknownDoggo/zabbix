@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -146,7 +141,7 @@ class CMapImporter extends CImporter {
 					break;
 
 				case SYSMAP_ELEMENT_TYPE_HOST_GROUP:
-					$groupid = $this->referencer->findGroupidByName($selement['elements'][0]['name']);
+					$groupid = $this->referencer->findHostGroupidByName($selement['elements'][0]['name']);
 
 					if ($groupid === null) {
 						throw new Exception(_s('Cannot find group "%1$s" used in map "%2$s".',
@@ -172,7 +167,7 @@ class CMapImporter extends CImporter {
 				case SYSMAP_ELEMENT_TYPE_TRIGGER:
 					foreach ($selement['elements'] as &$element) {
 						$triggerid = $this->referencer->findTriggeridByName($element['description'],
-							$element['expression'], $element['recovery_expression']
+							$element['expression'], $element['recovery_expression'], true
 						);
 
 						if ($triggerid === null) {
@@ -209,30 +204,52 @@ class CMapImporter extends CImporter {
 					}
 					$selement[$id_field] = $imageid;
 				}
+				else {
+					$selement[$id_field] = 0;
+				}
 			}
 		}
 		unset($selement);
 
 		foreach ($map['links'] as &$link) {
-			if (!$link['linktriggers']) {
-				unset($link['linktriggers']);
-				continue;
+			if ($link['indicator_type'] == MAP_INDICATOR_TYPE_TRIGGER) {
+				foreach ($link['linktriggers'] as &$linktrigger) {
+					$trigger = $linktrigger['trigger'];
+					unset($linktrigger['trigger']);
+
+					$triggerid = $this->referencer->findTriggeridByName($trigger['description'], $trigger['expression'],
+						$trigger['recovery_expression'], true
+					);
+
+					if ($triggerid === null) {
+						throw new Exception(_s('Cannot find trigger "%1$s" used in map "%2$s".',
+							$trigger['description'], $map['name']));
+					}
+
+					$linktrigger['triggerid'] = $triggerid;
+				}
+				unset($linktrigger);
 			}
+			elseif ($link['indicator_type'] == MAP_INDICATOR_TYPE_ITEM_VALUE) {
+				$item = $link['item'];
+				unset($link['item']);
 
-			foreach ($link['linktriggers'] as &$linktrigger) {
-				$trigger = $linktrigger['trigger'];
-				$triggerid = $this->referencer->findTriggeridByName($trigger['description'], $trigger['expression'],
-					$trigger['recovery_expression']
-				);
+				$hostid = $this->referencer->findHostidByHost($item['host']);
+				$itemid = $hostid !== null
+					? $this->referencer->findItemidByKey($hostid, $item['key'], true)
+					: null;
 
-				if ($triggerid === null) {
-					throw new Exception(_s('Cannot find trigger "%1$s" used in map "%2$s".',
-						$trigger['description'], $map['name']));
+				if ($itemid === null) {
+					throw new Exception(_s(
+						'Cannot find item "%1$s" on "%2$s" used in a link of map "%3$s".',
+						$item['key'],
+						$item['host'],
+						$map['name']
+					));
 				}
 
-				$linktrigger['triggerid'] = $triggerid;
+				$link['itemid'] = $itemid;
 			}
-			unset($linktrigger);
 		}
 		unset($link);
 
@@ -261,6 +278,9 @@ class CMapImporter extends CImporter {
 				}
 				$map['iconmapid'] = $iconmapid;
 			}
+			else {
+				$map['iconmapid'] = null;
+			}
 
 			if (array_key_exists('background', $map) && array_key_exists('name', $map['background'])
 					&& $map['background']['name'] !== '') {
@@ -272,6 +292,9 @@ class CMapImporter extends CImporter {
 					));
 				}
 				$map['backgroundid'] = $imageid;
+			}
+			else {
+				$map['backgroundid'] = null;
 			}
 		}
 		unset($map);

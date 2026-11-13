@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 package resultcache
 
@@ -25,35 +20,41 @@ import (
 	"sync/atomic"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/log"
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"zabbix.com/internal/agent"
-	"zabbix.com/internal/monitor"
-	"zabbix.com/pkg/itemutil"
-	"zabbix.com/pkg/version"
+	"golang.zabbix.com/agent2/internal/agent"
+	"golang.zabbix.com/agent2/internal/monitor"
+	"golang.zabbix.com/agent2/pkg/version"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/plugin/itemutil"
 )
 
 type MemoryCache struct {
 	*cacheData
 	results         []*AgentData
+	cresults        []*AgentCommands
 	maxBufferSize   int32
 	totalValueNum   int32
 	persistValueNum int32
+	historyUpload   bool
 }
 
 func (c *MemoryCache) upload(u Uploader) (err error) {
-	if len(c.results) == 0 {
+	resultsLen := len(c.results) + len(c.cresults)
+	if resultsLen == 0 {
 		return
 	}
 
-	c.Debugf("upload history data, %d/%d value(s)", len(c.results), cap(c.results))
+	c.Debugf("upload history data, %d/%d value(s) commands %d/%d value(s)", len(c.results), cap(c.results),
+		len(c.cresults), cap(c.cresults))
 
 	request := AgentDataRequest{
-		Request: "agent data",
-		Data:    c.results,
-		Session: c.token,
-		Host:    u.Hostname(),
-		Version: version.Short(),
+		Request:  "agent data",
+		Data:     c.results,
+		Commands: c.cresults,
+		Session:  u.Session(),
+		Host:     u.Hostname(),
+		Version:  version.Long(),
+		Variant:  agent.Variant,
 	}
 
 	var data []byte
@@ -63,11 +64,15 @@ func (c *MemoryCache) upload(u Uploader) (err error) {
 		return
 	}
 
-	timeout := len(c.results) * c.timeout
+	timeout := resultsLen * c.timeout
 	if timeout > 60 {
 		timeout = 60
 	}
-	if errs := u.Write(data, time.Duration(timeout)*time.Second); errs != nil {
+
+	upload, errs := u.Write(data, time.Duration(timeout)*time.Second)
+	c.EnableUpload(upload)
+
+	if errs != nil {
 		if !reflect.DeepEqual(errs, c.lastErrors) {
 			for i := 0; i < len(errs); i++ {
 				c.Warningf("%s", errs[i])
@@ -85,14 +90,25 @@ func (c *MemoryCache) upload(u Uploader) (err error) {
 	}
 
 	// clear results slice to ensure that the data is garbage collected
-	c.results[0] = nil
-	for i := 1; i < len(c.results); i *= 2 {
-		copy(c.results[i:], c.results[:i])
+	if len(c.results) != 0 {
+		c.results[0] = nil
+		for i := 1; i < len(c.results); i *= 2 {
+			copy(c.results[i:], c.results[:i])
+		}
+		c.results = c.results[:0]
 	}
-	c.results = c.results[:0]
+
+	if len(c.cresults) != 0 {
+		c.cresults[0] = nil
+		for i := 1; i < len(c.cresults); i *= 2 {
+			copy(c.cresults[i:], c.cresults[:i])
+		}
+		c.cresults = c.cresults[:0]
+	}
 
 	c.totalValueNum = 0
 	c.persistValueNum = 0
+
 	return
 }
 
@@ -123,6 +139,10 @@ func (c *MemoryCache) addResult(result *AgentData) {
 	}
 }
 
+func (c *MemoryCache) addCommandResult(result *AgentCommands) {
+	c.cresults = append(c.cresults, result)
+}
+
 // insertResult attempts to insert the received result into results slice by replacing existing value.
 // If no appropriate target was found it calls addResult to append value.
 func (c *MemoryCache) insertResult(result *AgentData) {
@@ -149,7 +169,7 @@ func (c *MemoryCache) insertResult(result *AgentData) {
 		}
 	}
 	if index == -1 {
-		c.Warningf("cache is full and cannot cannot find a value to replace, adding new instead")
+		c.Warningf("cache is full and cannot find a value to replace, adding new instead")
 		c.addResult(result)
 		return
 	}
@@ -200,6 +220,31 @@ func (c *MemoryCache) write(r *plugin.Result) {
 	}
 }
 
+func (c *MemoryCache) writeCommand(cr *CommandResult) {
+	var value *string
+	var err *string
+
+	log.Debugf("cache command(%d) result:%s error:%s", cr.ID, cr.Result, cr.Error)
+
+	c.lastCommandID++
+
+	if cr.Result != "" {
+		value = &cr.Result
+	}
+
+	if cr.Error != nil {
+		err_msg := cr.Error.Error()
+		err = &err_msg
+	}
+
+	cmd := &AgentCommands{
+		Id:    cr.ID,
+		Value: value,
+		Error: err}
+
+	c.addCommandResult(cmd)
+}
+
 func (c *MemoryCache) run() {
 	defer log.PanicHook()
 	c.Debugf("starting memory cache")
@@ -214,6 +259,8 @@ func (c *MemoryCache) run() {
 			c.flushOutput(v)
 		case *plugin.Result:
 			c.write(v)
+		case *CommandResult:
+			c.writeCommand(v)
 		case *agent.AgentOptions:
 			c.updateOptions(v)
 		}
@@ -252,5 +299,6 @@ func (c *MemoryCache) PersistSlotsAvailable() int {
 	if slots < 0 {
 		slots = 0
 	}
+
 	return int(slots)
 }

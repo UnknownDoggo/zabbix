@@ -1,21 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-**
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 /*
@@ -27,21 +21,56 @@
 package mqtt
 
 import (
-	"crypto/rand"
+	"crypto/tls"
 	"encoding/json"
-	"errors"
 	"fmt"
+	"math/rand"
 	"net/url"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/conf"
-	"git.zabbix.com/ap/plugin-support/plugin"
 	mqtt "github.com/eclipse/paho.mqtt.golang"
-	"zabbix.com/pkg/itemutil"
-	"zabbix.com/pkg/version"
-	"zabbix.com/pkg/watch"
+	"golang.zabbix.com/agent2/pkg/watch"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/plugin/itemutil"
+	"golang.zabbix.com/sdk/tlsconfig"
+	"golang.zabbix.com/sdk/zbxerr"
+	"golang.zabbix.com/sdk/zbxsync"
 )
+
+const (
+	pluginName = "MQTT"
+)
+
+const (
+	// The backoff goroutine is not running.
+	stateIdle backoffState = iota
+	// The backoff goroutine is active and trying to connect.
+	stateRetrying
+	// The Release method has been called, and the goroutine is shutting down.
+	stateStopping
+)
+
+var _ plugin.Watcher = (*Plugin)(nil)
+var _ watch.EventProvider = (*Plugin)(nil)
+
+var _ watch.EventSource = (*mqttSub)(nil)
+var _ watch.EventFilter = (*respFilter)(nil)
+
+var impl Plugin //nolint:gochecknoglobals // legacy implementation
+
+// Plugin inherits plugin.Base and store MQTT plugin-specific data and methods.
+type Plugin struct {
+	plugin.Base
+
+	options     options
+	manager     *watch.Manager
+	mqttClients zbxsync.SyncMap[broker, *mqttClient]
+}
 
 type mqttClient struct {
 	client    mqtt.Client
@@ -55,6 +84,10 @@ type mqttSub struct {
 	broker   broker
 	topic    string
 	wildCard bool
+
+	stateLock    sync.Mutex
+	backoffState backoffState
+	stopCh       chan struct{}
 }
 
 type broker struct {
@@ -62,187 +95,230 @@ type broker struct {
 	username string
 	password string
 }
-type Plugin struct {
-	plugin.Base
-	options     Options
-	manager     *watch.Manager
-	mqttClients map[broker]*mqttClient
+
+type respFilter struct {
+	wildcard bool
 }
 
-var impl Plugin
+type backoffState int
 
-type Options struct {
-	plugin.SystemOptions `conf:"optional"`
-	Timeout              int `conf:"optional,range=1:30"`
+// Watch implements plugin.Watcher interface.
+func (p *Plugin) Watch(items []*plugin.Item, ctx plugin.ContextProvider) {
+	p.manager.Lock()
+	p.manager.Update(ctx.ClientID(), ctx.Output(), items)
+	p.manager.Unlock()
 }
 
-func (p *Plugin) Configure(global *plugin.GlobalOptions, options interface{}) {
-	if err := conf.Unmarshal(options, &p.options); err != nil {
-		p.Warningf("cannot unmarshal configuration options: %s", err)
+// EventSourceByKey implements watch.EventProvider interface.
+//
+//nolint:ireturn // returning interface is a part of implementation requirements.
+func (p *Plugin) EventSourceByKey(rawKey string) (watch.EventSource, error) {
+	key, raw, err := itemutil.ParseKey(rawKey)
+	if err != nil {
+		return nil, errs.Wrap(err, "cannot parse key")
 	}
-	if p.options.Timeout == 0 {
-		p.options.Timeout = global.Timeout
+
+	params, _, hc, err := metrics[key].EvalParams(raw, p.options.Sessions)
+	if err != nil {
+		return nil, errs.Wrap(err, "cannot evaluate params")
 	}
-}
 
-func (p *Plugin) Validate(options interface{}) error {
-	var o Options
-	return conf.Unmarshal(options, &o)
-}
+	err = metric.SetDefaults(params, hc, p.options.Default)
+	if err != nil {
+		return nil, errs.Wrap(err, "cannot set defaults")
+	}
 
-func (p *Plugin) createOptions(clientid, username, password string, b broker) *mqtt.ClientOptions {
-	opts := mqtt.NewClientOptions().AddBroker(b.url).SetClientID(clientid).SetCleanSession(true).SetConnectTimeout(
-		time.Duration(impl.options.Timeout) * time.Second)
-	if username != "" {
-		opts.SetUsername(username)
-		if password != "" {
-			opts.SetPassword(password)
+	topic := params["Topic"]
+	username := params["User"]
+	password := params["Password"]
+
+	u, err := parseURL(params["URL"])
+	if err != nil {
+		return nil, err
+	}
+
+	if topic == "" {
+		return nil, errs.WrapConst(errs.New("second parameter \"Topic\" is required"), zbxerr.ErrorTooFewParameters)
+	}
+
+	connectionTimeout, err := p.getConnectionTimeout(params)
+	if err != nil {
+		return nil, err
+	}
+
+	p.Tracef("connection timeout set to: %d", connectionTimeout)
+
+	var (
+		client *mqttClient
+		ok     bool
+		b      = broker{
+			url:      u.String(),
+			username: username,
+			password: password,
 		}
+	)
+
+	opt, err := p.createOptions(
+		getClientID(rand.NewSource(time.Now().UnixNano())),
+		username,
+		password,
+		b,
+		&tlsconfig.Details{
+			TLSCaFile:   params["TLSCAFile"],
+			TLSCertFile: params["TLSCertFile"],
+			TLSKeyFile:  params["TLSKeyFile"],
+			RawURI:      u.String(),
+		},
+		connectionTimeout,
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	opts.OnConnectionLost = func(client mqtt.Client, reason error) {
-		impl.Warningf("connection lost to [%s]: %s", b.url, reason.Error())
-	}
-
-	opts.OnConnect = func(client mqtt.Client) {
-		impl.Debugf("connected to [%s]", b.url)
-
-		impl.manager.Lock()
-		defer impl.manager.Unlock()
-
-		mc, ok := p.mqttClients[b]
-		if !ok || mc == nil || mc.client == nil {
-			impl.Warningf("cannot subscribe to [%s]: broker is not connected", b.url)
-			return
+	client, ok = p.mqttClients.Load(b)
+	if !ok {
+		impl.Debugf("creating client for [%s]", b.url)
+		client = &mqttClient{
+			client:    nil,
+			broker:    b,
+			subs:      make(map[string]*mqttSub),
+			opts:      opt,
+			connected: false,
 		}
+		p.mqttClients.Store(b, client)
+	}
 
-		mc.connected = true
-		for _, ms := range mc.subs {
-			if err := ms.subscribe(mc); err != nil {
-				impl.Warningf("cannot subscribe topic '%s' to [%s]: %s", ms.topic, b.url, err)
-				impl.manager.Notify(ms, err)
-			}
+	sub, ok := client.subs[topic]
+	if !ok {
+		impl.Debugf("creating new subscriber on topic '%s' for [%s]", topic, b.url)
+
+		sub = &mqttSub{
+			broker:   b,
+			topic:    topic,
+			wildCard: hasWildCards(topic),
 		}
+		client.subs[topic] = sub
 	}
 
-	return opts
+	return sub, nil
 }
 
-func newClient(options *mqtt.ClientOptions) (mqtt.Client, error) {
-	c := mqtt.NewClient(options)
-	token := c.Connect()
-	if !token.WaitTimeout(time.Duration(impl.options.Timeout) * time.Second) {
-		c.Disconnect(200)
-		return nil, fmt.Errorf("timed out while connecting")
-	}
-
-	if token.Error() != nil {
-		return nil, token.Error()
-	}
-
-	return c, nil
-}
-
-func (ms *mqttSub) handler(client mqtt.Client, msg mqtt.Message) {
-	impl.manager.Lock()
-	impl.Tracef("received publish from [%s] on topic '%s' got: %s", ms.broker.url, msg.Topic(), string(msg.Payload()))
-	impl.manager.Notify(ms, msg)
-	impl.manager.Unlock()
-}
-
-func (ms *mqttSub) subscribe(mc *mqttClient) error {
-	impl.Tracef("subscribing '%s' to [%s]", ms.topic, ms.broker.url)
-
-	token := mc.client.Subscribe(ms.topic, 0, ms.handler)
-	if !token.WaitTimeout(time.Duration(impl.options.Timeout) * time.Second) {
-		return fmt.Errorf("timed out while subscribing")
-	}
-
-	if token.Error() != nil {
-		return token.Error()
-	}
-
-	impl.Tracef("subscribed '%s' to [%s]", ms.topic, ms.broker.url)
-	return nil
-}
-
-//Watch MQTT plugin
-func (p *Plugin) Watch(requests []*plugin.Request, ctx plugin.ContextProvider) {
-	impl.manager.Lock()
-	impl.manager.Update(ctx.ClientID(), ctx.Output(), requests)
-	impl.manager.Unlock()
-}
-
-func (ms *mqttSub) Initialize() (err error) {
-	mc, ok := impl.mqttClients[ms.broker]
+// Initialize implements watch.EventSource interface methods.
+func (ms *mqttSub) Initialize() error {
+	mc, ok := impl.mqttClients.Load(ms.broker)
 	if !ok || mc == nil {
-		return fmt.Errorf("Cannot connect to [%s]: broker could not be initialized", ms.broker.url)
+		return errs.New(fmt.Sprintf("Cannot connect to [%s]: broker could not be initialized", ms.broker.url))
 	}
 
 	if mc.client == nil {
+		var err error
+
 		impl.Debugf("establishing connection to [%s]", ms.broker.url)
+
 		mc.client, err = newClient(mc.opts)
 		if err != nil {
 			impl.Warningf("cannot establish connection to [%s]: %s", ms.broker.url, err)
-			return
+
+			ms.stateLock.Lock()
+			// Only start a new backoff goroutine if we are in the idle state.
+			if ms.backoffState == stateIdle {
+				ms.backoffState = stateRetrying
+				ms.stopCh = make(chan struct{})
+				// Pass the channel as an argument to avoid a data race on ms.stopCh
+				go ms.startAsyncEstablishingConnectionBackoff()
+			}
+
+			ms.stateLock.Unlock()
+
+			// the backoff system will try to make connection so the manager system would know that connection is
+			//  being created
+			return nil
 		}
 
 		impl.Debugf("established connection to [%s]", ms.broker.url)
-		return
+
+		return nil
 	}
 
 	if mc.connected {
 		return ms.subscribe(mc)
 	}
 
-	return
+	return nil
 }
 
+// Release implements watch.EventSource interface methods.
 func (ms *mqttSub) Release() {
-	mc, ok := impl.mqttClients[ms.broker]
-	if !ok || mc == nil || mc.client == nil {
+	ms.stateLock.Lock()
+	// Only close the channel if the goroutine is currently running.
+	if ms.backoffState == stateRetrying {
+		ms.backoffState = stateStopping
+		close(ms.stopCh)
+	}
+
+	ms.stateLock.Unlock()
+
+	mc, ok := impl.mqttClients.Load(ms.broker)
+	if !ok || mc == nil {
 		impl.Errf("cannot release [%s]: broker was not initialized", ms.broker.url)
+
 		return
 	}
 
-	impl.Tracef("unsubscribing topic '%s' from [%s]", ms.topic, ms.broker.url)
-	token := mc.client.Unsubscribe(ms.topic)
-	if !token.WaitTimeout(time.Duration(impl.options.Timeout) * time.Second) {
-		impl.Errf("cannot unsubscribe topic '%s' from [%s]: timed out", ms.topic, ms.broker.url)
-	}
+	if mc.client != nil && !mc.client.IsConnected() {
+		impl.Tracef("unsubscribing topic '%s' from [%s]", ms.topic, ms.broker.url)
 
-	if token.Error() != nil {
-		impl.Errf("cannot unsubscribe topic '%s' from [%s]: %s", ms.topic, ms.broker.url, token.Error())
+		token := mc.client.Unsubscribe(ms.topic)
+		if !token.WaitTimeout(mc.opts.ConnectTimeout) {
+			impl.Errf("cannot unsubscribe topic '%s' from [%s]: timed out", ms.topic, ms.broker.url)
+		}
+
+		if token.Error() != nil {
+			impl.Errf("cannot unsubscribe topic '%s' from [%s]: %s", ms.topic, ms.broker.url, token.Error())
+		}
 	}
 
 	delete(mc.subs, ms.topic)
 	impl.Tracef("unsubscribed topic '%s' from [%s]", ms.topic, ms.broker.url)
+
 	if len(mc.subs) == 0 {
 		impl.Debugf("disconnecting from [%s]", ms.broker.url)
-		mc.client.Disconnect(200)
-		delete(impl.mqttClients, mc.broker)
+
+		if mc.client != nil {
+			mc.client.Disconnect(200)
+		}
+
+		impl.mqttClients.Delete(ms.broker)
 	}
 }
 
-type respFilter struct {
-	wildcard bool
+// NewFilter implements watch.EventSource interface methods.
+//
+//nolint:ireturn // returning interface is a part of implementation requirements.
+func (ms *mqttSub) NewFilter(_ string) (watch.EventFilter, error) {
+	return &respFilter{ms.wildCard}, nil
 }
 
-func (f *respFilter) Process(v interface{}) (s *string, err error) {
+// Process implements watch.EventFilter interface methods.
+func (f *respFilter) Process(v any) (*string, error) {
 	m, ok := v.(mqtt.Message)
 	if !ok {
-		if err, ok = v.(error); !ok {
-			err = fmt.Errorf("unexpected input type %T", v)
+		err, ok := v.(error)
+		if !ok {
+			err = errs.New(fmt.Sprintf("unexpected input type %T", v))
 		}
-		return
+
+		return nil, err
 	}
 
 	var value string
+
 	if f.wildcard {
 		j, err := json.Marshal(map[string]string{m.Topic(): string(m.Payload())})
 		if err != nil {
-			return nil, err
+			return nil, errs.Wrap(err, "cannot marshal filter response")
 		}
+
 		value = string(j)
 	} else {
 		value = string(m.Payload())
@@ -251,106 +327,268 @@ func (f *respFilter) Process(v interface{}) (s *string, err error) {
 	return &value, nil
 }
 
-func (ms *mqttSub) NewFilter(key string) (filter watch.EventFilter, err error) {
-	return &respFilter{ms.wildCard}, nil
+func (ms *mqttSub) startAsyncEstablishingConnectionBackoff() {
+	const (
+		baseBackoff = 1 * time.Second
+		maxBackoff  = 10 * time.Minute
+		factor      = 2
+	)
+
+	//nolint:gosec // This use of math/rand is not for a security-sensitive context.
+	wait := baseBackoff + time.Duration(rand.Intn(1000))*time.Millisecond
+	ticker := time.NewTicker(wait)
+
+	go func() {
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ms.stopCh:
+				// Exit signal received from Release.
+				return
+			case <-ticker.C:
+				// This check ensures the routine stops if the parent object is destroyed.
+				if ms == nil {
+					return
+				}
+
+				mc, ok := impl.mqttClients.Load(ms.broker)
+				if !ok || mc == nil {
+					impl.Warningf("finished attempting to establish connection to [%s]", ms.broker.url)
+
+					return
+				}
+
+				if mc.connected {
+					return
+				}
+
+				var err error
+
+				mc.client, err = newClient(mc.opts)
+				if err != nil {
+					impl.Debugf("cannot establish connection to [%s]: %s", ms.broker.url, err)
+
+					wait *= factor
+					if wait > maxBackoff {
+						wait = maxBackoff
+					}
+
+					// Reset the ticker with the new, longer backoff duration plus jitter.
+					//nolint:gosec // This use of math/rand is not for a security-sensitive context.
+					newDuration := wait + time.Duration(rand.Intn(1000))*time.Millisecond
+					ticker.Reset(newDuration)
+
+					continue
+				}
+
+				ms.stateLock.Lock()
+				ms.backoffState = stateIdle
+				ms.stopCh = nil
+				ms.stateLock.Unlock()
+
+				impl.Debugf("established connection to [%s]", ms.broker.url)
+
+				return
+			}
+		}
+	}()
 }
 
-func (p *Plugin) EventSourceByKey(key string) (es watch.EventSource, err error) {
-	var params []string
-	if _, params, err = itemutil.ParseKey(key); err != nil {
-		return
-	}
-	if len(params) > 4 {
-		return nil, fmt.Errorf("Too many parameters.")
+func (p *Plugin) getConnectionTimeout(params map[string]string) (int, error) {
+	connectionTimeout, err := strconv.Atoi(params["ConnectionTimeout"])
+	if err != nil {
+		p.Tracef("failed to convert parameter connection timeout %s", err.Error())
+
+		connectionTimeout, err = strconv.Atoi(p.options.Default.ConnectionTimeout)
+		if err != nil {
+			p.Tracef("failed to convert default connection timeout %s", err.Error())
+
+			return 0, errs.New("failed to get connection timeout")
+		}
 	}
 
-	if len(params) < 2 || "" == params[1] {
-		return nil, errors.New("Invalid second parameter.")
+	return connectionTimeout, nil
+}
+
+func (p *Plugin) createOptions(
+	clientid string,
+	username string,
+	password string,
+	b broker,
+	details *tlsconfig.Details,
+	connectionTimeout int,
+) (*mqtt.ClientOptions, error) {
+	opts := mqtt.NewClientOptions().
+		AddBroker(b.url).
+		SetClientID(clientid).
+		SetCleanSession(true).
+		SetConnectTimeout(time.Duration(connectionTimeout) * time.Second)
+
+	if username != "" {
+		opts.SetUsername(username)
+
+		if password != "" {
+			opts.SetPassword(password)
+		}
 	}
 
-	topic := params[1]
-	url, err := parseURL(params[0])
+	opts.OnConnectionLost = func(_ mqtt.Client, reason error) {
+		p.Warningf("connection lost to [%s]: %s", b.url, reason.Error())
+	}
+
+	var connectionEstablished bool
+
+	opts.OnConnect = func(_ mqtt.Client) {
+		if !connectionEstablished {
+			p.Warningf("connected to [%s]", b.url)
+
+			connectionEstablished = true
+		} else {
+			p.Warningf("reconnected to [%s]", b.url)
+		}
+
+		p.manager.Lock()
+		defer p.manager.Unlock()
+
+		mc, ok := p.mqttClients.Load(b)
+		if !ok || mc == nil || mc.client == nil {
+			p.Warningf("cannot subscribe to [%s]: broker is not connected", b.url)
+
+			return
+		}
+
+		mc.connected = true
+		for _, ms := range mc.subs {
+			err := ms.subscribe(mc)
+			if err != nil {
+				p.Warningf("cannot subscribe topic '%s' to [%s]: %s", ms.topic, b.url, err)
+				p.manager.Notify(ms, err)
+			}
+		}
+	}
+
+	t, err := getTLSConfig(details)
 	if err != nil {
 		return nil, err
 	}
 
-	var username, password string
-	if len(params) > 2 {
-		username = params[2]
-	}
+	opts.SetTLSConfig(t)
 
-	if len(params) > 3 {
-		password = params[3]
-	}
-
-	broker := broker{url.String(), username, password}
-	var client *mqttClient
-	var ok bool
-	if client, ok = p.mqttClients[broker]; !ok {
-		impl.Tracef("creating client for [%s]", broker.url)
-
-		client = &mqttClient{nil, broker, make(map[string]*mqttSub), p.createOptions(getClientID(), username, password,
-			broker), false}
-		p.mqttClients[broker] = client
-	}
-
-	var sub *mqttSub
-	if sub, ok = client.subs[topic]; !ok {
-		impl.Tracef("creating new subscriber on topic '%s' for [%s]", topic, broker.url)
-
-		sub = &mqttSub{broker, topic, hasWildCards(topic)}
-		client.subs[topic] = sub
-	}
-
-	return sub, nil
+	return opts, nil
 }
 
-func getClientID() string {
-	b := make([]byte, 16)
-	_, err := rand.Read(b)
-	if err != nil {
-		impl.Errf("failed to generate a uuid for mqtt Client ID: %s", err.Error)
-		return "Zabbix agent 2 " + version.Long()
+//nolint:ireturn // legacy implementation.
+func newClient(options *mqtt.ClientOptions) (mqtt.Client, error) {
+	c := mqtt.NewClient(options)
+
+	token := c.Connect()
+	if !token.WaitTimeout(options.ConnectTimeout) {
+		c.Disconnect(200)
+
+		return nil, errs.New("timed out while connecting")
 	}
-	return fmt.Sprintf("Zabbix agent 2 %s %x-%x-%x-%x-%x", version.Long(), b[0:4], b[4:6], b[6:8], b[8:10], b[10:])
+
+	if token.Error() != nil {
+		return nil, errs.Wrap(token.Error(), "cannot connect to mqtt")
+	}
+
+	return c, nil
+}
+
+func getTLSConfig(d *tlsconfig.Details) (*tls.Config, error) {
+	if d.TLSCaFile == "" && d.TLSCertFile == "" && d.TLSKeyFile == "" {
+		return nil, nil //nolint:nilnil // this case makes sense for such behavior because no tls should be created.
+	}
+
+	config, err := tlsconfig.CreateConfig(
+		tlsconfig.Details{
+			TLSCaFile:   d.TLSCaFile,
+			TLSCertFile: d.TLSCertFile,
+			TLSKeyFile:  d.TLSKeyFile,
+			RawURI:      d.RawURI,
+		},
+		false,
+	)
+	if err != nil {
+		return nil, errs.Wrap(err, "cannot create tls config")
+	}
+
+	return config, nil
+}
+
+func (ms *mqttSub) handler(_ mqtt.Client, msg mqtt.Message) {
+	go func(message mqtt.Message, sub *mqttSub) {
+		impl.manager.Lock()
+		defer impl.manager.Unlock()
+
+		impl.Tracef("received publish from [%s] on topic '%s' got: %s",
+			ms.broker.url, msg.Topic(),
+			string(msg.Payload()),
+		)
+
+		impl.manager.Notify(sub, message)
+	}(msg, ms)
+}
+
+func (ms *mqttSub) subscribe(mc *mqttClient) error {
+	impl.Tracef("subscribing '%s' to [%s]", ms.topic, ms.broker.url)
+
+	token := mc.client.Subscribe(ms.topic, 0, ms.handler)
+	if !token.WaitTimeout(mc.opts.ConnectTimeout) {
+		return errs.New("timed out while subscribing")
+	}
+
+	if token.Error() != nil {
+		return errs.Wrap(token.Error(), "cannot subscribe to topic")
+	}
+
+	impl.Tracef("subscribed '%s' to [%s]", ms.topic, ms.broker.url)
+
+	return nil
+}
+
+func getClientID(src rand.Source) string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+
+	var result = make([]byte, 8)
+
+	//nolint:gosec
+	// we are okay with using a weaker random number generator as this is not intended to be a secure token
+	r := rand.New(src)
+
+	for i := range result {
+		result[i] = charset[r.Intn(len(charset))]
+	}
+
+	return "ZabbixAgent2" + string(result)
 }
 
 func hasWildCards(topic string) bool {
 	return strings.HasSuffix(topic, "#") || strings.Contains(topic, "+")
 }
 
-func parseURL(rawUrl string) (out *url.URL, err error) {
-	if len(rawUrl) == 0 {
-		rawUrl = "localhost"
+func parseURL(rawURL string) (*url.URL, error) {
+	if !strings.Contains(rawURL, "://") {
+		rawURL = "tcp://" + rawURL
 	}
 
-	if !strings.Contains(rawUrl, "://") {
-		rawUrl = "tcp://" + rawUrl
-	}
-
-	out, err = url.Parse(rawUrl)
+	out, err := url.Parse(rawURL)
 	if err != nil {
-		return
+		return nil, errs.Wrap(err, "cannot parse URL")
 	}
 
 	if out.Port() != "" && out.Hostname() == "" {
-		return nil, errors.New("Host is required.")
+		return nil, errs.New("host is required.")
 	}
 
 	if out.Port() == "" {
-		out.Host = fmt.Sprintf("%s:1883", out.Host)
+		out.Host += ":1883"
 	}
 
 	if len(out.Query()) > 0 {
-		return nil, errors.New("URL should not contain query parameters.")
+		return nil, errs.New("URL should not contain query parameters.")
 	}
 
-	return
-}
-
-func init() {
-	impl.manager = watch.NewManager(&impl)
-	impl.mqttClients = make(map[broker]*mqttClient)
-
-	plugin.RegisterMetrics(&impl, "MQTT", "mqtt.get", "Subscribe to MQTT topics for published messages.")
+	return out, nil
 }

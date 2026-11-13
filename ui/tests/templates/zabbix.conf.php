@@ -4,7 +4,7 @@ global $DB;
 
 $DB['TYPE']				= '{DBTYPE}';
 $DB['SERVER']			= '{DBHOST}';
-$DB['PORT']				= '0';
+$DB['PORT']				= '{DBPORT}';
 $DB['DATABASE']			= '{DBNAME}';
 $DB['USER']				= '{DBUSER}';
 $DB['PASSWORD']			= '{DBPASSWORD}';
@@ -24,6 +24,10 @@ $ZBX_SERVER_PORT		= '{SERVER_PORT}';
 $ZBX_SERVER_NAME		= 'TEST_SERVER_NAME';
 
 $IMAGE_FORMAT_DEFAULT	= IMAGE_FORMAT_PNG;
+
+$ZBX_FEATURE_FLAGS['banners_enabled'] = false;
+
+$NO_AUTH_DEBUG_MODE = true;
 
 // PHP runtime error log file for unit tests.
 define('PHPUNIT_ERROR_LOG', '{PHPUNIT_ERROR_LOG}');
@@ -90,7 +94,7 @@ if (!defined('PHPUNIT_BASEDIR')) {
 		}
 
 		return zbx_err_handler($errno, $errstr, $errfile, $errline);
-	}, E_ALL | E_STRICT);
+	}, PHP_VERSION_ID >= 80400 ? E_ALL : E_ALL | E_STRICT);
 
 	set_exception_handler(function ($exception) {
 		file_put_contents(PHPUNIT_ERROR_LOG, $exception."\n", FILE_APPEND);

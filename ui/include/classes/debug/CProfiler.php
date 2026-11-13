@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -34,6 +29,13 @@ class CProfiler {
 	 * @var float
 	 */
 	protected $slowElasticQueryTime = 0.01;
+
+	/**
+	 * Determines time for single ClickHouse query to be considered slow.
+	 *
+	 * @var float
+	 */
+	protected $slowClickHouseQueryTime = 0.01;
 
 	/**
 	 * Contains all api requests info.
@@ -57,6 +59,13 @@ class CProfiler {
 	protected $elasticQueryLog = [];
 
 	/**
+	 * Contains ClickHouse queries info.
+	 *
+	 * @var array
+	 */
+	protected $clickhouseQueryLog = [];
+
+	/**
 	 * Total time of all performed sql queries.
 	 *
 	 * @var float
@@ -69,6 +78,13 @@ class CProfiler {
 	 * @var float
 	 */
 	protected $elasticTotalTime = 0.0;
+
+	/**
+	 * Total time of all performed ClickHouse queries.
+	 *
+	 * @var float
+	 */
+	protected $clickhouseTotalTime = 0.0;
 
 	/**
 	 * Timestamp of profiling start.
@@ -99,8 +115,6 @@ class CProfiler {
 	private $root_dir;
 
 	/**
-	 * @static
-	 *
 	 * @return CProfiler
 	 */
 	public static function getInstance() {
@@ -151,6 +165,11 @@ class CProfiler {
 
 		if ($this->elasticQueryLog) {
 			$debug[] = _s('Total Elasticsearch time: %1$s', $this->elasticTotalTime);
+			$debug[] = BR();
+		}
+
+		if ($this->clickhouseQueryLog) {
+			$debug[] = _s('Total ClickHouse time: %1$s', $this->clickhouseTotalTime);
 			$debug[] = BR();
 		}
 
@@ -208,27 +227,46 @@ class CProfiler {
 			$debug[] = BR();
 		}
 
-		$debug[] = BR();
-
 		foreach ($this->elasticQueryLog as $query) {
 			$time = $query[0];
 
 			$record = [
 				'Elasticsearch ('.$time.'): ',
-				$query[1].' ',
-				(new CSpan($query[2]))->addClass(ZBX_STYLE_BLUE),
-				BR(),
-				'Request: ',
-				(new CSpan($query[3]))->addClass(ZBX_STYLE_GREEN),
+				(new CSpan($query[1]))->addClass(ZBX_STYLE_GREEN),
 				BR()
 			];
 
 			if ($time > $this->slowElasticQueryTime) {
-				$sql = bold($record);
+				$record = bold($record);
 			}
+
 			$debug[] = $record;
 
-			$debug[] = $this->formatCallStack($query[4]);
+			$debug[] = $this->formatCallStack($query[2]);
+			$debug[] = BR();
+			$debug[] = BR();
+		}
+
+		foreach ($this->clickhouseQueryLog as $query) {
+			$time = $query[0];
+
+			$record = [
+				'ClickHouse ('.$time.'): ',
+				(new CSpan($query[1]))->addClass(ZBX_STYLE_GREEN),
+				BR()
+			];
+
+			if ($time > $this->slowClickHouseQueryTime) {
+				$record = bold($record);
+			}
+
+			$debug[] = $record;
+			if ($query[2]) {
+				$debug[] = (new CSpan(json_encode($query[2])))->addClass(ZBX_STYLE_GREY);
+				$debug[] = BR();
+			}
+
+			$debug[] = $this->formatCallStack($query[3]);
 			$debug[] = BR();
 			$debug[] = BR();
 		}
@@ -299,11 +337,9 @@ class CProfiler {
 	 * Store Elasticsearch query data.
 	 *
 	 * @param float  $time
-	 * @param string $method
-	 * @param string $endpoint
 	 * @param string $query
 	 */
-	public function profileElasticsearch($time, $method, $endpoint, $query) {
+	public function profileElasticsearch(float $time, string $query) {
 		if (!is_null(CWebUser::$data) && isset(CWebUser::$data['debug_mode'])
 				&& CWebUser::$data['debug_mode'] == GROUP_DEBUG_MODE_DISABLED) {
 			return;
@@ -314,9 +350,28 @@ class CProfiler {
 		$this->elasticTotalTime += $time;
 		$this->elasticQueryLog[] = [
 			$time,
-			$method,
-			$endpoint,
 			$query,
+			array_slice(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS), 1)
+		];
+	}
+
+	/**
+	 * Store ClickHouse query data.
+	 *
+	 * @param float  $time
+	 * @param string $query
+	 * @param array  $params
+	 */
+	public function profileClickHouse(float $time, string $query, array $params = []) {
+		if (!is_null(CWebUser::$data) && isset(CWebUser::$data['debug_mode'])
+			&& CWebUser::$data['debug_mode'] == GROUP_DEBUG_MODE_DISABLED) {
+			return;
+		}
+
+		$time = round($time, 6);
+
+		$this->clickhouseTotalTime += $time;
+		$this->clickhouseQueryLog[] = [$time, $query, $params,
 			array_slice(debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS), 1)
 		];
 	}
@@ -340,7 +395,7 @@ class CProfiler {
 	 *
 	 * @return string
 	 */
-	public function formatCallStack(array $callStack = null) {
+	public function formatCallStack(?array $callStack = null) {
 		if (!$callStack) {
 			$callStack = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS);
 

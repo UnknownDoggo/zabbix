@@ -1,26 +1,22 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
+
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/../CElement.php';
+require_once __DIR__.'/../CElement.php';
 
 /**
  * Table element.
@@ -35,7 +31,7 @@ class CTableElement extends CElement {
 	protected $selectors = [
 		'header' => 'xpath:./thead/tr/th',
 		'row' => 'xpath:./tbody/tr',
-		'column' => 'xpath:./td'
+		'column' => 'xpath:./*'
 	];
 
 	/**
@@ -51,6 +47,13 @@ class CTableElement extends CElement {
 	 * @var array
 	 */
 	protected $headers_text;
+
+	/**
+	 * Array of column names.
+	 *
+	 * @var array
+	 */
+	protected $column_names;
 
 	/**
 	 * @inheritdoc
@@ -98,6 +101,37 @@ class CTableElement extends CElement {
 	}
 
 	/**
+	 * Get sortable table headers.
+	 *
+	 * @return CElementCollection
+	 */
+	public function getSortableHeaders() {
+		return $this->getHeaders()->query('tag:a');
+	}
+
+	/**
+	 * Get array of header element texts for column naming.
+	 *
+	 * @return array
+	 */
+	public function getColumnNames() {
+		if ($this->column_names === null) {
+			$this->column_names = $this->getHeadersText();
+		}
+
+		return $this->column_names;
+	}
+
+	/**
+	 * Set array of header element texts for column naming.
+	 *
+	 * @param array $names  array of names
+	 */
+	public function setColumnNames($names) {
+		$this->column_names = $names;
+	}
+
+	/**
 	 * Get collection of table rows.
 	 *
 	 * @return CElementCollection
@@ -129,7 +163,7 @@ class CTableElement extends CElement {
 	 * @return array
 	 */
 	public function getCells() {
-		$headers = $this->getHeadersText();
+		$headers = $this->getColumnNames();
 
 		$table = [];
 		foreach ($this->getRows() as $row) {
@@ -154,7 +188,7 @@ class CTableElement extends CElement {
 	 * @return CTableRow|CNullElement
 	 */
 	public function findRow($column, $value, $contains = false) {
-		$headers = $this->getHeadersText();
+		$headers = $this->getColumnNames();
 
 		if (is_string($column)) {
 			$index = array_search($column, $headers);
@@ -165,9 +199,13 @@ class CTableElement extends CElement {
 			$column = $index + 1;
 		}
 
-		$suffix = $contains ? '['.$column.'][contains(string(), '.CXPathHelper::escapeQuotes($value).')]/..'
+		$suffix = $contains
+			? '['.$column.'][contains(string(), '.CXPathHelper::escapeQuotes($value).')]/..'
 			: '['.$column.'][string()='.CXPathHelper::escapeQuotes($value).']/..';
-		$xpaths = ['.//tbody/tr/td'.$suffix, './/tbody/tr/th'.$suffix];
+		$textarea_suffix = $contains
+			? '['.$column.']/z-textarea-flexible[contains(@value, '.CXPathHelper::escapeQuotes($value).')]/../..'
+			: '['.$column.']/z-textarea-flexible[@value='.CXPathHelper::escapeQuotes($value).']/../..';
+		$xpaths = ['.//tbody/tr/td'.$suffix, './/tbody/tr/td'.$textarea_suffix, './/tbody/tr/th'.$suffix];
 
 		return $this->query('xpath', implode('|', $xpaths))->asTableRow([
 			'parent' => $this,
@@ -186,7 +224,7 @@ class CTableElement extends CElement {
 	public function findRows($param, $data = []) {
 		$rows = [];
 
-		if (is_callable($param)) {
+		if ($param instanceof \Closure) {
 			foreach ($this->getRows() as $i => $row) {
 				if (call_user_func($param, $row)) {
 					$rows[$i] = $row;

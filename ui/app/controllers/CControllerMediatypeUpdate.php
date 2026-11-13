@@ -1,184 +1,304 @@
-<?php
+<?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
-class CControllerMediatypeUpdate extends CController {
+class CControllerMediatypeUpdate extends CControllerMediatypeUpdateGeneral {
 
-	protected function checkInput() {
-		$fields = [
-			'mediatypeid' =>			'fatal|required|db media_type.mediatypeid',
-			'type' =>					'required|db media_type.type|in '.implode(',', array_keys(media_type2str())),
-			'name' =>					'db media_type.name|not_empty',
-			'smtp_server' =>			'db media_type.smtp_server',
-			'smtp_port' =>				'db media_type.smtp_port',
-			'smtp_helo' =>				'db media_type.smtp_helo',
-			'smtp_email' =>				'db media_type.smtp_email',
-			'smtp_security' =>			'db media_type.smtp_security|in '.SMTP_CONNECTION_SECURITY_NONE.','.SMTP_CONNECTION_SECURITY_STARTTLS.','.SMTP_CONNECTION_SECURITY_SSL_TLS,
-			'smtp_verify_peer' =>		'db media_type.smtp_verify_peer|in 0,1',
-			'smtp_verify_host' =>		'db media_type.smtp_verify_host|in 0,1',
-			'smtp_authentication' =>	'db media_type.smtp_authentication|in '.SMTP_AUTHENTICATION_NONE.','.SMTP_AUTHENTICATION_NORMAL,
-			'exec_path' =>				'db media_type.exec_path',
-			'exec_params' =>			'array',
-			'gsm_modem' =>				'db media_type.gsm_modem',
-			'smtp_username' =>			'db media_type.username',
-			'passwd' =>					'db media_type.passwd',
-			'parameters' =>				'array',
-			'script' => 				'db media_type.script',
-			'timeout' => 				'db media_type.timeout',
-			'process_tags' =>			'in '.ZBX_MEDIA_TYPE_TAGS_DISABLED.','.ZBX_MEDIA_TYPE_TAGS_ENABLED,
-			'show_event_menu' =>		'in '.ZBX_EVENT_MENU_HIDE.','.ZBX_EVENT_MENU_SHOW,
-			'event_menu_url' =>			'db media_type.event_menu_url',
-			'event_menu_name' =>		'db media_type.event_menu_name',
-			'status' =>					'db media_type.status|in '.MEDIA_TYPE_STATUS_ACTIVE.','.MEDIA_TYPE_STATUS_DISABLED,
-			'maxsessions' =>			'db media_type.maxsessions',
-			'maxattempts' =>			'db media_type.maxattempts',
-			'attempt_interval' =>		'db media_type.attempt_interval',
-			'description' =>			'db media_type.description',
-			'form_refresh' =>			'int32',
-			'content_type' =>			'db media_type.content_type|in '.SMTP_MESSAGE_FORMAT_PLAIN_TEXT.','.SMTP_MESSAGE_FORMAT_HTML,
-			'message_templates' =>		'array'
+	public static function getValidationRules(): array {
+		$api_uniq = [
+			'mediatype.get', ['name' => '{name}'], 'mediatypeid'
 		];
 
-		$ret = $this->validateInput($fields);
-		$error = $this->GetValidationError();
+		return ['object', 'api_uniq' => $api_uniq, 'fields' => [
+			'mediatypeid' => ['db media_type.mediatypeid', 'required'],
+			'type' => ['db media_type.type', 'required', 'in' => CMediatypeHelper::getSupportedMediaTypes()],
+			'name' => ['db media_type.name', 'required', 'not_empty'],
+			'provider' => ['db media_type.provider', 'in' => array_keys(CMediatypeHelper::getEmailProviders()),
+				'when' => ['type', 'in' => [MEDIA_TYPE_EMAIL]]
+			],
+			'smtp_server' => ['db media_type.smtp_server', 'required', 'not_empty',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]]
+				]
+			],
+			'smtp_port' => ['db media_type.smtp_port', 'required',
+				'min' => ZBX_MIN_PORT_NUMBER, 'max' => ZBX_MAX_PORT_NUMBER,
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]]
+				]
+			],
+			'smtp_helo' => ['db media_type.smtp_helo', 'required',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]]
+				]
+			],
+			'smtp_email' =>	['db media_type.smtp_email', 'required', 'not_empty',
+				'use' => [CEmailValidator::class, []],
+				'when' => ['type', 'in' => [MEDIA_TYPE_EMAIL]]
+			],
+			'smtp_security' => ['db media_type.smtp_security', 'required',
+				'in' => [SMTP_SECURITY_NONE, SMTP_SECURITY_STARTTLS, SMTP_SECURITY_SSL],
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]]
+				]
+			],
+			'smtp_verify_peer' => ['boolean',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]],
+					['smtp_security', 'in' => [SMTP_SECURITY_STARTTLS, SMTP_SECURITY_SSL]]
+				]
+			],
+			'smtp_verify_host' => ['boolean',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]],
+					['smtp_security', 'in' => [SMTP_SECURITY_STARTTLS, SMTP_SECURITY_SSL]]
+				]
+			],
+			'smtp_authentication' => ['db media_type.smtp_authentication', 'required',
+				'in' =>[SMTP_AUTHENTICATION_NONE, SMTP_AUTHENTICATION_PASSWORD, SMTP_AUTHENTICATION_OAUTH],
+				'when' => ['type', 'in' => [MEDIA_TYPE_EMAIL]]
+			],
+			'smtp_username' => ['db media_type.username', 'required',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_PASSWORD]]
+				]
+			],
+			'passwd' =>	[
+				['db media_type.passwd', 'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_PASSWORD]]
+				]],
+				['db media_type.passwd', 'not_empty', 'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['provider', 'not_in' => [CMediatypeHelper::EMAIL_PROVIDER_SMTP]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_PASSWORD]]
+				]]
+			],
+			'tokens_status' => [
+				['db media_type_oauth.tokens_status', 'required',
+					'in' => [OAUTH_ACCESS_TOKEN_VALID | OAUTH_REFRESH_TOKEN_VALID],
+					'when' => [
+						['type', 'in' => [MEDIA_TYPE_EMAIL]],
+						['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+					],
+					'messages' => ['in' => _('Invalid OAuth configuration')]
+				]
+			],
+			'redirection_url' => ['db media_type_oauth.redirection_url', 'required', 'not_empty',
+				'use' => [CUrlValidator::class, ['schemes' => CMediatypeHelper::OAUTH_URL_SCHEMES]],
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]],
+					['tokens_status', 'not_in' => [0]]
+				],
+				'messages' => ['not_empty' => _('Invalid OAuth configuration')]
+			],
+			'client_id' => ['db media_type_oauth.client_id', 'required', 'not_empty',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]],
+					['redirection_url', 'not_empty']
+				],
+				'messages' => ['not_empty' => _('Invalid OAuth configuration')]
+			],
+			'client_secret' => ['db media_type_oauth.client_secret', 'not_empty',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+				]
+			],
+			'authorization_url' => ['db media_type_oauth.authorization_url', 'required', 'not_empty',
+				'use' => [CUrlValidator::class, ['schemes' => CMediatypeHelper::OAUTH_URL_SCHEMES]],
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]],
+					['client_id', 'not_empty']
+				],
+				'messages' => ['not_empty' => _('Invalid OAuth configuration')]
+			],
+			'token_url' => ['db media_type_oauth.token_url', 'required', 'not_empty',
+				'use' => [CUrlValidator::class, ['schemes' => CMediatypeHelper::OAUTH_URL_SCHEMES]],
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]],
+					['authorization_url', 'not_empty']
+				],
+				'messages' => ['not_empty' => _('Invalid OAuth configuration')]
+			],
+			'access_token' => ['db media_type_oauth.access_token',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+				]
+			],
+			'access_token_updated' => ['db media_type_oauth.access_token_updated',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+				]
+			],
+			'access_expires_in' => ['db media_type_oauth.access_expires_in',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+				]
+			],
+			'refresh_token' => ['db media_type_oauth.refresh_token',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_EMAIL]],
+					['smtp_authentication', 'in' => [SMTP_AUTHENTICATION_OAUTH]]
+				]
+			],
+			'message_format' =>	['db media_type.message_format',
+				'in' => [ZBX_MEDIA_MESSAGE_FORMAT_TEXT, ZBX_MEDIA_MESSAGE_FORMAT_HTML],
+				'when' => ['type', 'in' => [MEDIA_TYPE_EMAIL]]
+			],
+			'gsm_modem' => ['db media_type.gsm_modem', 'required', 'not_empty',
+				'when' => ['type', 'in' => [MEDIA_TYPE_SMS]]
+			],
+			'exec_path' => ['db media_type.exec_path', 'required', 'not_empty',
+				'when' => ['type', 'in' => [MEDIA_TYPE_EXEC]]
+			],
+			'parameters_exec' => ['objects', 'required',
+				'fields' => ['value' => ['string']],
+				'when' => ['type', 'in' => [MEDIA_TYPE_EXEC]]
+			],
+			'parameters_webhook' =>	['objects', 'required', 'uniq' => ['name'],
+				'fields' => [
+					'value' => ['string', 'required'],
+					'name' => [
+						['string', 'required'],
+						['string', 'required', 'not_empty', 'when' => ['value', 'not_empty']]
+					]
+				],
+				'when' => ['type', 'in' => [MEDIA_TYPE_WEBHOOK]],
+				'messages' => ['uniq' => _('Name is not unique.')]
+			],
+			'script' => ['db media_type.script', 'required', 'not_empty',
+				'when' => ['type', 'in' => [MEDIA_TYPE_WEBHOOK]]
+			],
+			'timeout' => ['db media_type.timeout', 'required', 'not_empty',
+				'use' => [CTimeUnitValidator::class, ['min' => 1, 'max' => SEC_PER_MIN]],
+				'when' => ['type', 'in' => [MEDIA_TYPE_WEBHOOK]]
+			],
+			'process_tags' => ['db media_type.process_tags',
+				'in' => [ZBX_MEDIA_TYPE_TAGS_DISABLED, ZBX_MEDIA_TYPE_TAGS_ENABLED],
+				'when' => ['type', 'in' => [MEDIA_TYPE_WEBHOOK]]
+			],
+			'show_event_menu' => ['db media_type.show_event_menu', 'in' => [ZBX_EVENT_MENU_HIDE, ZBX_EVENT_MENU_SHOW],
+				'when' => ['type', 'in' => [MEDIA_TYPE_WEBHOOK]]
+			],
+			'event_menu_url' =>	['db media_type.event_menu_url', 'required', 'not_empty',
+				'use' => [CUrlValidator::class, [
+					'event_tags_macro' => true,
+					'schemes' => CSettingsHelper::getAllowedUriSchemes()
+				]],
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_WEBHOOK]],
+					['show_event_menu', 'in' => [ZBX_EVENT_MENU_SHOW]]
+				]
+			],
+			'event_menu_name' => ['db media_type.event_menu_name', 'required', 'not_empty',
+				'when' => [
+					['type', 'in' => [MEDIA_TYPE_WEBHOOK]],
+					['show_event_menu', 'in' => [ZBX_EVENT_MENU_SHOW]]
+				]
+			],
+			'description' => ['db media_type.description'],
+			'status' =>	['db media_type.status', 'in' => [MEDIA_TYPE_STATUS_ACTIVE, MEDIA_TYPE_STATUS_DISABLED]],
+			'message_templates' => ['objects', 'uniq' => ['eventsource', 'recovery'], 'fields' => [
+				'eventsource' => ['db media_type_message.eventsource', 'required',
+					'in' => [EVENT_SOURCE_TRIGGERS, EVENT_SOURCE_DISCOVERY, EVENT_SOURCE_AUTOREGISTRATION,
+						EVENT_SOURCE_INTERNAL, EVENT_SOURCE_SERVICE
+					]
+				],
+				'recovery' => [
+					['db media_type_message.recovery', 'required',
+						'in' => [ACTION_OPERATION, ACTION_RECOVERY_OPERATION, ACTION_UPDATE_OPERATION],
+						'when' => ['eventsource', 'in' => [EVENT_SOURCE_TRIGGERS, EVENT_SOURCE_SERVICE]]
+					],
+					['db media_type_message.recovery', 'required',
+						'in' => [ACTION_OPERATION],
+						'when' => ['eventsource', 'in' => [EVENT_SOURCE_DISCOVERY, EVENT_SOURCE_AUTOREGISTRATION]]
+					],
+					['db media_type_message.recovery', 'required',
+						'in' => [ACTION_OPERATION, ACTION_RECOVERY_OPERATION],
+						'when' => ['eventsource', 'in' => [EVENT_SOURCE_INTERNAL]]
+					]
+				],
+				'subject' => ['db media_type_message.subject'],
+				'message' => ['db media_type_message.message']
+			]],
+			'maxsessions' => ['db media_type.maxsessions', 'min' => 0, 'max' => 100,
+				'when' => ['type', 'in' => [MEDIA_TYPE_EMAIL, MEDIA_TYPE_EXEC, MEDIA_TYPE_WEBHOOK, MEDIA_TYPE_PUSH]]
+			],
+			'maxattempts' => ['db media_type.maxattempts', 'min' => 1, 'max' => 100],
+			'attempt_interval' => ['db media_type.attempt_interval', 'required', 'not_empty',
+				'use' => [CTimeUnitValidator::class, ['min' => 0, 'max' => SEC_PER_HOUR]]
+			]
+		]];
+	}
 
-		if ($ret && $this->hasInput('exec_params')) {
-			foreach ($this->getInput('exec_params') as $exec_param) {
-				if (count($exec_param) != 1
-						|| !array_key_exists('exec_param', $exec_param) || !is_string($exec_param['exec_param'])) {
-					$ret = false;
-					break;
-				}
-			}
-		}
+	protected function checkInput(): bool {
+		$ret = $this->validateInput(self::getValidationRules());
 
 		if (!$ret) {
-			switch ($error) {
-				case self::VALIDATION_ERROR:
-					$response = new CControllerResponseRedirect('zabbix.php?action=mediatype.edit');
-					$response->setFormData($this->getInputAll());
-					CMessageHelper::setErrorTitle(_('Cannot update media type'));
-					$this->setResponse($response);
-					break;
+			$form_errors = $this->getValidationError();
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'title' => _('Cannot update media type'),
+					'messages' => array_column(get_and_clear_messages(), 'message')
+				]];
 
-				case self::VALIDATION_FATAL_ERROR:
-					$this->setResponse(new CControllerResponseFatal());
-					break;
-			}
+			$this->setResponse(
+				new CControllerResponseData(['main_block' => json_encode($response)])
+			);
 		}
 
 		return $ret;
 	}
 
-	protected function checkPermissions() {
-		if (!$this->checkAccess(CRoleHelper::UI_ADMINISTRATION_MEDIA_TYPES)) {
-			return false;
-		}
-
-		return (bool) API::Mediatype()->get([
-			'output' => [],
-			'mediatypeids' => $this->getInput('mediatypeid'),
-			'editable' => true
-		]);
-	}
-
-	protected function doAction() {
-		$mediatype = [];
-
-		$this->getInputs($mediatype, ['mediatypeid', 'type', 'name', 'maxsessions', 'maxattempts', 'attempt_interval',
-			'description'
-		]);
-		$mediatype['status'] = $this->getInput('status', MEDIA_TYPE_STATUS_ACTIVE);
-		$mediatype['message_templates'] = $this->getInput('message_templates', []);
-
-		switch ($mediatype['type']) {
-			case MEDIA_TYPE_EMAIL:
-				$this->getInputs($mediatype, ['smtp_server', 'smtp_port', 'smtp_helo', 'smtp_email', 'smtp_security',
-					'smtp_authentication', 'passwd', 'content_type'
-				]);
-
-				if ($this->hasInput('smtp_username')) {
-					$mediatype['username'] = $this->getInput('smtp_username');
-				}
-
-				$mediatype['smtp_verify_peer'] = $this->getInput('smtp_verify_peer', 0);
-				$mediatype['smtp_verify_host'] = $this->getInput('smtp_verify_host', 0);
-
-				break;
-
-			case MEDIA_TYPE_EXEC:
-				$this->getInputs($mediatype, ['exec_path']);
-
-				$mediatype['exec_params'] = '';
-
-				if ($this->hasInput('exec_params')) {
-					$exec_params = zbx_objectValues($this->getInput('exec_params'), 'exec_param');
-
-					foreach ($exec_params as $exec_param) {
-						$mediatype['exec_params'] .= $exec_param."\n";
-					}
-				}
-				break;
-
-			case MEDIA_TYPE_SMS:
-				$this->getInputs($mediatype, ['gsm_modem']);
-				$mediatype['maxsessions'] = 1;
-				break;
-
-			case MEDIA_TYPE_WEBHOOK:
-				$mediatype['process_tags'] = ZBX_MEDIA_TYPE_TAGS_DISABLED;
-				$mediatype['show_event_menu'] = ZBX_EVENT_MENU_HIDE;
-				$mediatype['parameters'] = [];
-				$this->getInputs($mediatype, ['script', 'timeout', 'process_tags', 'show_event_menu', 'event_menu_url',
-					'event_menu_name'
-				]);
-				$parameters = $this->getInput('parameters', []);
-
-				if (array_key_exists('name', $parameters) && array_key_exists('value', $parameters)) {
-					$mediatype['parameters'] = array_map(function ($name, $value) {
-							return compact('name', 'value');
-						},
-						$parameters['name'],
-						$parameters['value']
-					);
-				}
-				break;
-		}
+	protected function doAction(): void {
+		$mediatype = self::processMediatypeData($this->getInputAll());
 
 		$result = API::Mediatype()->update($mediatype);
+		$output = [];
 
 		if ($result) {
-			$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
-				->setArgument('action', 'mediatype.list')
-				->setArgument('page', CPagerHelper::loadPage('mediatype.list', null))
-			);
-			$response->setFormData(['uncheck' => '1']);
-			CMessageHelper::setSuccessTitle(_('Media type updated'));
+			$output['success']['title'] = _('Media type updated');
+
+			if ($messages = get_and_clear_messages()) {
+				$output['success']['messages'] = array_column($messages, 'message');
+			}
 		}
 		else {
-			$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
-				->setArgument('action', 'mediatype.edit')
-			);
-			$response->setFormData($this->getInputAll());
-			CMessageHelper::setErrorTitle(_('Cannot update media type'));
+			$output['error'] = [
+				'title' => ('Cannot update media type'),
+				'messages' => array_column(get_and_clear_messages(), 'message')
+			];
 		}
-		$this->setResponse($response);
+
+		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
 	}
 }

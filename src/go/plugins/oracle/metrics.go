@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package oracle
@@ -22,20 +17,23 @@ package oracle
 import (
 	"context"
 
-	"git.zabbix.com/ap/plugin-support/metric"
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"git.zabbix.com/ap/plugin-support/uri"
+	"golang.zabbix.com/agent2/plugins/oracle/dbconn"
+	"golang.zabbix.com/agent2/plugins/oracle/handlers"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/uri"
 )
 
 const (
-	keyArchive                = "oracle.archive.info"
-	keyArchiveDiscovery       = "oracle.archive.discovery"
 	keyASMDiskGroups          = "oracle.diskgroups.stats"
 	keyASMDiskGroupsDiscovery = "oracle.diskgroups.discovery"
+	keyArchive                = "oracle.archive.info"
+	keyArchiveDiscovery       = "oracle.archive.discovery"
 	keyCDB                    = "oracle.cdb.info"
 	keyCustomQuery            = "oracle.custom.query"
-	keyDatabasesDiscovery     = "oracle.db.discovery"
 	keyDataFiles              = "oracle.datafiles.stats"
+	keyDatabasesDiscovery     = "oracle.db.discovery"
 	keyFRA                    = "oracle.fra.stats"
 	keyInstance               = "oracle.instance.info"
 	keyPDB                    = "oracle.pdb.info"
@@ -44,169 +42,264 @@ const (
 	keyPing                   = "oracle.ping"
 	keyProc                   = "oracle.proc.stats"
 	keyRedoLog                = "oracle.redolog.info"
-	keySessions               = "oracle.sessions.stats"
 	keySGA                    = "oracle.sga.stats"
+	keySessions               = "oracle.sessions.stats"
 	keySysMetrics             = "oracle.sys.metrics"
 	keySysParams              = "oracle.sys.params"
 	keyTablespaces            = "oracle.ts.stats"
 	keyTablespacesDiscovery   = "oracle.ts.discovery"
 	keyUser                   = "oracle.user.info"
+	keyVersion                = "oracle.version"
 )
+
+var metricsMeta = map[string]handlerFunc{ //nolint:gochecknoglobals
+	keyASMDiskGroups:          handlers.AsmDiskGroupsHandler,
+	keyASMDiskGroupsDiscovery: handlers.AsmDiskGroupsDiscovery,
+	keyArchive:                handlers.ArchiveHandler,
+	keyArchiveDiscovery:       handlers.ArchiveDiscoveryHandler,
+	keyCDB:                    handlers.CdbHandler,
+	keyCustomQuery:            handlers.CustomQueryHandler,
+	keyDataFiles:              handlers.DataFileHandler,
+	keyDatabasesDiscovery:     handlers.DatabasesDiscoveryHandler,
+	keyFRA:                    handlers.FraHandler,
+	keyInstance:               handlers.InstanceHandler,
+	keyPDB:                    handlers.PdbHandler,
+	keyPDBDiscovery:           handlers.PdbDiscoveryHandler,
+	keyPGA:                    handlers.PgaHandler,
+	keyPing:                   handlers.PingHandler,
+	keyProc:                   handlers.ProcHandler,
+	keyRedoLog:                handlers.RedoLogHandler,
+	keySGA:                    handlers.SgaHandler,
+	keySessions:               handlers.SessionsHandler,
+	keySysMetrics:             handlers.SysMetricsHandler,
+	keySysParams:              handlers.SysParamsHandler,
+	keyTablespaces:            handlers.TablespacesHandler,
+	keyTablespacesDiscovery:   handlers.TablespacesDiscoveryHandler,
+	keyUser:                   handlers.UserHandler,
+	keyVersion:                handlers.VersionHandler,
+}
+
+// Common params: [URI|Session][,User][,Password][,Service].
+var (
+	//nolint:gochecknoglobals
+	paramURI = metric.NewConnParam("URI", "URI to connect or session name.").
+			WithValidator(uri.URIValidator{Defaults: dbconn.URIDefaults, AllowedSchemes: []string{"tcp", "tcps"}}).
+			WithDefault(dbconn.URIDefaults.Scheme + "://localhost:" + dbconn.URIDefaults.Port).
+			WithSession()
+	//nolint:gochecknoglobals
+	paramUsername = metric.NewConnParam("User", "Oracle user.").WithDefault("")
+	//nolint:gochecknoglobals
+	paramPassword = metric.NewConnParam("Password", "User's password.").WithDefault("")
+	//nolint:gochecknoglobals
+	paramService = metric.NewConnParam("Service", "Service name to be used for connection.").WithDefault("XE")
+	//nolint:gochecknoglobals
+	paramConnTimeout = metric.NewSessionOnlyParam("ConnectionTimeout", "Time for connection to timeout.")
+)
+
+var metrics = metric.MetricSet{ //nolint:gochecknoglobals
+	keyASMDiskGroups: metric.New(
+		"Returns ASM disk groups statistics.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam("Diskgroup", "Diskgroup name."), paramConnTimeout,
+		},
+		false,
+	),
+
+	keyASMDiskGroupsDiscovery: metric.New(
+		"Returns list of ASM disk groups in LLD format.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyArchive: metric.New(
+		"Returns archive logs statistics.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam("Destination", "Destination name."), paramConnTimeout,
+		},
+		false,
+	),
+
+	keyArchiveDiscovery: metric.New(
+		"Returns list of archive logs in LLD format.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyCDB: metric.New(
+		"Returns CDBs info.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam("Database", "Database name."), paramConnTimeout,
+		},
+		false,
+	),
+
+	keyCustomQuery: metric.New(
+		"Returns result of a custom query.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam(
+				"QueryName", "Name of a custom query "+
+					"(must be equal to a name of an SQL file without an extension).",
+			).SetRequired(), paramConnTimeout,
+		},
+		true,
+	),
+
+	keyDataFiles: metric.New(
+		"Returns data files statistics.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyDatabasesDiscovery: metric.New(
+		"Returns list of databases in LLD format.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyFRA: metric.New(
+		"Returns FRA statistics.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyInstance: metric.New(
+		"Returns instance stats.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyPDB: metric.New(
+		"Returns PDBs info.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam("Database", "Database name."), paramConnTimeout,
+		},
+		false,
+	),
+
+	keyPDBDiscovery: metric.New(
+		"Returns list of PDBs in LLD format.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyPGA: metric.New(
+		"Returns PGA statistics.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyPing: metric.New(
+		"Tests if connection is alive or not.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyProc: metric.New(
+		"Returns processes statistics.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyRedoLog: metric.New(
+		"Returns log file information from the control file.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keySGA: metric.New(
+		"Returns SGA statistics.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keySessions: metric.New(
+		"Returns sessions statistics.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam(
+				"LockMaxTime",
+				"Maximum session lock duration in seconds to count "+
+					"the session as a prolongedly locked.",
+			).
+				WithDefault("600").
+				WithValidator(metric.NumberValidator{}),
+			paramConnTimeout,
+		},
+		false,
+	),
+
+	keySysMetrics: metric.New(
+		"Returns a set of system metric values.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam(
+				"Duration",
+				"Capturing interval in seconds of system metric values.",
+			).
+				WithDefault("60").
+				WithValidator(metric.SetValidator{Set: []string{"15", "60"}}),
+			paramConnTimeout,
+		},
+		false,
+	),
+
+	keySysParams: metric.New(
+		"Returns a set of system parameter values.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyTablespaces: metric.New(
+		"Returns tablespaces statistics.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam("Tablespace", "Table-space name."),
+			metric.NewParam("Type", "table-space type."),
+			metric.NewParam("Conname", "Container name."),
+			paramConnTimeout,
+		},
+		false,
+	),
+
+	keyTablespacesDiscovery: metric.New(
+		"Returns list of tablespaces in LLD format.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+
+	keyUser: metric.New(
+		"Returns user information.",
+		[]*metric.Param{
+			paramURI, paramUsername, paramPassword, paramService,
+			metric.NewParam(
+				"Username",
+				"Username for which the information is needed.",
+			),
+			paramConnTimeout,
+		},
+		false,
+	),
+
+	keyVersion: metric.New(
+		"Returns database version.",
+		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService, paramConnTimeout},
+		false,
+	),
+}
 
 // handlerFunc defines an interface must be implemented by handlers.
-type handlerFunc func(ctx context.Context, conn OraClient,
-	params map[string]string, extraParams ...string) (res interface{}, err error)
+type handlerFunc func(
+	ctx context.Context, conn dbconn.OraClient, params map[string]string, extraParams ...string,
+) (res any, err error)
 
-// getHandlerFunc returns a handlerFunc related to a given key.
-func getHandlerFunc(key string) handlerFunc {
-	switch key {
-	case keyASMDiskGroups:
-		return asmDiskGroupsHandler
-	case keyASMDiskGroupsDiscovery:
-		return asmDiskGroupsDiscovery
-	case keyArchive:
-		return archiveHandler
-	case keyArchiveDiscovery:
-		return archiveDiscoveryHandler
-	case keyCDB:
-		return cdbHandler
-	case keyCustomQuery:
-		return customQueryHandler
-	case keyDataFiles:
-		return dataFileHandler
-	case keyDatabasesDiscovery:
-		return databasesDiscoveryHandler
-	case keyFRA:
-		return fraHandler
-	case keyInstance:
-		return instanceHandler
-	case keyPDB:
-		return pdbHandler
-	case keyPDBDiscovery:
-		return pdbDiscoveryHandler
-	case keyPGA:
-		return pgaHandler
-	case keyPing:
-		return pingHandler
-	case keyProc:
-		return procHandler
-	case keyRedoLog:
-		return redoLogHandler
-	case keySGA:
-		return sgaHandler
-	case keySessions:
-		return sessionsHandler
-	case keySysMetrics:
-		return sysMetricsHandler
-	case keySysParams:
-		return sysParamsHandler
-	case keyTablespaces:
-		return tablespacesHandler
-	case keyTablespacesDiscovery:
-		return tablespacesDiscoveryHandler
-	case keyUser:
-		return userHandler
-
-	default:
-		return nil
+func init() { //nolint:gochecknoinits
+	err := plugin.RegisterMetrics(&impl, pluginName, metrics.List()...)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
 	}
-}
-
-var uriDefaults = &uri.Defaults{Scheme: "tcp", Port: "1521"}
-
-// Common params: [URI|Session][,User][,Password][,Service]
-var (
-	paramURI = metric.NewConnParam("URI", "URI to connect or session name.").
-			WithDefault(uriDefaults.Scheme + "://localhost:" + uriDefaults.Port).WithSession().
-			WithValidator(uri.URIValidator{Defaults: uriDefaults, AllowedSchemes: []string{"tcp"}})
-	paramUsername = metric.NewConnParam("User", "Oracle user.").WithDefault("")
-	paramPassword = metric.NewConnParam("Password", "User's password.").WithDefault("")
-	paramService  = metric.NewConnParam("Service", "Service name to be used for connection.").
-			WithDefault("XE")
-)
-
-var metrics = metric.MetricSet{
-	keyASMDiskGroups: metric.New("Returns ASM disk groups statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyASMDiskGroupsDiscovery: metric.New("Returns list of ASM disk groups in LLD format.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyArchive: metric.New("Returns archive logs statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyArchiveDiscovery: metric.New("Returns list of archive logs in LLD format.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyCDB: metric.New("Returns CDBs info.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyCustomQuery: metric.New("Returns result of a custom query.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService,
-			metric.NewParam("QueryName", "Name of a custom query "+
-				"(must be equal to a name of an SQL file without an extension).").SetRequired(),
-		}, true),
-
-	keyDataFiles: metric.New("Returns data files statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyDatabasesDiscovery: metric.New("Returns list of databases in LLD format.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyFRA: metric.New("Returns FRA statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyInstance: metric.New("Returns instance stats.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyPDB: metric.New("Returns PDBs info.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyPDBDiscovery: metric.New("Returns list of PDBs in LLD format.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyPGA: metric.New("Returns PGA statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyPing: metric.New("Tests if connection is alive or not.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyProc: metric.New("Returns processes statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyRedoLog: metric.New("Returns log file information from the control file.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keySGA: metric.New("Returns SGA statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keySessions: metric.New("Returns sessions statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService,
-			metric.NewParam("LockMaxTime", "Maximum session lock duration in seconds to count "+
-				"the session as a prolongedly locked.").WithDefault("600").WithValidator(metric.NumberValidator{}),
-		}, false),
-
-	keySysMetrics: metric.New("Returns a set of system metric values.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService,
-			metric.NewParam("Duration", "Capturing interval in seconds of system metric values.").
-				WithDefault("60").WithValidator(metric.SetValidator{Set: []string{"15", "60"}}),
-		}, false),
-
-	keySysParams: metric.New("Returns a set of system parameter values.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyTablespaces: metric.New("Returns tablespaces statistics.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyTablespacesDiscovery: metric.New("Returns list of tablespaces in LLD format.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService}, false),
-
-	keyUser: metric.New("Returns user information.",
-		[]*metric.Param{paramURI, paramUsername, paramPassword, paramService,
-			metric.NewParam("Username", "Username for which the information is needed."),
-		}, false),
-}
-
-func init() {
-	plugin.RegisterMetrics(&impl, pluginName, metrics.List()...)
 }

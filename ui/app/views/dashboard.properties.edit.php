@@ -1,35 +1,30 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 /**
  * @var CView $this
+ * @var array $data
  */
 
 $form = (new CForm())
-	->cleanItems()
 	->setName('dashboard_properties_form')
 	->addItem(getMessages());
 
-// Submit button is needed to enable submit event on Enter on inputs.
-$form->addItem((new CInput('submit', 'dashboard_properties_submit'))->addStyle('display: none;'));
+// Enable form submitting on Enter.
+$form->addItem((new CSubmitButton())->addClass(ZBX_STYLE_FORM_SUBMIT_HIDDEN));
 
 $form_list = new CFormList();
 
@@ -40,7 +35,7 @@ if (!$data['dashboard']['template']) {
 		'name' => 'userid',
 		'object_name' => 'users',
 		'data' => [$data['dashboard']['owner']],
-		'disabled' => in_array(CWebUser::getType(), [USER_TYPE_ZABBIX_USER, USER_TYPE_ZABBIX_ADMIN]),
+		'readonly' => in_array(CWebUser::getType(), [USER_TYPE_ZABBIX_USER, USER_TYPE_ZABBIX_ADMIN]),
 		'multiple' => false,
 		'popup' => [
 			'parameters' => [
@@ -61,8 +56,9 @@ if (!$data['dashboard']['template']) {
 }
 
 $form_list->addRow((new CLabel(_('Name'), 'name'))->setAsteriskMark(),
-	(new CTextBox('name', $data['dashboard']['name'], false, DB::getFieldLength('dashboard', 'name')))
+	(new CTextAreaFlexible('name', $data['dashboard']['name']))
 		->setWidth(ZBX_TEXTAREA_STANDARD_WIDTH)
+		->setMaxlength(DB::getFieldLength('dashboard', 'name'))
 		->setAriaRequired()
 		->setAttribute('autofocus', 'autofocus')
 );
@@ -76,9 +72,9 @@ foreach (DASHBOARD_DISPLAY_PERIODS as $period) {
 	$display_period_select->addOption(new CSelectOption($period, secondsToPeriod($period)));
 }
 
-$form_list->addRow(new CLabel(_('Default page display period'), 'display_period'), $display_period_select);
+$form_list->addRow(new CLabel(_('Default slideshow interval'), 'display_period'), $display_period_select);
 
-$form_list->addRow(new CLabel(_('Start slideshow automatically'), 'auto_start'),
+$form_list->addRow(new CLabel(_('Start slideshow'), 'auto_start'),
 	(new CCheckBox('auto_start'))->setChecked($data['dashboard']['auto_start'] == 1)
 );
 
@@ -86,7 +82,7 @@ $form->addItem($form_list);
 
 $output = [
 	'header' => _('Dashboard properties'),
-	'doc_url' => CDocHelper::getUrl(CDocHelper::DASHBOARD_PROPERTIES_EDIT),
+	'doc_url' => CDocHelper::getUrl(CDocHelper::DASHBOARDS_PROPERTIES_EDIT),
 	'body' => $form->toString(),
 	'buttons' => [
 		[

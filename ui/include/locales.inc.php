@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -33,14 +28,15 @@ function getLocales(): array {
 		'en_GB' => ['name' => _('English (en_GB)'),	'display' => true],
 		'en_US' => ['name' => _('English (en_US)'),	'display' => true],
 		'bg_BG' => ['name' => _('Bulgarian (bg_BG)'),	'display' => false],
-		'ca_ES' => ['name' => _('Catalan (ca_ES)'),	'display' => false],
+		'ca_ES' => ['name' => _('Catalan (ca_ES)'),	'display' => true],
 		'zh_CN' => ['name' => _('Chinese (zh_CN)'),	'display' => true],
 		'zh_TW' => ['name' => _('Chinese (zh_TW)'),	'display' => false],
 		'cs_CZ' => ['name' => _('Czech (cs_CZ)'),	'display' => true],
+		'da_DK' => ['name' => _('Danish (da_DK)'),	'display' => true],
 		'nl_NL' => ['name' => _('Dutch (nl_NL)'),	'display' => false],
 		'fi_FI' => ['name' => _('Finnish (fi_FI)'),	'display' => false],
 		'fr_FR' => ['name' => _('French (fr_FR)'),	'display' => true],
-		'ka_GE' => ['name' => _('Georgian (ka_GE)'),	'display' => false],
+		'ka_GE' => ['name' => _('Georgian (ka_GE)'),	'display' => true],
 		'de_DE' => ['name' => _('German (de_DE)'),	'display' => true],
 		'el_GR' => ['name' => _('Greek (el_GR)'),	'display' => false],
 		'he_IL' => ['name' => _('Hebrew (he_IL)'),	'display' => true],
@@ -49,7 +45,7 @@ function getLocales(): array {
 		'it_IT' => ['name' => _('Italian (it_IT)'),	'display' => true],
 		'ko_KR' => ['name' => _('Korean (ko_KR)'),	'display' => true],
 		'ja_JP' => ['name' => _('Japanese (ja_JP)'),	'display' => true],
-		'lv_LV' => ['name' => _('Latvian (lv_LV)'),	'display' => false],
+		'lv_LV' => ['name' => _('Latvian (lv_LV)'),	'display' => true],
 		'lt_LT' => ['name' => _('Lithuanian (lt_LT)'),	'display' => false],
 		'nb_NO' => ['name' => _('Norwegian (nb_NO)'),	'display' => true],
 		'fa_IR' => ['name' => _('Persian (fa_IR)'),	'display' => false],
@@ -59,42 +55,43 @@ function getLocales(): array {
 		'ro_RO' => ['name' => _('Romanian (ro_RO)'),	'display' => false],
 		'ru_RU' => ['name' => _('Russian (ru_RU)'),	'display' => true],
 		'sk_SK' => ['name' => _('Slovak (sk_SK)'),	'display' => true],
-		'es_ES' => ['name' => _('Spanish (es_ES)'),	'display' => false],
+		'es_ES' => ['name' => _('Spanish (es_ES)'),	'display' => true],
 		'sv_SE' => ['name' => _('Swedish (sv_SE)'),	'display' => false],
 		'tr_TR' => ['name' => _('Turkish (tr_TR)'),	'display' => true],
 		'uk_UA' => ['name' => _('Ukrainian (uk_UA)'),	'display' => true],
+		'uz_UZ' => ['name' => _('Uzbek (uz_UZ)'),	'display' => true],
 		'vi_VN' => ['name' => _('Vietnamese (vi_VN)'),	'display' => true]
 	];
 }
 
 /**
- * Get support URL for specified language.
+ * Get subscriptions URL for specified language.
  *
- * @param string|null $language  ISO639-1 code or null for English support URL.
+ * @param string $language  ISO639-1 code.
  *
- * @return string
+ * @return string  Fallback to English subscriptions URL.
  */
-function getSupportUrl(string $language = null): string {
+function getSubscriptionsUrl(string $language): string {
 	$urls = [
-		'cs' => 'https://www.zabbix.com/cz/support',
-		'fr' => 'https://www.zabbix.com/fr/support',
-		'ja' => 'https://www.zabbix.com/jp/support',
-		'pt' => 'https://www.zabbix.com/br/support',
-		'ru' => 'https://www.zabbix.com/ru/support',
-		'zh' => 'https://www.zabbix.com/cn/support'
+		'cs' => 'https://www.zabbix.com/cz/subscriptions',
+		'fr' => 'https://www.zabbix.com/fr/subscriptions',
+		'ja' => 'https://www.zabbix.com/jp/subscriptions',
+		'pt' => 'https://www.zabbix.com/br/subscriptions',
+		'ru' => 'https://www.zabbix.com/ru/subscriptions',
+		'zh' => 'https://www.zabbix.com/cn/subscriptions'
 	];
 
-	return array_key_exists($language, $urls) ? $urls[$language] : 'https://www.zabbix.com/support';
+	return array_key_exists($language, $urls) ? $urls[$language] : 'https://www.zabbix.com/subscriptions';
 }
 
 /**
  * Get integrations URL for specified language.
  *
- * @param string|null $language  ISO639-1 code or null for English integrations URL.
+ * @param string $language  ISO639-1 code.
  *
- * @return string
+ * @return string  Fallback to English integrations URL.
  */
-function getIntegrationsUrl(string $language = null): string {
+function getIntegrationsUrl(string $language): string {
 	$urls = [
 		'cs' => 'https://www.zabbix.com/cz/integrations',
 		'fr' => 'https://www.zabbix.com/fr/integrations',
@@ -182,6 +179,7 @@ function zbx_locale_variants_win($language) {
 		'zh_cn' => ['Chinese (Simplified)_People\'s Republic of China.936', 'chinese'],
 		'zh_tw' => ['Chinese_Taiwan.950', 'chinese'],
 		'cs_cz' => ['Czech_Czech Republic.1250', 'czech'],
+		'da_dk' => ['Danish_Denmark.1252', 'danish'],
 		'nl_nl' => ['Dutch_Netherlands.1252', 'dutch'],
 		'fi_fi' => ['Finnish_Finland.1252', 'finnish'],
 		'fr_fr' => ['French_France.1252', 'french'],
@@ -208,6 +206,7 @@ function zbx_locale_variants_win($language) {
 		'sv_se' => ['Swedish_Sweden.1252', 'swedish'],
 		'tr_tr' => ['Turkish_Turkey.1254', 'turkish'],
 		'uk_ua' => ['Ukrainian_Ukraine.1251', 'ukrainian'],
+		'uz_uz' => ['Uzbek_Uzbekistan.1252', 'uzbek'],
 		'vi_vn' => ['Vietnamese_Viet Nam.1258', 'vietnamese']
 	];
 

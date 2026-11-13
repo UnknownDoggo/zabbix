@@ -1,0 +1,1502 @@
+
+# GCP by HTTP
+
+## Overview
+
+This template is designed to monitor GCP by HTTP.
+It works without any external scripts and uses the script item.
+Currently, the template supports the discovery of Compute Engine instances, Cloud SQL instances (Microsoft SQL Server, MySQL, and PostgreSQL, including replicas), Cloud Run services, Application Load Balancers, Cost Monitoring, and Cloud Storage resources.
+
+## Included Monitoring Templates
+
+- *GCP Application Load Balancer by HTTP*
+- *GCP Cost Monitoring by HTTP*
+- *GCP Compute Engine Instance by HTTP*
+- *GCP Cloud SQL MSSQL by HTTP*
+- *GCP Cloud SQL MSSQL Replica by HTTP*
+- *GCP Cloud SQL MySQL by HTTP*
+- *GCP Cloud SQL MySQL Replica by HTTP*
+- *GCP Cloud SQL PostgreSQL by HTTP*
+- *GCP Cloud SQL PostgreSQL Replica by HTTP*
+- *GCP Cloud Run Service by HTTP*
+- *GCP Cloud Storage Bucket by HTTP*
+
+The template additionally supports the collection of [Compute Engine](https://cloud.google.com/compute) project quota metrics.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- Google Cloud Platform
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+1. Enable the Stackdriver Monitoring API for the GCP project you wish to monitor.
+>More on [enabling Monitoring API](https://cloud.google.com/monitoring/api/enable-api).
+2. Create a service account in Google Cloud Console for the same GCP project.
+>More on [managing service accounts](https://cloud.google.com/iam/docs/creating-managing-service-accounts).
+3. Create and download the service account key in JSON format.
+>More on [service account keys](https://cloud.google.com/iam/docs/creating-managing-service-account-keys).
+4. If you want to monitor Cloud SQL services - don't forget to activate the Cloud SQL Admin API.
+>More on [Cloud SQL Admin API](https://cloud.google.com/sql/docs/mysql/admin-api).
+5. For monitoring Cloud Run services - activate the Cloud Run Admin API.
+>More on [Cloud Run APIs](https://docs.cloud.google.com/run/docs/apis).
+6. Copy the `project_id`, `private_key_id`, `private_key`, `client_email` from the JSON key file and add them to their corresponding macros `{$GCP.PROJECT.ID}`, `{$GCP.PRIVATE.KEY.ID}`, `{$GCP.PRIVATE.KEY}`, `{$GCP.CLIENT.EMAIL}` on the Zabbix template/host.
+
+**Notes**
+
+    - Make sure that you're creating the Google Cloud Console service account using the credentials with the Project Owner/Project IAM Admin/Service Account Admin role.
+
+    - The service account JSON key file can only be downloaded **once**: regenerate it if the previous key has been lost.
+
+    - The service account should have Project Viewer permissions or granular permissions for the GCP Compute Engine API/GCP Cloud SQL/Cloud Run Viewer.
+
+    - You can copy and paste `private_key` string data from the Service Account JSON key file as is, or replace the new line metasymbol (`\n`) with actual line breaks.
+
+Refer to the [vendor documentation](https://cloud.google.com/iam/docs/manage-access-service-accounts) on managing access to service accounts.
+
+**IMPORTANT**
+
+     - The Zabbix secret authorization token (used for GCP API authentication) is defined as a plain text in host prototype settings by default due to template export/import limitations. It is highly recommended to change the user macro `{$GCP.AUTH.TOKEN}` value type to `SECRET` for all host prototypes after importing the *GCP by HTTP* template.
+
+     - All the discovered instances/quotas/metrics are related to a particular GCP project. To monitor several GCP projects, create their corresponding service accounts and Zabbix hosts.
+
+     - The GCP Access Token is available for 1 hour (3600 seconds) after the generation request.
+
+     - To avoid GCP token inconsistencies between the Zabbix database and Zabbix server configuration cache, do not set the Zabbix server configuration parameter `CacheUpdateFrequency` above 45 minutes, and do not set the GCP authorization item update interval above 1 hour (the maximum `CacheUpdateFrequency` value).
+
+More on metrics and used API methods:
+
+  - [Compute Engine](https://docs.cloud.google.com/monitoring/api/metrics_gcp_c#gcp-compute)
+
+  - [Cloud SQL](https://docs.cloud.google.com/monitoring/api/metrics_gcp_c#gcp-cloudsql)
+
+  - [Cloud Run](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z#gcp-run)
+
+  - [Cloud Storage](https://docs.cloud.google.com/monitoring/api/metrics_gcp_p_z#gcp-storage)
+
+  - [Cloud Load Balancing](https://docs.cloud.google.com/monitoring/api/metrics_gcp_i_o#gcp-loadbalancing)
+
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.PROJECT.ID}|<p>GCP project ID.</p>||
+|{$GCP.CLIENT.EMAIL}|<p>Service account client e-mail.</p>||
+|{$GCP.PRIVATE.KEY.ID}|<p>Service account private key id.</p>||
+|{$GCP.PRIVATE.KEY}|<p>Service account private key data.</p>||
+|{$GCP.AUTH.FREQUENCY}|<p>The update interval for the GCP Authorization item, which also equals to the access token regeneration request frequency.</p><p>Check the template documentation notes carefully for more details.</p>|`45m`|
+|{$GCP.RUN.LOCATION.FILTER}|<p>Cloud Run Service filter locations. If empty - all locations are monitored.</p><p>The value must be a string. The operator must be either `=, !=, >, <, <=, >= or :`.</p><p>Example: `name="europe-west1" OR name="europe-north1" OR name="asia-southeast2"`, `name!= "us-central1"`, `name!= "me-*`.</p>||
+|{$GCP.GCE.QUOTA.PUSED.MIN.WARN}|<p>GCP Compute Engine project quota warning utilization threshold.</p>|`80`|
+|{$GCP.GCE.QUOTA.PUSED.MIN.CRIT}|<p>GCP Compute Engine project quota critical quota utilization threshold.</p>|`95`|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items and JavaScript preprocessing: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP", e.g. {$HTTP.TLS.VERIFY:"GCP"}.</p>|`full`|
+|{$GCP.GCE.INST.NAME.MATCHES}|<p>The filter to include GCP Compute Engine instances by namespace.</p>|`.*`|
+|{$GCP.GCE.INST.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine instances by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.GCE.ZONE.MATCHES}|<p>The filter to include GCP Compute Engine instances by zone.</p>|`.*`|
+|{$GCP.GCE.ZONE.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine instances by zone.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MYSQL.INST.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL MySQL instances by namespace.</p>|`.*`|
+|{$GCP.MYSQL.INST.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MySQL instances by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MYSQL.ZONE.MATCHES}|<p>The filter to include GCP Cloud SQL MySQL instances by zone.</p>|`.*`|
+|{$GCP.MYSQL.ZONE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MySQL instances by zone.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MYSQL.INST.TYPE.MATCHES}|<p>The filter to include GCP Cloud SQL MySQL instances by type (standalone/replica).</p>|`.*`|
+|{$GCP.MYSQL.INST.TYPE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MySQL instances by type (standalone/replica).</p><p>Set a macro value 'CLOUD_SQL_INSTANCE' to exclude standalone Instances or 'READ_REPLICA_INSTANCE' to exclude read-only Replicas.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.PGSQL.INST.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL PostgreSQL instances by namespace.</p>|`.*`|
+|{$GCP.PGSQL.INST.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL PostgreSQL instances by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.PGSQL.ZONE.MATCHES}|<p>The filter to include GCP Cloud SQL PostgreSQL instances by zone.</p>|`.*`|
+|{$GCP.PGSQL.ZONE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL PostgreSQL instances by zone.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.PGSQL.INST.TYPE.MATCHES}|<p>The filter to include GCP Cloud SQL PostgreSQL instances by type (standalone/replica).</p>|`.*`|
+|{$GCP.PGSQL.INST.TYPE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL PostgreSQL instances by type (standalone/replica).</p><p>Set a macro value 'CLOUD_SQL_INSTANCE' to exclude standalone Instances or 'READ_REPLICA_INSTANCE' to exclude read-only Replicas.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MSSQL.INST.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL instances by namespace.</p>|`.*`|
+|{$GCP.MSSQL.INST.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL instances by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MSSQL.ZONE.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL instances by zone.</p>|`.*`|
+|{$GCP.MSSQL.ZONE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL instances by zone.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.MSSQL.INST.TYPE.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL instances by type (standalone/replica).</p>|`.*`|
+|{$GCP.MSSQL.INST.TYPE.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL instances by type (standalone/replica).</p><p>Set a macro value 'CLOUD_SQL_INSTANCE' to exclude standalone Instances or 'READ_REPLICA_INSTANCE' to exclude read-only Replicas.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.GCE.QUOTA.MATCHES}|<p>The filter to include GCP Compute Engine project quotas by namespace.</p>|`.*`|
+|{$GCP.GCE.QUOTA.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine project quotas by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.CLOUD.RUN.SERVICE.NAME.MATCHES}|<p>The filter to include GCP Cloud Run services by name.</p>|`.*`|
+|{$GCP.CLOUD.RUN.SERVICE.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud Run services by name.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.CLOUD.RUN.SERVICE.CONDITION.MATCHES}|<p>The filter to include GCP Cloud Run services by condition.</p>|`.*`|
+|{$GCP.CLOUD.RUN.SERVICE.CONDITION.NOT_MATCHES}|<p>The filter to exclude GCP Cloud Run services by condition.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.BUCKET.NAME.MATCHES}|<p>The filter to include GCP Cloud Storage buckets by name.</p>|`.*`|
+|{$GCP.BUCKET.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud Storage buckets by name.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.LB.NAME.MATCHES}|<p>The filter to include load balancers by name.</p>|`.*`|
+|{$GCP.LB.NAME.NOT_MATCHES}|<p>The filter to exclude load balancers by name.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.LB.SCHEME.MATCHES}|<p>The filter to include load balancers by scheme.</p>|`.*`|
+|{$GCP.LB.SCHEME.NOT_MATCHES}|<p>The filter to exclude load balancers by scheme.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.LB.PROTOCOL.MATCHES}|<p>The filter to include load balancers by protocol.</p>|`.*`|
+|{$GCP.LB.PROTOCOL.NOT_MATCHES}|<p>The filter to exclude load balancers by protocol.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.LB.SCOPE.MATCHES}|<p>The filter to include load balancers by scope.</p>|`.*`|
+|{$GCP.LB.SCOPE.NOT_MATCHES}|<p>The filter to exclude load balancers by scope.</p>|`CHANGE_IF_NEEDED`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Authorization|<p>Google Cloud Platform REST authorization with service account authentication parameters and temporary-generated RSA-based JWT-token usage.</p><p>The necessary scopes are pre-defined.</p><p>Returns a signed authorization token with 1 hour lifetime; it is required only once, and is used for all the dependent script items.</p><p>Check the template documentation for the details.</p>|Script|gcp.authorization|
+|GCE instances get|<p>Get GCP Compute Engine instances.</p>|Dependent item|gcp.gce.instances.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Cloud Run service get|<p>Get GCP Cloud Run services.</p>|Dependent item|gcp.run.services.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Authorization errors check|<p>A list of errors from API requests.</p>|Dependent item|gcp.auth.err.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li></ul>|
+|Cloud SQL instances get|<p>GCP Cloud SQL: Instances get.</p>|Dependent item|gcp.cloudsql.instances.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Cloud SQL instances total|<p>GCP Cloud SQL instances total count.</p>|Dependent item|gcp.cloudsql.instances.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[*].length()`</p></li></ul>|
+|MSSQL instances count|<p>GCP Cloud SQL MSSQL instances count.</p>|Dependent item|gcp.cloudsql.instances.mssql_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.db_type =~ 'SQLSERVER')].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|MySQL instances count|<p>GCP Cloud SQL MySQL instances count.</p>|Dependent item|gcp.cloudsql.instances.mysql_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.db_type =~ 'MYSQL')].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|PostgreSQL instances count|<p>GCP Cloud SQL PostgreSQL instances count.</p>|Dependent item|gcp.cloudsql.instances.pgsql_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.db_type =~ 'POSTGRES')].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|GCE instances total|<p>GCP Compute Engine instances total count.</p>|Dependent item|gcp.gce.instances.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[*].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Regular GCE instances count|<p>GCP Compute Engine: Regular instances count.</p>|Dependent item|gcp.gce.instances.regular_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.i_type == 'regular')].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Container-optimized GCE instances count|<p>GCP Compute Engine: count of instances with Container-Optimized OS used.</p>|Dependent item|gcp.gce.instances.cos_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.i_type == 'container-optimized')].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Project quotas get|<p>GCP Compute Engine resource quotas available for the particular project.</p>|Dependent item|gcp.gce.quotas.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Cloud Run service total|<p>GCP Cloud Run services total count.</p>|Dependent item|gcp.run.service.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[*].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Cloud Storage buckets get|<p>GCP Cloud Storage: Buckets get.</p>|Dependent item|gcp.storage.buckets.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Cloud Storage buckets total|<p>GCP Cloud Storage buckets total count.</p>|Dependent item|gcp.storage.buckets.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[*].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Load balancers (forwarding rules) get|<p>GCP Application Load Balancing forwarding rules.</p>|Dependent item|gcp.lb.forwarding_rules.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Global load balancers total|<p>GCP Application Load Balancing global forwarding rules total count.</p>|Dependent item|gcp.lb.forwarding_rules.global.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.scope=="global")].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Regional load balancers total|<p>GCP Application Load Balancing regional forwarding rules total count.</p>|Dependent item|gcp.lb.forwarding_rules.regional.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.scope=="regional")].length()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP: Authorization has failed|<p>GCP: Authorization has failed.<br>Check the authorization parameters and GCP API availability from a network segment, where Zabbix-server/proxy is located.</p>|`length(last(/GCP by HTTP/gcp.auth.err.check)) > 0`|Average||
+
+### LLD rule GCP Compute Engine: Instances discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Compute Engine: Instances discovery|<p>GCP Compute Engine: Instances discovery.</p>|Dependent item|gcp.gce.inst.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Cloud SQL: PostgreSQL instances discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud SQL: PostgreSQL instances discovery|<p>GCP Cloud SQL: PostgreSQL instances discovery.</p>|Dependent item|gcp.cloudsql.pgsql.inst.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Cloud SQL: MSSQL instances discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud SQL: MSSQL instances discovery|<p>GCP Cloud SQL: MSSQL instances discovery.</p>|Dependent item|gcp.cloudsql.mssql.inst.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Cloud SQL: MySQL instances discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud SQL: MySQL instances discovery|<p>GCP Cloud SQL: MySQL instances discovery.</p>|Dependent item|gcp.cloudsql.mysql.inst.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Compute Engine: Project quotas discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Compute Engine: Project quotas discovery|<p>GCP Compute Engine: Quotas discovery.</p>|Dependent item|gcp.gce.quotas.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for GCP Compute Engine: Project quotas discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Quota [{#GCE.QUOTA.NAME}]: Raw data|<p>GCP Compute Engine: Get metrics for [{#GCE.QUOTA.NAME}] quota.</p>|Dependent item|gcp.gce.quota.single.raw[{#GCE.QUOTA.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.metric == "{#GCE.QUOTA.NAME}")].first()`</p></li></ul>|
+|Quota [{#GCE.QUOTA.NAME}]: Usage|<p>GCP Compute Engine: The current usage value for [{#GCE.QUOTA.NAME}] quota.</p>|Dependent item|gcp.gce.quota.usage[{#GCE.QUOTA.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.usage`</p></li></ul>|
+|Quota [{#GCE.QUOTA.NAME}]: Limit|<p>GCP Compute Engine: The current limit value for [{#GCE.QUOTA.NAME}] quota.</p>|Dependent item|gcp.gce.quota.limit[{#GCE.QUOTA.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.limit`</p></li></ul>|
+|Quota [{#GCE.QUOTA.NAME}]: Percentage used|<p>GCP Compute Engine: Percentage usage for [{#GCE.QUOTA.NAME}] quota.</p>|Dependent item|gcp.gce.quota.pused[{#GCE.QUOTA.NAME}]<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.p_used`</p></li></ul>|
+
+### Trigger prototypes for GCP Compute Engine: Project quotas discovery
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP: Quota [{#GCE.QUOTA.NAME}] limit has been changed|<p>GCP Compute Engine: The limit for the `{#GCE.QUOTA.NAME}` quota has been changed.</p>|`change(/GCP by HTTP/gcp.gce.quota.limit[{#GCE.QUOTA.NAME}]) <> 0`|Info|**Manual close**: Yes|
+|GCP: Quota [{#GCE.QUOTA.NAME}] usage is close to reaching the limit|<p>GCP Compute Engine: The usage percentage for the `{#GCE.QUOTA.NAME}` quota is close to reaching the limit.</p>|`last(/GCP by HTTP/gcp.gce.quota.pused[{#GCE.QUOTA.NAME}]) >= {$GCP.GCE.QUOTA.PUSED.MIN.WARN:"{#GCE.QUOTA.NAME}"}`|Warning|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP: Quota [{#GCE.QUOTA.NAME}] usage is critically close to reaching the limit</li></ul>|
+|GCP: Quota [{#GCE.QUOTA.NAME}] usage is critically close to reaching the limit|<p>GCP Compute Engine: The usage percentage for the `{#GCE.QUOTA.NAME}` quota is critically close to reaching the limit.</p>|`last(/GCP by HTTP/gcp.gce.quota.pused[{#GCE.QUOTA.NAME}]) >= {$GCP.GCE.QUOTA.PUSED.MIN.CRIT:"{#GCE.QUOTA.NAME}"}`|Average|**Manual close**: Yes|
+
+### LLD rule GCP Cloud Run: Service discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud Run: Service discovery|<p>GCP Cloud Run services discovery.</p>|Dependent item|gcp.run.service.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Cloud Storage: Buckets discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud Storage: Buckets discovery|<p>GCP Cloud Storage: Buckets discovery.</p>|Dependent item|gcp.storage.buckets.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP Application Load Balancing: Load balancer discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Application Load Balancing: Load balancer discovery|<p>Discovers GCP forwarding rules representing Load Balancers</p><p>using the Compute Engine aggregated forwardingRules API.</p><p></p><p>The discovery automatically creates monitored hosts for:</p><p>  - Global external Application Load Balancers</p><p>  - Regional external Application Load Balancers</p><p>  - Internal Application Load Balancers</p><p>It also supports discovery of Network Load Balancers.</p>|Dependent item|gcp.lb.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+# GCP Compute Engine Instance by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Compute Engine instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Compute Engine
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Compute Engine Instance", e.g. {$HTTP.TLS.VERIFY:"GCP Compute Engine Instance"}.</p>|`full`|
+|{$GCE.DISK.NAME.MATCHES}|<p>The filter to include GCP Compute Engine disks by namespace.</p>|`.*`|
+|{$GCE.DISK.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine disks by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$GCE.DISK.DEV_TYPE.MATCHES}|<p>The filter to include GCP Compute Engine disks by device type.</p>|`.*`|
+|{$GCE.DISK.DEV_TYPE.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine disks by device type.</p>|`CHANGE_IF_NEEDED`|
+|{$GCE.DISK.STOR_TYPE.MATCHES}|<p>The filter to include GCP Compute Engine disks by storage type.</p>|`.*`|
+|{$GCE.DISK.STOR_TYPE.NOT_MATCHES}|<p>The filter to exclude GCP Compute Engine disks by storage type.</p>|`CHANGE_IF_NEEDED`|
+|{$GCE.CPU.UTIL.MAX}|<p>GCP Compute Engine instance CPU utilization threshold.</p>|`95`|
+|{$GCE.RAM.UTIL.MAX}|<p>GCP Compute Engine instance RAM utilization threshold.</p>|`90`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Metrics get|<p>GCP Compute Engine metrics get in raw format.</p>|Script|gcp.gce.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Firewall: Dropped packets|<p>Count of incoming packets dropped by the firewall.</p>|Dependent item|gcp.gce.firewall.dropped_packets_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.dropped_packets_count`</p></li></ul>|
+|Firewall: Dropped bytes|<p>Count of incoming bytes dropped by the firewall.</p>|Dependent item|gcp.gce.firewall.dropped_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.dropped_bytes_count`</p></li></ul>|
+|Guest visible vCPUs|<p>Number of vCPUs visible inside the guest.</p><p>For many GCE machine types, the number of vCPUs visible inside the guest is equal to the `compute.googleapis.com/instance/cpu/reserved_cores` metric.</p><p>For shared-core machine types, the number of guest-visible vCPUs differs from the number of reserved cores.</p><p>For example, e2-small instances have two vCPUs visible inside the guest and 0.5 fractional vCPUs reserved.</p><p>Therefore, for an e2-small instance, `compute.googleapis.com/instance/cpu/guest_visible_vcpus` has a value of 2 and `compute.googleapis.com/instance/cpu/reserved_cores` has a value of 0.5.</p>|Dependent item|gcp.gce.cpu.guest_visible_vcpus<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.guest_visible_vcpus`</p></li></ul>|
+|Reserved vCPUs|<p>Number of vCPUs reserved on the host of the instance.</p>|Dependent item|gcp.gce.cpu.reserved_cores<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.reserved_cores`</p></li></ul>|
+|Scheduler wait time|<p>Wait time is the time a vCPU is ready to run, but unexpectedly not scheduled to run.</p><p>The wait time returned here is the accumulated value for all vCPUs.</p><p>The time interval for which the value was measured is returned by Monitoring in whole seconds as start_time and end_time.</p><p>This metric is only available for VMs that belong to the e2 family or to overcommitted VMs on sole-tenant nodes.</p>|Dependent item|gcp.gce.cpu.scheduler_wait_time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.scheduler_wait_time`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|CPU usage time|<p>Delta vCPU usage for all vCPUs, in vCPU-seconds.</p><p>To compute the per-vCPU utilization fraction, divide this value by (end-start)*N, where end and start define this value's time interval and N is `compute.googleapis.com/instance/cpu/reserved_cores` at the end of the interval.</p><p>This value is reported by the hypervisor for the VM and can differ from `agent.googleapis.com/cpu/usage_time`, which is reported from inside the VM.</p>|Dependent item|gcp.gce.cpu.usage_time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.usage_time`</p></li></ul>|
+|CPU utilization|<p>Fractional utilization of allocated CPU on this instance.</p><p>This metric is reported by the hypervisor for the VM and can differ from `agent.googleapis.com/cpu/utilization`, which is reported from inside the VM.</p>|Dependent item|gcp.gce.cpu.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Memory size|<p>Total VM memory size.</p><p>This metric is only available for VMs that belong to the e2 family; returns empty value for different instance types.</p>|Dependent item|gcp.gce.memory.ram_size<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.ram_size`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Memory used|<p>Memory currently used in the VM.</p><p>This metric is only available for VMs that belong to the e2 family; returns empty value for different instance types.</p>|Dependent item|gcp.gce.memory.ram_used<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.ram_used`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Memory usage percentage|<p>Memory usage Percentage.</p><p>This metric is only available for VMs that belong to the e2 family; returns empty value for different instance types.</p>|Dependent item|gcp.gce.memory.ram_pused<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.ram_pused`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|VM swap in|<p>The amount of memory read into the guest from its own swap space.</p><p>This metric is only available for VMs that belong to the e2 family; returns empty value for different instance types.</p>|Dependent item|gcp.gce.memory.swap_in_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.swap_in_bytes_count`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|VM swap out|<p>The amount of memory written from the guest to its own swap space.</p><p>This metric is only available for VMs that belong to the e2 family; returns empty value for different instance types.</p>|Dependent item|gcp.gce.memory.swap_out_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.swap_out_bytes_count`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network: Received bytes|<p>Count of bytes received from the network without load-balancing.</p>|Dependent item|gcp.gce.network.lb.received_bytes_count.false<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.received_bytes_count.false`</p></li></ul>|
+|Network: Received bytes: Load-balanced|<p>Whether traffic was received by an L3 loadbalanced IP address assigned to the VM.</p><p>Traffic that is externally routed to the VM's standard internal or external IP address, such as L7 loadbalanced traffic, is not considered to be loadbalanced in this metric.</p><p>The value is empty when load-balancing is not used.</p>|Dependent item|gcp.gce.network.lb.received_bytes_count.true<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.received_bytes_count.true`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network: Received packets|<p>Count of packets received from the network without load-balancing.</p>|Dependent item|gcp.gce.network.lb.received_packets_count.false<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.received_packets_count.false`</p></li></ul>|
+|Network: Received packets: Load-balanced|<p>Whether traffic was received by an L3 loadbalanced IP address assigned to the VM.</p><p>Traffic that is externally routed to the VM's standard internal or external IP address, such as L7 loadbalanced traffic, is not considered to be loadbalanced in this metric.</p><p>The value is empty when load-balancing is not used.</p>|Dependent item|gcp.gce.network.lb.received_packets_count.true<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.received_packets_count.true`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network: Sent bytes|<p>Count of bytes sent over the network without load-balancing.</p>|Dependent item|gcp.gce.network.lb.sent_bytes_count.false<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sent_bytes_count.false`</p></li></ul>|
+|Network: Sent bytes: Load-balanced|<p>Whether traffic was received by an L3 loadbalanced IP address assigned to the VM.</p><p>Traffic that is externally routed to the VM's standard internal or external IP address, such as L7 loadbalanced traffic, is not considered to be loadbalanced in this metric.</p><p>The value is empty when load-balancing is not used.</p>|Dependent item|gcp.gce.network.lb.sent_bytes_count.true<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sent_bytes_count.true`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network: Sent packets|<p>Count of packets sent over the network without load-balancing.</p>|Dependent item|gcp.gce.network.lb.sent_packets_count.false<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sent_packets_count.false`</p></li></ul>|
+|Network: Sent packets: Load-balanced|<p>Whether traffic was received by an L3 loadbalanced IP address assigned to the VM.</p><p>Traffic that is externally routed to the VM's standard internal or external IP address, such as L7 loadbalanced traffic, is not considered to be loadbalanced in this metric.</p><p>The value is empty when load-balancing is not used.</p>|Dependent item|gcp.gce.network.lb.sent_packets_count.true<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sent_packets_count.true`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network: Mirrored bytes|<p>The count of mirrored bytes.</p>|Dependent item|gcp.gce.network.mirrored_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mirrored_bytes_count`</p></li></ul>|
+|Network: Mirrored packets|<p>The count of mirrored packets.</p>|Dependent item|gcp.gce.network.mirrored_packets_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mirrored_packets_count`</p></li></ul>|
+|Network: Mirrored packets dropped: Out of quota|<p>The count of mirrored packets dropped.</p><p>Reason - out of quota.</p>|Dependent item|gcp.gce.network.mirr_dropped_packets.out_of_quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.out_of_quota`</p></li></ul>|
+|Network: Mirrored packets dropped: Unknown|<p>The count of mirrored packets dropped.</p><p>Reason - unknown.</p>|Dependent item|gcp.gce.network.mirr_dropped_packets.unknown<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.unknown`</p></li></ul>|
+|Network: Mirrored packets dropped: Invalid|<p>The count of mirrored packets dropped.</p><p>Reason - invalid.</p>|Dependent item|gcp.gce.network.mirr_dropped_packets.invalid<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.invalid`</p></li></ul>|
+|Integrity: Early boot validation status|<p>The validation status of early boot integrity policy.</p><p>Empty value if integrity monitoring isn't enabled.</p>|Dependent item|gcp.gce.integrity.early_boot_validation_status<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.early_boot_validation_status`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Integrity: Late boot validation status|<p>The validation status of late boot integrity policy.</p><p>Empty value if integrity monitoring isn't enabled.</p>|Dependent item|gcp.gce.integrity.late_boot_validation_status<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.late_boot_validation_status`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Instance uptime|<p>Elapsed time since the VM was started, in seconds.</p>|Dependent item|gcp.gce.instance.uptime<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.uptime_total`</p></li></ul>|
+|Instance state|<p>GCP Compute Engine instance state.</p>|HTTP agent|gcp.gce.instance.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.status`</p><p>⛔️Custom on fail: Set value to: `10`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|Disks get|<p>Disk entities and metrics related to a particular instance.</p>|Script|gcp.gce.disks.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Compute Engine Instance: High CPU utilization|<p>The CPU utilization is too high. The system might be slow to respond.</p>|`min(/GCP Compute Engine Instance by HTTP/gcp.gce.cpu.utilization,15m) >= {$GCE.CPU.UTIL.MAX}`|Average|**Manual close**: Yes|
+|GCP Compute Engine Instance: High memory utilization|<p>RAM utilization is too high. The system might be slow to respond.</p>|`min(/GCP Compute Engine Instance by HTTP/gcp.gce.memory.ram_pused,15m) >= {$GCE.RAM.UTIL.MAX}`|Average||
+|GCP Compute Engine Instance: Instance is in suspended state|<p>The VM is in a suspended state. You can resume the VM or delete it.</p>|`last(/GCP Compute Engine Instance by HTTP/gcp.gce.instance.state) = 7`|Info|**Manual close**: Yes|
+|GCP Compute Engine Instance: The instance is in repairing state|<p>The VM is being repaired.<br>Repairing occurs when the VM encounters an internal error or the underlying machine is unavailable due to maintenance.<br>During this time, the VM is unusable.</p>|`last(/GCP Compute Engine Instance by HTTP/gcp.gce.instance.state) = 4`|Warning|**Manual close**: Yes|
+|GCP Compute Engine Instance: The instance is in terminated state|<p>The VM is stopped. You stopped the VM, or the VM encountered a failure.</p>|`last(/GCP Compute Engine Instance by HTTP/gcp.gce.instance.state) = 5`|Average|**Manual close**: Yes|
+|GCP Compute Engine Instance: Failed to get the instance state|<p>Failed to get the instance state.<br>Check access permissions to GCP API or service account.</p>|`last(/GCP Compute Engine Instance by HTTP/gcp.gce.instance.state) = 10`|Average|**Manual close**: Yes|
+
+### LLD rule GCP Compute Engine: Physical disks discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Compute Engine: Physical disks discovery|<p>GCP Compute Engine: Physical disks discovery.</p>|Dependent item|gcp.gce.phys.disks.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for GCP Compute Engine: Physical disks discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Disk [{#GCE.DISK.NAME}]: Raw data|<p>Data in raw format for the disk with the name [{#GCE.DISK.NAME}].</p>|Dependent item|gcp.gce.quota.single.raw[{#GCE.DISK.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.disk_name == "{#GCE.DISK.NAME}")].metrics.first()`</p></li></ul>|
+|Disk [{#GCE.DISK.NAME}]: Read bytes|<p>Count of bytes read from [{#GCE.DISK.NAME}] disk.</p>|Dependent item|gcp.gce.disk.read_bytes_count[{#GCE.DISK.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.read_bytes_count`</p></li></ul>|
+|Disk [{#GCE.DISK.NAME}]: Read operations|<p>Count of read IO operations from [{#GCE.DISK.NAME}] disk.</p>|Dependent item|gcp.gce.disk.read_ops_count[{#GCE.DISK.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.read_ops_count`</p></li></ul>|
+|Disk [{#GCE.DISK.NAME}]: Write bytes|<p>Count of bytes written to {#GCE.DISK.NAME}] disk.</p>|Dependent item|gcp.gce.disk.write_bytes_count[{#GCE.DISK.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.write_bytes_count`</p></li></ul>|
+|Disk [{#GCE.DISK.NAME}]: Write operations|<p>Count of write IO operations to [{#GCE.DISK.NAME}] disk.</p>|Dependent item|gcp.gce.disk.write_ops_count[{#GCE.DISK.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.write_ops_count`</p></li></ul>|
+
+# GCP Cloud SQL MySQL by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL MySQL instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL MySQL versions: 8.0, 5.7
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL MySQL", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL MySQL"}.</p>|`full`|
+|{$CLOUD_SQL.MYSQL.DISK.UTIL.WARN}|<p>GCP Cloud SQL MySQL instance warning disk usage threshold.</p>|`80`|
+|{$CLOUD_SQL.MYSQL.DISK.UTIL.CRIT}|<p>GCP Cloud SQL MySQL instance critical disk usage threshold.</p>|`90`|
+|{$CLOUD_SQL.MYSQL.CPU.UTIL.MAX}|<p>GCP Cloud SQL MySQL instance CPU usage threshold.</p>|`95`|
+|{$CLOUD_SQL.MYSQL.RAM.UTIL.MAX}|<p>GCP Cloud SQL MySQL instance RAM usage threshold.</p>|`90`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Metrics get|<p>MySQL metrics in raw format.</p>|Script|gcp.cloudsql.mysql.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Reserved CPU cores|<p>Number of cores reserved for the database.</p>|Dependent item|gcp.cloudsql.mysql.cpu.reserved_cores<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_reserved_cores`</p></li></ul>|
+|CPU usage time|<p>Cumulative CPU usage time in seconds.</p>|Dependent item|gcp.cloudsql.mysql.cpu.usage_time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage_time`</p></li></ul>|
+|CPU utilization|<p>Current CPU utilization represented as a percentage of the reserved CPU that is currently in use.</p>|Dependent item|gcp.cloudsql.mysql.cpu.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Disk size|<p>Maximum data disk size in bytes.</p>|Dependent item|gcp.cloudsql.mysql.disk.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_quota`</p></li></ul>|
+|Disk bytes used|<p>Data utilization in bytes.</p>|Dependent item|gcp.cloudsql.mysql.disk.bytes_used<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_bytes_used`</p></li></ul>|
+|Disk read I/O|<p>Delta count of data disk read I/O operations.</p>|Dependent item|gcp.cloudsql.mysql.disk.read_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_read_ops_count`</p></li></ul>|
+|Disk write I/O|<p>Delta count of data disk write I/O operations.</p>|Dependent item|gcp.cloudsql.mysql.disk.write_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_write_ops_count`</p></li></ul>|
+|Disk utilization|<p>The fraction of the disk quota that is currently in use. </p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.mysql.disk.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Memory size|<p>Maximum RAM size in bytes.</p>|Dependent item|gcp.cloudsql.mysql.memory.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_quota`</p></li></ul>|
+|Memory used by DB engine|<p>Total RAM usage in bytes. </p><p>This metric reports the RAM usage of the database process, including the buffer/cache.</p>|Dependent item|gcp.cloudsql.mysql.memory.total_usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_total_usage`</p></li></ul>|
+|Memory usage|<p>The RAM usage in bytes. </p><p>This metric reports the RAM usage of the server, excluding the buffer/cache.</p>|Dependent item|gcp.cloudsql.mysql.memory.usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage`</p></li></ul>|
+|Memory utilization|<p>The fraction of the memory quota that is currently in use.</p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.mysql.memory.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_ram_pused`</p></li></ul>|
+|Network: Received bytes|<p>Delta count of bytes received through the network.</p>|Dependent item|gcp.cloudsql.mysql.network.received_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_received_bytes_count`</p></li></ul>|
+|Network: Sent bytes|<p>Delta count of bytes sent through the network.</p>|Dependent item|gcp.cloudsql.mysql.network.sent_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_sent_bytes_count`</p></li></ul>|
+|Connections|<p>Number of connections to the databases on the Cloud SQL instance.</p>|Dependent item|gcp.cloudsql.mysql.network.connections<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_connections`</p></li></ul>|
+|Instance state|<p>GCP Cloud SQL MySQL Current instance state.</p>|HTTP agent|gcp.cloudsql.mysql.inst.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].stringValue`</p><p>⛔️Custom on fail: Set value to: `10`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|DB engine state|<p>GCP Cloud SQL MySQL DB Engine State.</p>|HTTP agent|gcp.cloudsql.mysql.db.state<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].int64Value`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|InnoDB dirty pages|<p>Number of unflushed pages in the InnoDB buffer pool.</p>|Dependent item|gcp.cloudsql.mysql.innodb_buffer_pool_pages_dirty<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_buffer_pool_pages_dirty`</p></li></ul>|
+|InnoDB free pages|<p>Number of unused pages in the InnoDB buffer pool.</p>|Dependent item|gcp.cloudsql.mysql.innodb_buffer_pool_pages_free<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_buffer_pool_pages_free`</p></li></ul>|
+|InnoDB total pages|<p>Total number of pages in the InnoDB buffer pool.</p>|Dependent item|gcp.cloudsql.mysql.innodb_buffer_pool_pages_total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_buffer_pool_pages_total`</p></li></ul>|
+|InnoDB fsync calls|<p>Delta count of InnoDB fsync() calls.</p>|Dependent item|gcp.cloudsql.mysql.innodb_data_fsyncs<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_data_fsyncs`</p></li></ul>|
+|InnoDB log fsync calls|<p>Delta count of InnoDB fsync() calls to the log file.</p>|Dependent item|gcp.cloudsql.mysql.innodb_os_log_fsyncs<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_os_log_fsyncs`</p></li></ul>|
+|InnoDB pages read|<p>Delta count of InnoDB pages read.</p>|Dependent item|gcp.cloudsql.mysql.innodb_pages_read<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_pages_read`</p></li></ul>|
+|InnoDB pages written|<p>Delta count of InnoDB pages written.</p>|Dependent item|gcp.cloudsql.mysql.innodb_pages_written<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_innodb_pages_written`</p></li></ul>|
+|Open tables|<p>The number of tables that are currently open.</p>|Dependent item|gcp.cloudsql.mysql.open_tables<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_open_tables`</p></li></ul>|
+|Open table definitions|<p>The number of table definitions that are currently cached.</p>|Dependent item|gcp.cloudsql.mysql.open_table_definitions<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_open_table_definitions`</p></li></ul>|
+|Queries|<p>Delta of statements executed by the server.</p>|Dependent item|gcp.cloudsql.queries<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_queries`</p></li></ul>|
+|Questions|<p>Delta of statements executed by the server sent by the client.</p>|Dependent item|gcp.cloudsql.questions<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_questions`</p></li></ul>|
+|Network: Bytes received by MySQL|<p>Delta count of bytes received by MySQL process.</p>|Dependent item|gcp.cloudsql.mysql_received_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_received_bytes_count`</p></li></ul>|
+|Network: Bytes sent by MySQL|<p>Delta count of bytes sent by MySQL process.</p>|Dependent item|gcp.cloudsql.mysql_sent_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mysql_sent_bytes_count`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP MySQL: High CPU utilization|<p>The CPU utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.cpu.utilization,5m) >= {$CLOUD_SQL.MYSQL.CPU.UTIL.MAX}`|Average||
+|GCP MySQL: Disk space is low|<p>High utilization of the storage space.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.disk.utilization) >= {$CLOUD_SQL.MYSQL.DISK.UTIL.WARN}`|Warning|**Depends on**:<br><ul><li>GCP MySQL: Disk space is critically low</li></ul>|
+|GCP MySQL: Disk space is critically low|<p>Critical utilization of the disk space.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.disk.utilization) >= {$CLOUD_SQL.MYSQL.DISK.UTIL.CRIT}`|Average||
+|GCP MySQL: High memory utilization|<p>RAM utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.memory.utilization,5m) >= {$CLOUD_SQL.MYSQL.RAM.UTIL.MAX}`|High||
+|GCP MySQL: Instance is in suspended state|<p>The instance is in suspended state. <br>It is not available, for example, due to problems with billing.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 1`|Warning||
+|GCP MySQL: Instance is stopped by the owner|<p>The instance has been stopped by the owner. <br>It is not currently running, but it's ready to be restarted.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 2`|Info||
+|GCP MySQL: Instance is in maintenance|<p>The instance is down for maintenance.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 4`|Info||
+|GCP MySQL: Instance is in failed state|<p>The instance creation failed, or an operation left the instance in an own bad state.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 5`|Average||
+|GCP MySQL: Instance is in unknown state|<p>The state of the instance is unknown.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 6`|Average||
+|GCP MySQL: Failed to get the instance state|<p>Failed to get the instance state. <br>Check access permissions to GCP API or service account.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.inst.state) = 10`|Average||
+|GCP MySQL: Database engine is down|<p>Database engine is down.<br>If an instance experiences unplanned (non-maintenance) downtime, the instance state will still be RUNNING, but the database engine state metric will report 0.</p>|`last(/GCP Cloud SQL MySQL by HTTP/gcp.cloudsql.mysql.db.state)=0`|Average|**Depends on**:<br><ul><li>GCP MySQL: Instance is stopped by the owner</li><li>GCP MySQL: Instance is in suspended state</li><li>GCP MySQL: Instance is in maintenance</li><li>GCP MySQL: Instance is in failed state</li><li>GCP MySQL: Instance is in unknown state</li><li>GCP MySQL: Failed to get the instance state</li></ul>|
+
+# GCP Cloud SQL MySQL Replica by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL metrics for the MySQL read-only replica instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL MySQL read replica versions: 8.0, 5.7
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL MySQL Replica", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL MySQL Replica"}.</p>|`full`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Replica metrics get|<p>MySQL replication metrics data in raw format.</p>|Script|gcp.cloudsql.mysql.repl.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Last I/O thread error number|<p>The error number of the most recent error that caused the I/O thread to stop.</p>|Dependent item|gcp.cloudsql.mysql.repl.last_io_errno<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.last_io_errno`</p></li></ul>|
+|Last SQL thread error number|<p>The error number of the most recent error that caused the SQL thread to stop.</p>|Dependent item|gcp.cloudsql.mysql.repl.last_sql_errno<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.last_sql_errno`</p></li></ul>|
+|Replication lag|<p>Number of seconds the read replica is behind its primary (approximation).</p>|Dependent item|gcp.cloudsql.mysql.repl.replica_lag<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.replica_lag`</p></li></ul>|
+|Network lag|<p>Indicates time taken from primary binary log to IO thread on replica.</p>|Dependent item|gcp.cloudsql.mysql.repl.network_lag<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.network_lag`</p></li></ul>|
+|Replication state|<p>The current serving state of replication.</p><p>This metric is only available for the MySQL/PostgreSQL instances.</p>|Dependent item|gcp.cloudsql.mysql.repl.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.state`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Slave I/O thread running|<p>Indicates whether the I/O thread for reading the primary's binary log is running.</p><p>Possible values are Yes, No and Connecting.</p>|Dependent item|gcp.cloudsql.mysql.repl.slave_io_running<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.slave_io_running`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Slave SQL thread running|<p>Indicates whether the SQL thread for executing events in the relay log is running.</p>|Dependent item|gcp.cloudsql.mysql.repl.slave_sql_running<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.slave_sql_running`</p></li><li>Boolean to decimal</li></ul>|
+
+# GCP Cloud SQL PostgreSQL by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL PostgreSQL database metrics using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL PostgreSQL versions: 14, 13, 12
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL PostgreSQL", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL PostgreSQL"}.</p>|`full`|
+|{$GCP.CLOUD_SQL.DB.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL PostgreSQL databases by namespace.</p>|`.*`|
+|{$GCP.CLOUD_SQL.DB.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL PostgreSQL databases by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$CLOUD_SQL.PGSQL.DISK.UTIL.WARN}|<p>GCP Cloud SQL PostgreSQL instance warning disk usage threshold.</p>|`80`|
+|{$CLOUD_SQL.PGSQL.DISK.UTIL.CRIT}|<p>GCP Cloud SQL PostgreSQL instance critical disk usage threshold.</p>|`90`|
+|{$CLOUD_SQL.PGSQL.CPU.UTIL.MAX}|<p>GCP Cloud SQL PostgreSQL instance CPU usage threshold.</p>|`95`|
+|{$CLOUD_SQL.PGSQL.RAM.UTIL.MAX}|<p>GCP Cloud SQL PostgreSQL instance RAM usage threshold.</p>|`90`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Metrics get|<p>PostgreSQL metrics data in raw format.</p>|Script|gcp.cloudsql.pgsql.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Reserved CPU cores|<p>Number of cores reserved for the database.</p>|Dependent item|gcp.cloudsql.pgsql.cpu.reserved_cores<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_reserved_cores`</p></li></ul>|
+|CPU usage time|<p>Cumulative CPU usage time in seconds.</p>|Dependent item|gcp.cloudsql.pgsql.cpu.usage_time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage_time`</p></li></ul>|
+|CPU utilization|<p>Current CPU utilization represented as a percentage of the reserved CPU that is currently in use.</p>|Dependent item|gcp.cloudsql.pgsql.cpu.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Disk size|<p>Maximum data disk size in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.disk.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_quota`</p></li></ul>|
+|Disk bytes used|<p>Data utilization in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.disk.bytes_used<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_bytes_used`</p></li></ul>|
+|Disk read I/O|<p>Delta count of data disk read I/O operations.</p>|Dependent item|gcp.cloudsql.pgsql.disk.read_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_read_ops_count`</p></li></ul>|
+|Disk write I/O|<p>Delta count of data disk write I/O operations.</p>|Dependent item|gcp.cloudsql.pgsql.disk.write_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_write_ops_count`</p></li></ul>|
+|Disk utilization|<p>The fraction of the disk quota that is currently in use. </p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.pgsql.disk.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Memory size|<p>Maximum RAM size in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.memory.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_quota`</p></li></ul>|
+|Memory used by DB engine|<p>Total RAM usage in bytes. </p><p>This metric reports the RAM usage of the database process, including the buffer/cache.</p>|Dependent item|gcp.cloudsql.pgsql.memory.total_usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_total_usage`</p></li></ul>|
+|Memory usage|<p>The RAM usage in bytes. </p><p>This metric reports the RAM usage of the server, excluding the buffer/cache.</p>|Dependent item|gcp.cloudsql.pgsql.memory.usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage`</p></li></ul>|
+|Memory utilization|<p>The fraction of the memory quota that is currently in use.</p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.pgsql.memory.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_ram_pused`</p></li></ul>|
+|Network: Received bytes|<p>Delta count of bytes received through the network.</p>|Dependent item|gcp.cloudsql.pgsql.network.received_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_received_bytes_count`</p></li></ul>|
+|Network: Sent bytes|<p>Delta count of bytes sent through the network.</p>|Dependent item|gcp.cloudsql.pgsql.network.sent_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_sent_bytes_count`</p></li></ul>|
+|Instance state|<p>GCP Cloud SQL PostgreSQL Current instance state.</p>|HTTP agent|gcp.cloudsql.pgsql.inst.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].stringValue`</p><p>⛔️Custom on fail: Set value to: `10`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|DB engine state|<p>GCP Cloud SQL PostgreSQL DB Engine State.</p>|HTTP agent|gcp.cloudsql.pgsql.db.state<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].int64Value`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|Transaction ID utilization|<p>Current utilization represented as a percentage of transaction IDs consumed by the Cloud SQL PostgreSQL instance.</p>|Dependent item|gcp.cloudsql.pgsql.transaction_id_utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_transaction_id_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Assigned transactions|<p>Delta count of assigned transaction IDs.</p>|Dependent item|gcp.cloudsql.pgsql.transaction_id_count_assigned<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_assigned`</p></li></ul>|
+|Frozen transactions|<p>Delta count of frozen transaction IDs.</p>|Dependent item|gcp.cloudsql.pgsql.transaction_id_count_frozen<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_frozen`</p></li></ul>|
+|Data written to temporary|<p>Total data size (in bytes) written to temporary files by the queries.</p>|Dependent item|gcp.cloudsql.pgsql.temp_bytes_written_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_temp_bytes_written_count`</p></li></ul>|
+|Temporary files used for writing data|<p>Total number of temporary files used for writing data while performing algorithms such as join and sort.</p>|Dependent item|gcp.cloudsql.pgsql.temp_files_written_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_temp_files_written_count`</p></li></ul>|
+|Oldest running transaction age|<p>Age of the oldest running transaction yet to be vacuumed in the Cloud SQL PostgreSQL instance, measured in number of transactions that have happened since the oldest transaction.</p><p>Empty value when there is no such transaction type.</p>|Dependent item|gcp.cloudsql.pgsql.oldest_transaction.running<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_running`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Oldest prepared transaction age|<p>Age of the oldest prepared transaction yet to be vacuumed in the Cloud SQL PostgreSQL instance, measured in number of transactions that have happened since the oldest transaction.</p><p>Empty value when there is no such transaction type.</p>|Dependent item|gcp.cloudsql.pgsql.oldest_transaction.prepared<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_prepared`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Oldest replication slot transaction age|<p>Age of the oldest replication slot transaction yet to be vacuumed in the Cloud SQL PostgreSQL instance, measured in number of transactions that have happened since the oldest transaction.</p><p>Empty value when there is no such transaction type.</p>|Dependent item|gcp.cloudsql.pgsql.oldest_transaction.replication_slot<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_replication_slot`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Oldest replica transaction age|<p>Age of the oldest replica transaction yet to be vacuumed in the Cloud SQL PostgreSQL instance, measured in number of transactions that have happened since the oldest transaction.</p><p>Empty value when there is no such transaction type.</p>|Dependent item|gcp.cloudsql.pgsql.oldest_transaction.replica<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_replica`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Connections|<p>The number of the connections to the Cloud SQL PostgreSQL instance.</p><p>Includes connections to the system databases, which aren't visible by default.</p>|Dependent item|gcp.cloudsql.pgsql.num_backends<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pgsql_num_backends`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP PostgreSQL: High CPU utilization|<p>The CPU utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.cpu.utilization,5m) >= {$CLOUD_SQL.PGSQL.CPU.UTIL.MAX}`|Average||
+|GCP PostgreSQL: Disk space is low|<p>High utilization of the storage space.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.disk.utilization) >= {$CLOUD_SQL.PGSQL.DISK.UTIL.WARN}`|Warning|**Depends on**:<br><ul><li>GCP PostgreSQL: Disk space is critically low</li></ul>|
+|GCP PostgreSQL: Disk space is critically low|<p>Critical utilization of the disk space.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.disk.utilization) >= {$CLOUD_SQL.PGSQL.DISK.UTIL.CRIT}`|Average||
+|GCP PostgreSQL: High memory utilization|<p>RAM utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.memory.utilization,5m) >= {$CLOUD_SQL.PGSQL.RAM.UTIL.MAX}`|High||
+|GCP PostgreSQL: Instance is in suspended state|<p>The instance is in suspended state. <br>It is not available, for example, due to problems with billing.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 1`|Warning||
+|GCP PostgreSQL: Instance is stopped by the owner|<p>The instance has been stopped by the owner. <br>It is not currently running, but it's ready to be restarted.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 2`|Info||
+|GCP PostgreSQL: Instance is in maintenance|<p>The instance is down for maintenance.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 4`|Info||
+|GCP PostgreSQL: Instance is in failed state|<p>The instance creation failed, or an operation left the instance in an own bad state.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 5`|Average||
+|GCP PostgreSQL: Instance is in unknown state|<p>The state of the instance is unknown.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 6`|Average||
+|GCP PostgreSQL: Failed to get the instance state|<p>Failed to get the instance state. <br>Check access permissions to GCP API or service account.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.inst.state) = 10`|Average||
+|GCP PostgreSQL: Database engine is down|<p>Database engine is down.<br>If an instance experiences unplanned (non-maintenance) downtime, the instance state will still be RUNNING, but the database engine state metric will report 0.</p>|`last(/GCP Cloud SQL PostgreSQL by HTTP/gcp.cloudsql.pgsql.db.state)=0`|Average|**Depends on**:<br><ul><li>GCP PostgreSQL: Instance is stopped by the owner</li><li>GCP PostgreSQL: Instance is in suspended state</li><li>GCP PostgreSQL: Instance is in maintenance</li><li>GCP PostgreSQL: Instance is in failed state</li><li>GCP PostgreSQL: Instance is in unknown state</li><li>GCP PostgreSQL: Failed to get the instance state</li></ul>|
+
+### LLD rule GCP Cloud SQL PostgreSQL: Databases discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP Cloud SQL PostgreSQL: Databases discovery|<p>Databases discovery for the particular PostgreSQL instance.</p>|HTTP agent|gcp.cloudsql.pgsql.db.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.items`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for GCP Cloud SQL PostgreSQL: Databases discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Database [{#PGSQL.DB.NAME}]: Metrics raw|<p>PostgreSQL metrics in raw format.</p>|Script|gcp.cloudsql.pgsql.db.metrics.get[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Deadlocks count|<p>Number of deadlocks detected in the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.deadlock_count[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.deadlock_count`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Tuples returned|<p>Total number of rows scanned while processing the queries of the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.tuples_returned_count[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.tuples_returned_count`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Tuples fetched|<p>Total number of rows fetched as a result of queries to the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.tuples_fetched_count[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.tuples_fetched_count`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Committed transactions|<p>Delta count of number of committed transactions to the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.transaction_count_commit[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.commit`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Rolled-back transactions|<p>Delta count of number of rolled-back transactions in the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.transaction_count_rollback[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rollback`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Buffer cache blocks read.|<p>Number of buffer cache blocks read by the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.blocks_read_count_buffer_cache[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.buffer_cache`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Disk blocks read.|<p>Number of disk blocks read by the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.blocks_read_count_disk[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.disk`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Inserted rows processed.|<p>Number of tuples(rows) processed for insert operations for the database with the name [{#PGSQL.DB.NAME}].</p>|Dependent item|gcp.cloudsql.pgsql.tuples_processed_count_insert[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.insert`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Deleted rows processed|<p>Number of tuples(rows) processed for delete operations for the database with the name [{#PGSQL.DB.NAME}].</p>|Dependent item|gcp.cloudsql.pgsql.tuples_processed_count_delete[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.delete`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Updated rows processed|<p>Number of tuples(rows) processed for update operations for the database with the name [{#PGSQL.DB.NAME}].</p>|Dependent item|gcp.cloudsql.pgsql.tuples_processed_count_update[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.update`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Live tuples|<p>Number of live tuples(rows) in the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.tuple_size_live[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.live`</p></li></ul>|
+|Database [{#PGSQL.DB.NAME}]: Dead tuples|<p>Number of live tuples(rows) in the [{#PGSQL.DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.pgsql.tuple_size_dead[{#PGSQL.DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.dead`</p></li></ul>|
+
+# GCP Cloud SQL PostgreSQL Replica by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL PostgreSQL read-only replica instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL PostgreSQL read replica versions: 14, 13, 12
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL PostgreSQL Replica", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL PostgreSQL Replica"}.</p>|`full`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Replica metrics get|<p>PostgreSQL replica metrics data in raw format.</p>|Script|gcp.cloudsql.pgsql.repl.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Network lag|<p>Indicates time taken from primary binary log to IO thread on replica.</p>|Dependent item|gcp.cloudsql.pgsql.repl.network_lag<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.network_lag`</p></li></ul>|
+|Replication lag|<p>Number of seconds the read replica is behind its primary (approximation).</p>|Dependent item|gcp.cloudsql.pgsql.repl.replica_lag<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.replica_lag`</p></li></ul>|
+|Replication state|<p>The current serving state of replication.</p><p>This metric is only available for the MySQL/PostgreSQL instances.</p>|Dependent item|gcp.cloudsql.pgsql.repl.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.state`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Replay location lag|<p>Replay location replication lag in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.repl.replay_location<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.replay_location`</p></li></ul>|
+|Write location lag|<p>Write location replication lag in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.repl.write_location<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.write_location`</p></li></ul>|
+|Flush location lag|<p>Flush location replication lag in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.repl.flush_location<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.flush_location`</p></li></ul>|
+|Sent location lag|<p>Sent location replication lag in bytes.</p>|Dependent item|gcp.cloudsql.pgsql.repl.sent_location<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sent_location`</p></li></ul>|
+|Number of log archival failures|<p>Number of failed attempts for archiving replication log files.</p>|Dependent item|gcp.cloudsql.pgsql.repl.log_archive_failure_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.log_archive_failure_count`</p></li></ul>|
+|Number of log archival successes|<p>Number of failed attempts for archiving replication log files.</p>|Dependent item|gcp.cloudsql.pgsql.repl.log_archive_success_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.log_archive_success_count`</p></li></ul>|
+
+# GCP Cloud SQL MSSQL by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL MSSQL instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL MSSQL versions: 2022 Standard/Enterprise, 2019 Standard/Enterprise, 2017 Standard/Enterprise.
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL MSSQL", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL MSSQL"}.</p>|`full`|
+|{$CLOUD_SQL.MSSQL.RES.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL resources by namespace.</p>|`.*`|
+|{$CLOUD_SQL.MSSQL.RES.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL resources by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$CLOUD_SQL.MSSQL.DB.NAME.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL databases by namespace.</p>|`.*`|
+|{$CLOUD_SQL.MSSQL.DB.NAME.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL databases by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$CLOUD_SQL.MSSQL.SCHEDULER.ID.MATCHES}|<p>The filter to include GCP Cloud SQL MSSQL schedulers by namespace.</p>|`.*`|
+|{$CLOUD_SQL.MSSQL.SCHEDULER.ID.NOT_MATCHES}|<p>The filter to exclude GCP Cloud SQL MSSQL schedulers by namespace.</p>|`CHANGE_IF_NEEDED`|
+|{$CLOUD_SQL.MSSQL.DISK.UTIL.WARN}|<p>GCP Cloud SQL MSSQL instance warning disk usage threshold.</p>|`80`|
+|{$CLOUD_SQL.MSSQL.DISK.UTIL.CRIT}|<p>GCP Cloud SQL MSSQL instance critical disk usage threshold.</p>|`90`|
+|{$CLOUD_SQL.MSSQL.CPU.UTIL.MAX}|<p>GCP Cloud SQL MSSQL instance CPU usage threshold.</p>|`95`|
+|{$CLOUD_SQL.MSSQL.RAM.UTIL.MAX}|<p>GCP Cloud SQL MSSQL instance RAM usage threshold.</p>|`90`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Metrics get|<p>MSSQL metrics data in raw format.</p>|Script|gcp.cloudsql.mssql.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Reserved CPU cores|<p>Number of cores reserved for the database.</p>|Dependent item|gcp.cloudsql.mssql.cpu.reserved_cores<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_reserved_cores`</p></li></ul>|
+|CPU usage time|<p>Cumulative CPU usage time in seconds.</p>|Dependent item|gcp.cloudsql.mssql.cpu.usage_time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage_time`</p></li></ul>|
+|CPU utilization|<p>Current CPU utilization represented as a percentage of the reserved CPU that is currently in use.</p>|Dependent item|gcp.cloudsql.mssql.cpu.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Disk size|<p>Maximum data disk size in bytes.</p>|Dependent item|gcp.cloudsql.mssql.disk.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_quota`</p></li></ul>|
+|Disk bytes used|<p>Data utilization in bytes.</p>|Dependent item|gcp.cloudsql.mssql.disk.bytes_used<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_bytes_used`</p></li></ul>|
+|Disk read I/O|<p>Delta count of data disk read I/O operations.</p>|Dependent item|gcp.cloudsql.mssql.disk.read_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_read_ops_count`</p></li></ul>|
+|Disk write I/O|<p>Delta count of data disk write I/O operations.</p>|Dependent item|gcp.cloudsql.mssql.disk.write_ops_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_write_ops_count`</p></li></ul>|
+|Disk utilization|<p>The fraction of the disk quota that is currently in use. </p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.mssql.disk.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_utilization`</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Memory size|<p>Maximum RAM size in bytes.</p>|Dependent item|gcp.cloudsql.mssql.memory.quota<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_quota`</p></li></ul>|
+|Memory used by DB engine|<p>Total RAM usage in bytes. </p><p>This metric reports the RAM usage of the database process, including the buffer/cache.</p>|Dependent item|gcp.cloudsql.mssql.memory.total_usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_total_usage`</p></li></ul>|
+|Memory usage|<p>The RAM usage in bytes. </p><p>This metric reports the RAM usage of the server, excluding the buffer/cache.</p>|Dependent item|gcp.cloudsql.mssql.memory.usage<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_usage`</p></li></ul>|
+|Memory utilization|<p>The fraction of the memory quota that is currently in use.</p><p>Shown as percentage.</p>|Dependent item|gcp.cloudsql.mssql.memory.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_ram_pused`</p></li></ul>|
+|Network: Received bytes|<p>Delta count of bytes received through the network.</p>|Dependent item|gcp.cloudsql.mssql.network.received_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_received_bytes_count`</p></li></ul>|
+|Network: Sent bytes|<p>Delta count of bytes sent through the network.</p>|Dependent item|gcp.cloudsql.mssql.network.sent_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_sent_bytes_count`</p></li></ul>|
+|Connections|<p>Number of connections to the databases on the Cloud SQL instance.</p>|Dependent item|gcp.cloudsql.mssql.network.connections<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_connections`</p></li></ul>|
+|Instance state|<p>GCP Cloud SQL MSSQL Current instance state.</p>|HTTP agent|gcp.cloudsql.mssql.inst.state<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].stringValue`</p><p>⛔️Custom on fail: Set value to: `10`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|DB engine state|<p>GCP Cloud SQL MSSQL DB Engine State.</p>|HTTP agent|gcp.cloudsql.mssql.db.state<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.timeSeriesData[0].pointData[0].values[0].int64Value`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `10m`</p></li></ul>|
+|Connection resets|<p>Total number of login operations started from the connection pool since the last restart of SQL Server service.</p>|Dependent item|gcp.cloudsql.mssql.conn.connection_reset_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_connection_reset_count`</p></li></ul>|
+|Login attempts|<p>Total number of login attempts since the last restart of SQL Server service.</p><p>This does not include pooled connections.</p>|Dependent item|gcp.cloudsql.mssql.conn.login_attempt_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_login_attempt_count`</p></li></ul>|
+|Logouts|<p>Total number of logout operations since the last restart of SQL Server service.</p>|Dependent item|gcp.cloudsql.mssql.conn.logout_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_logout_count`</p></li></ul>|
+|Processes blocked|<p>Current number of blocked processes.</p>|Dependent item|gcp.cloudsql.mssql.conn.processes_blocked<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_processes_blocked`</p></li></ul>|
+|Buffer cache hit ratio|<p>Current percentage of pages found in the buffer cache without having to read from disk.</p><p>The ratio is the total number of cache hits divided by the total number of cache lookups.</p>|Dependent item|gcp.cloudsql.mssql.memory.buffer_cache_hit_ratio<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_buffer_cache_hit_ratio`</p></li></ul>|
+|Checkpoint pages|<p>Total number of pages flushed to disk by a checkpoint or other operation that requires all dirty pages to be flushed.</p>|Dependent item|gcp.cloudsql.mssql.memory.checkpoint_page_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_checkpoint_page_count`</p></li></ul>|
+|Free list stalls|<p>Total number of requests that had to wait for a free page.</p>|Dependent item|gcp.cloudsql.mssql.memory.free_list_stall_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_free_list_stall_count`</p></li></ul>|
+|Lazy writes|<p>Total number of buffers written by the buffer manager's lazy writer.</p><p>The lazy writer is a system process that flushes out batches of dirty, aged buffers</p><p>(buffers that contain changes that must be written back to disk before the buffer can be reused for a different page)</p><p>and makes them available to user processes.</p>|Dependent item|gcp.cloudsql.mssql.memory.lazy_write_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_lazy_write_count`</p></li></ul>|
+|Memory grants pending|<p>Current number of processes waiting for a workspace memory grant.</p>|Dependent item|gcp.cloudsql.mssql.memory.memory_grants_pending<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_memory_grants_pending`</p></li></ul>|
+|Page life expectancy|<p>Current number of seconds a page will stay in the buffer pool without references.</p>|Dependent item|gcp.cloudsql.mssql.memory.page_life_expectancy<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_page_life_expectancy`</p></li></ul>|
+|Batch requests|<p>Total number of Transact-SQL command batches received.</p>|Dependent item|gcp.cloudsql.mssql.trans.batch_request_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_batch_request_count`</p></li></ul>|
+|Forwarded records|<p>Total number of records fetched through forwarded record pointers.</p>|Dependent item|gcp.cloudsql.mssql.trans.forwarded_record_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_forwarded_record_count`</p></li></ul>|
+|Full scans|<p>Total number of unrestricted full scans.</p><p>These can be either base-table or full-index scans.</p>|Dependent item|gcp.cloudsql.mssql.trans.full_scan_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_full_scan_count`</p></li></ul>|
+|Page splits|<p>Total number of page splits that occur as the result of overflowing index pages.</p>|Dependent item|gcp.cloudsql.mssql.trans.page_split_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_page_split_count`</p></li></ul>|
+|Probe scans|<p>Total number of probe scans that are used to find at least one single qualified row in an index or base table directly.</p>|Dependent item|gcp.cloudsql.mssql.trans.probe_scan_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_probe_scan_count`</p></li></ul>|
+|SQL compilations|<p>Total number of SQL compilations.</p>|Dependent item|gcp.cloudsql.mssql.trans.sql_compilation_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_sql_compilation_count`</p></li></ul>|
+|SQL recompilations|<p>Total number of SQL recompilations.</p>|Dependent item|gcp.cloudsql.mssql.trans.sql_recompilation_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_sql_recompilation_count`</p></li></ul>|
+|Read page operations|<p>Total number of physical database page reads.</p><p>This metric counts physical page reads across all databases.</p>|Dependent item|gcp.cloudsql.mssql.memory.page_ops.read<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_read`</p></li></ul>|
+|Write age operations|<p>Total number of physical database page writes.</p><p>This metric counts physical page writes across all databases.</p>|Dependent item|gcp.cloudsql.mssql.memory.page_ops.write<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_write`</p></li></ul>|
+|Audits size|<p>Tracks the size in bytes of stored SQLServer audit files on an instance.</p><p>Empty value if there are no audits enabled.</p>|Dependent item|gcp.cloudsql.mssql.audits_size<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.base_audits_size`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Audits successfully uploaded|<p>Tracks the size in bytes of stored SQLServer audit files on an instance.</p><p>Empty value if there are no audits enabled.</p>|Dependent item|gcp.cloudsql.mssql.audits_upload_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.mssql_success`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Resources get|<p>MSSQL resources data in raw format.</p>|Script|gcp.cloudsql.mssql.resources.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Databases get|<p>MSSQL databases data in raw format.</p>|Script|gcp.cloudsql.mssql.db.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Schedulers get|<p>MSSQL schedulers data in raw format.</p>|Script|gcp.cloudsql.mssql.schedulers.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP MSSQL: High CPU utilization|<p>The CPU utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.cpu.utilization,5m) >= {$CLOUD_SQL.MSSQL.CPU.UTIL.MAX}`|Average||
+|GCP MSSQL: Disk space is low|<p>High utilization of the storage space.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.disk.utilization) >= {$CLOUD_SQL.MSSQL.DISK.UTIL.WARN}`|Warning|**Depends on**:<br><ul><li>GCP MSSQL: Disk space is critically low</li></ul>|
+|GCP MSSQL: Disk space is critically low|<p>Critical utilization of the disk space.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.disk.utilization) >= {$CLOUD_SQL.MSSQL.DISK.UTIL.CRIT}`|Average||
+|GCP MSSQL: High memory utilization|<p>RAM utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.memory.utilization,5m) >= {$CLOUD_SQL.MSSQL.RAM.UTIL.MAX}`|High||
+|GCP MSSQL: Instance is in suspended state|<p>The instance is in suspended state. <br>It is not available, for example, due to problems with billing.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 1`|Warning||
+|GCP MSSQL: Instance is stopped by the owner|<p>The instance has been stopped by the owner. <br>It is not currently running, but it's ready to be restarted.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 2`|Info||
+|GCP MSSQL: Instance is in maintenance|<p>The instance is down for maintenance.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 4`|Info||
+|GCP MSSQL: Instance is in failed state|<p>The instance creation failed, or an operation left the instance in an own bad state.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 5`|Average||
+|GCP MSSQL: Instance is in unknown state|<p>The state of the instance is unknown.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 6`|Average||
+|GCP MSSQL: Failed to get the instance state|<p>Failed to get the instance state. <br>Check access permissions to GCP API or service account.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.inst.state) = 10`|Average||
+|GCP MSSQL: Database engine is down|<p>Database engine is down.<br>If an instance experiences unplanned (non-maintenance) downtime, the instance state will still be RUNNING, but the database engine state metric will report 0.</p>|`last(/GCP Cloud SQL MSSQL by HTTP/gcp.cloudsql.mssql.db.state)=0`|Average|**Depends on**:<br><ul><li>GCP MSSQL: Instance is stopped by the owner</li><li>GCP MSSQL: Instance is in suspended state</li><li>GCP MSSQL: Instance is in maintenance</li><li>GCP MSSQL: Instance is in failed state</li><li>GCP MSSQL: Instance is in unknown state</li><li>GCP MSSQL: Failed to get the instance state</li></ul>|
+
+### LLD rule Resources discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Resources discovery|<p>Resources discovery.</p>|Dependent item|gcp.cloudsql.resources.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for Resources discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Resource [{#RESOURCE.NAME}]: Raw data|<p>Data in raw format for the [{#RESOURCE.NAME}] resource.</p>|Dependent item|gcp.cloudsql.mssql.resource.raw[{#RESOURCE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.resource == "{#RESOURCE.NAME}")].metrics.first()`</p></li></ul>|
+|Resource [{#RESOURCE.NAME}]: Deadlocks|<p>Total number of lock requests that resulted in a deadlock for the [{#RESOURCE.NAME}] resource.</p>|Dependent item|gcp.cloudsql.mssql.resource.deadlock_count[{#RESOURCE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.deadlock_count`</p></li></ul>|
+|Resource [{#RESOURCE.NAME}]: Lock waits|<p>Total number of lock requests that required the caller to wait for the [{#RESOURCE.NAME}] resource.</p>|Dependent item|gcp.cloudsql.mssql.resource.lock_wait_count[{#RESOURCE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.lock_wait_count`</p></li></ul>|
+|Resource [{#RESOURCE.NAME}]: Lock wait time|<p>Total time lock requests were waiting for locks for the [{#RESOURCE.NAME}] resource.</p>|Dependent item|gcp.cloudsql.mssql.resource.lock_wait_time[{#RESOURCE.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.lock_wait_time`</p></li></ul>|
+
+### LLD rule Databases discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Databases discovery|<p>Databases discovery.</p>|Dependent item|gcp.cloudsql.db.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for Databases discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Database [{#DB.NAME}]: Raw data|<p>Data in raw format for the [{#DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.mssql.db.raw[{#DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.database == "{#DB.NAME}")].metrics.first()`</p></li></ul>|
+|Database [{#DB.NAME}]: Log bytes flushed|<p>Total number of log bytes flushed for the [{#DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.mssql.db.log_bytes_flushed_count[{#DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.log_bytes_flushed_count`</p></li></ul>|
+|Database [{#DB.NAME}]: Transactions started|<p>Total number of transactions started for the [{#DB.NAME}] database.</p>|Dependent item|gcp.cloudsql.mssql.db.transaction_count[{#DB.NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.transaction_count`</p></li></ul>|
+
+### LLD rule Schedulers discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Schedulers discovery|<p>Schedulers discovery.</p>|Dependent item|gcp.cloudsql.schedulers.discovery<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Item prototypes for Schedulers discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Scheduler [{#SCHEDULER.ID}]: Raw data|<p>Data in raw format associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p>|Dependent item|gcp.cloudsql.mssql.scheduler.raw[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$[?(@.scheduler == "{#SCHEDULER.ID}")].metrics.first()`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Active workers|<p>Current number of active workers associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p><p>An active worker is never preemptive, must have an associated task, and is either running, runnable, or suspended.</p>|Dependent item|gcp.cloudsql.mssql.scheduler.active_workers[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.active_workers`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Current tasks|<p>Current number of present tasks associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p><p>This count includes tasks that are waiting for a worker to execute them and tasks that are currently waiting or running (in SUSPENDED or RUNNABLE state).</p>|Dependent item|gcp.cloudsql.mssql.scheduler.current_tasks[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.current_tasks`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Current workers|<p>Current number of workers associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p><p>It includes workers that are not assigned any task.</p>|Dependent item|gcp.cloudsql.mssql.scheduler.current_workers[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.current_workers`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Pending I/O operations|<p>Current number of pending I/Os waiting to be completed that are associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p><p>Each scheduler has a list of pending I/Os that are checked to determine whether they have been completed every time there is a context switch.</p><p>The count is incremented when the request is inserted.</p><p>This count is decremented when the request is completed.</p><p>This number does not indicate the state of the I/Os.</p>|Dependent item|gcp.cloudsql.mssql.scheduler.pending_disk_io[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pending_disk_io`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Runnable tasks|<p>Current number of workers that are associated with the scheduler that goes by its ID [{#SCHEDULER.ID}] and have assigned tasks waiting to be scheduled on the runnable queue.</p>|Dependent item|gcp.cloudsql.mssql.scheduler.runnable_tasks[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.runnable_tasks`</p></li></ul>|
+|Scheduler [{#SCHEDULER.ID}]: Work queue|<p>Current number of tasks in the pending queue associated with the scheduler that goes by its ID [{#SCHEDULER.ID}].</p><p>These tasks are waiting for a worker to pick them up.</p>|Dependent item|gcp.cloudsql.mssql.scheduler.work_queue[{#SCHEDULER.ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.work_queue`</p></li></ul>|
+
+# GCP Cloud SQL MSSQL Replica by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud SQL MSSQL read-only replica instances using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud SQL MSSQL read replicas versions: 2019 Standard/Enterprise, 2017 Standard/Enterprise
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cloud SQL MSSQL Replica", e.g. {$HTTP.TLS.VERIFY:"GCP Cloud SQL MSSQL Replica"}.</p>|`full`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Replica metrics get|<p>MSSQL replica metrics data in raw format.</p>|Script|gcp.cloudsql.mssql.repl.metrics.get<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Bytes sent to replica|<p>Total number of bytes sent to the remote availability replica.</p><p>For an async replica, returns the number of bytes before compression.</p><p>For a sync replica without compression, returns the actual number of bytes.</p>|Dependent item|gcp.cloudsql.mssql.repl.bytes_sent_to_replica_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.bytes_sent_to_replica_count`</p></li></ul>|
+|Resent messages|<p>Total count of Always On messages to resend.</p><p>This includes messages that were attempted to be sent but failed and require resending.</p>|Dependent item|gcp.cloudsql.mssql.repl.resent_message_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.resent_message_count`</p></li></ul>|
+|Log apply pending queue|<p>Current number of log blocks that are waiting to be applied to replica.</p>|Dependent item|gcp.cloudsql.mssql.repl.log_apply_pending_queue<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.log_apply_pending_queue`</p></li></ul>|
+|Log bytes received|<p>Total size of log records received by the replica.</p>|Dependent item|gcp.cloudsql.mssql.repl.log_bytes_received_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.log_bytes_received_count`</p></li></ul>|
+|Recovery queue|<p>Current size of log records in bytes in the replica's log files that have not been redone.</p>|Dependent item|gcp.cloudsql.mssql.repl.recovery_queue<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.recovery_queue`</p></li><li><p>Custom multiplier: `1024`</p></li></ul>|
+|Redone bytes|<p>Total size in bytes of redone log records.</p>|Dependent item|gcp.cloudsql.mssql.repl.redone_bytes_count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.redone_bytes_count`</p></li></ul>|
+
+# GCP Cloud Run Service by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud Run services using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud Run
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.PROJECT.ID}|<p>GCP project ID.</p>||
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`5m`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$GCP.CPU.UTIL.MAX}|<p>GCP Cloud Run container instance CPU utilization threshold.</p>|`90`|
+|{$GCP.MEMORY.UTIL.CRIT}|<p>GCP Cloud Run container instance memory utilization threshold.</p>|`90`|
+|{$GCP.CONCURRENT.REQUEST.MAX}|<p>GCP Cloud Run max concurrent request threshold.</p>|`80`|
+|{$GCP.HTTP.FAIL.MAX.WARN}|<p>The maximum number of HTTP request failures for trigger expression.</p>|`5`|
+|{$GCP.REQUEST.LATENCY.WARN}|<p>Maximum of request latency in milliseconds for trigger expression.</p>|`100`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Get container utilization|<p>Raw data of utilization container.</p>|HTTP agent|gcp.run.utilization.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Container CPU utilization|<p>Container CPU utilization in percentage distribution across all container instances.</p>|Dependent item|gcp.run.cpu.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$..cpu.first()`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Container memory utilization|<p>Container memory utilization distribution across all container instances.</p>|Dependent item|gcp.run.memory.utilization<p>**Preprocessing**</p><ul><li><p>JSON Path: `$..memory.first()`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `100`</p></li></ul>|
+|Max concurrent requests|<p>Distribution of the maximum number of concurrent requests being served by each container instance over a minute.</p>|Dependent item|gcp.run.concurrent.request<p>**Preprocessing**</p><ul><li><p>JSON Path: `$..requests.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get request|<p>Number of requests reaching the service.</p>|HTTP agent|gcp.run.request.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Requests 2xx per second|<p>Number of `2xx` requests reaching the service.</p>|Dependent item|gcp.run.request.2xx.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == '2xx')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Requests 3xx per second|<p>Number of `3xx` requests reaching the service.</p>|Dependent item|gcp.run.request.3xx.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == '3xx')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Requests 4xx per second|<p>Number of `4xx` requests reaching the service.</p>|Dependent item|gcp.run.request.4xx.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == '4xx')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Requests 5xx per second|<p>Number of `5xx` requests reaching the service.</p>|Dependent item|gcp.run.request.5xx.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == '5xx')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get HTTP response traffic|<p>Raw data socket and HTTP response traffic.</p>|HTTP agent|gcp.run.http.traffic.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Internet sent bytes per second|<p>Outgoing response traffic, in bytes. Traffic is sent over network type `internet`.</p>|Dependent item|gcp.gce.internet.sent_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'internet')].sent_bytes.first()`</p></li></ul>|
+|Internet received bytes per second|<p>Incoming request traffic, in bytes. Traffic is received over network type `internet`.</p>|Dependent item|gcp.run.internet.received_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'internet')].received_bytes.first()`</p></li></ul>|
+|Private sent bytes per second|<p>Outgoing response traffic, in bytes. Traffic is sent over network type `private`.</p>|Dependent item|gcp.gce.private.sent_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'private')].sent_bytes.first()`</p></li></ul>|
+|Private received bytes per second|<p>Incoming request traffic, in bytes. Traffic is received over network type `private`.</p>|Dependent item|gcp.run.private.received_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'private')].received_bytes.first()`</p></li></ul>|
+|Google sent bytes per second|<p>Outgoing response traffic, in bytes.</p><p>For responses returned through Google Cloud load balancers, response traffic is classified as `google`.</p>|Dependent item|gcp.gce.google.sent_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'google')].sent_bytes.first()`</p></li></ul>|
+|Google received bytes per second|<p>Incoming request traffic, in bytes. Traffic is received over network type `google`.</p>|Dependent item|gcp.run.google.received_bytes.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.label_value == 'google')].received_bytes.first()`</p></li></ul>|
+|Get latency|<p>Raw data of request latencies.</p>|HTTP agent|gcp.run.latency.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Request latencies|<p>Distribution of request times in milliseconds reaching the service.</p>|Dependent item|gcp.run.request.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.request_latencies_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|End-to-end request latency|<p>Distribution of request latencies in milliseconds measured from when the request enters Google Cloud's network to when Cloud Run sends the response.</p>|Dependent item|gcp.run.e2e.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.e2e_latencies_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|Ingress to region request latency|<p>Distribution of request latencies in milliseconds measured from when the request enters Google Cloud's network to when the request reaches the cloud region.</p>|Dependent item|gcp.run.ingress.region.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.ingress_to_region_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|Routing request latency|<p>Distribution of request latencies in milliseconds measured from when the request reaches the cloud region to when the request reaches Cloud Run.</p>|Dependent item|gcp.run.routing.request.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.routing_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|Pending request latency|<p>Distribution of request latencies in milliseconds measured from when the request reaches Cloud Run to when the request is sent to an instance. Includes time spent waiting for a slot on an existing instance, or for a new instance to start (startup latency).</p>|Dependent item|gcp.run.pending.request.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pending_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|User execution request latency|<p>Distribution of request latencies in milliseconds measured from when the request reaches a running instance to when it exits. Only includes time spent in the user container.</p>|Dependent item|gcp.run.user_execution.request.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.user_execution_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|Response egress request latency|<p>Distribution of response latencies in milliseconds measured from when the container finished processing the request to when Cloud Run sends the response.</p>|Dependent item|gcp.run.response_egress.request.latency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.response_egress_percentile`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Custom multiplier: `0.001`</p></li></ul>|
+|Get container instance count|<p>Raw data of container instances that exist for the service.</p>|HTTP agent|gcp.run.container.count.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Active container instance count|<p>Number of active container instances for the service.</p>|Dependent item|gcp.run.active.container.count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.state == 'active')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Idle container instance count|<p>Number of idle container instances for the service.</p>|Dependent item|gcp.run.idle.container.count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.[?(@.state == 'idle')].value.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Billable instance time|<p>Total billable time (time multiplied by number of running containers).</p>|HTTP agent|gcp.run.billable.instance.time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.timeSeriesData..pointData..values..doubleValue.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Cloud Run Service: High CPU utilization|<p>The CPU utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud Run Service by HTTP/gcp.run.cpu.utilization,15m) >= {$GCP.CPU.UTIL.MAX}`|Average|**Manual close**: Yes|
+|GCP Cloud Run Service: High memory utilization|<p>Container memory utilization is too high. The system might be slow to respond.</p>|`min(/GCP Cloud Run Service by HTTP/gcp.run.memory.utilization,15m) >= {$GCP.MEMORY.UTIL.CRIT}`|Average||
+|GCP Cloud Run Service: Concurrent requests too high|<p>Fires when concurrent requests exceed the threshold `{$GCP.CONCURRENT.REQUEST.MAX}`%.</p>|`min(/GCP Cloud Run Service by HTTP/gcp.run.concurrent.request,15m) >= {$GCP.CONCURRENT.REQUEST.MAX}`|Warning|**Manual close**: Yes|
+|GCP Cloud Run Service: Too many HTTP request failures|<p>Too many requests failed on service with the `5xx` HTTP code.</p>|`min(/GCP Cloud Run Service by HTTP/gcp.run.request.5xx.rate,5m)>{$GCP.HTTP.FAIL.MAX.WARN}`|Warning||
+|GCP Cloud Run Service: Request latency is too high|<p>Fires when latency exceeds the threshold `{$GCP.REQUEST.LATENCY.WARN}`ms.</p>|`min(/GCP Cloud Run Service by HTTP/gcp.run.request.latency,5m)>{$GCP.REQUEST.LATENCY.WARN}`|Warning|**Manual close**: Yes|
+|GCP Cloud Run Service: No active container instances|<p>There are no active container instances for the service. This may indicate that the service is not receiving traffic or there is an issue with scaling.</p>|`max(/GCP Cloud Run Service by HTTP/gcp.run.active.container.count,15m)=0`|Warning|**Manual close**: Yes|
+
+# GCP Cloud Storage Bucket by HTTP
+
+## Overview
+
+This template is designed to monitor Google Cloud Platform Cloud Storage buckets using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Cloud Storage
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.PROJECT.ID}|<p>GCP project ID.</p>||
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`1h`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$GCS.BUCKET.SIZE.MAX}|<p>GCP Cloud Storage bucket size threshold (in bytes). Default is 1TB.</p>|`1T`|
+|{$GCS.BUCKET.SIZE.GROWTH.MAX}|<p>GCP Cloud Storage bucket size growth threshold (in bytes per hour). Default is 10GB.</p>|`10G`|
+|{$GCS.OBJECT.COUNT.MAX}|<p>GCP Cloud Storage bucket object count threshold. Default is 1M objects.</p>|`1000000`|
+|{$GCS.EGRESS.MAX}|<p>GCP Cloud Storage bucket egress traffic threshold (in bytes per 5m). Default is 100MB.</p>|`104857600`|
+|{$GCS.INGRESS.MAX}|<p>GCP Cloud Storage bucket ingress traffic threshold (in bytes per 5m). Default is 100MB.</p>|`104857600`|
+|{$GCS.API.ERROR.MAX}|<p>GCP Cloud Storage bucket API error rate threshold (per 5m). Default is 50.</p>|`50`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Get bucket storage info|<p>GCP Cloud Storage bucket raw metric data.</p>|HTTP agent|gcp.storage.bucket.metrics.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Bucket size|<p>GCP Cloud Storage bucket total size.</p>|Dependent item|gcp.storage.bucket.size<p>**Preprocessing**</p><ul><li><p>JSON Path: `$..size.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Bucket objects total count|<p>Cloud Storage bucket total object count.</p>|Dependent item|gcp.storage.bucket.objects.count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$..objects.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get bucket network traffic|<p>GCP Cloud Storage bucket raw traffic data.</p>|HTTP agent|gcp.storage.bucket.network.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Bucket sent bytes|<p>Outgoing network traffic from the bucket.</p>|Dependent item|gcp.storage.bucket.network.sent_bytes<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$..sent.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Bucket received bytes|<p>Incoming network traffic to the bucket.</p>|Dependent item|gcp.storage.bucket.network.received_bytes<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$..received.first()`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get bucket API metric|<p>GCP Cloud Storage bucket API raw metric data.</p>|HTTP agent|gcp.storage.bucket.requests.get<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Successful request count|<p>Number of `2xx` requests reaching the service.</p>|Dependent item|gcp.storage.bucket.request.2xx<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.r2xx`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+|Client error request count|<p>Number of `4xx` requests reaching the service.</p>|Dependent item|gcp.storage.bucket.request.4xx<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.r4xx`</p></li></ul>|
+|Server error request count|<p>Number of `5xx` requests reaching the service.</p>|Dependent item|gcp.storage.bucket.request.5xx<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.r5xx`</p></li></ul>|
+|Total requests|<p>Number of all requests reaching the service.</p>|Calculated|gcp.storage.bucket.request.total<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Error rate|<p>Rate of failed requests reaching the service.</p>|Calculated|gcp.storage.bucket.request.error.rate<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+|Success rate|<p>Rate of successful requests reaching the service.</p>|Calculated|gcp.storage.bucket.request.success.rate<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Set value to: `100`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Cloud Storage: GCP API is failing (bucket metrics)|<p>No data received from GCP API for the last 30 minutes. Possible query error or API failure.</p>|`nodata(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.metrics.get,30m)=1`|High|**Manual close**: Yes|
+|GCP Cloud Storage: Bucket size is too large|<p>Bucket size exceeds the configured threshold.</p>|`min(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.size,1h)>{$GCS.BUCKET.SIZE.MAX}`|Warning||
+|GCP Cloud Storage: Rapid storage growth detected|<p>Bucket size growth rate exceeds the configured threshold.</p>|`change(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.size)>{$GCS.BUCKET.SIZE.GROWTH.MAX}`|Warning|**Manual close**: Yes|
+|GCP Cloud Storage: Bucket object count is too high|<p>Number of objects in the bucket exceeds the configured limit.</p>|`min(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.objects.count,1h)>{$GCS.OBJECT.COUNT.MAX}`|Warning||
+|GCP Cloud Storage: No objects in bucket|<p>No objects have been stored in the bucket for the last 24 hours.</p>|`max(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.objects.count,24h)=0`|Info|**Manual close**: Yes|
+|GCP Cloud Storage: GCP API is failing (bucket network traffic)|<p>No data received from GCP API for the last 30 minutes. Possible query error or API failure.</p>|`nodata(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.network.get,30m)=1`|High|**Manual close**: Yes|
+|GCP Cloud Storage: High egress traffic|<p>Outgoing network traffic from the bucket exceeds the threshold.</p>|`min(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.network.sent_bytes,5m)>{$GCS.EGRESS.MAX}`|Warning||
+|GCP Cloud Storage: High ingress traffic|<p>Incoming network traffic to the bucket exceeds the threshold.</p>|`min(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.network.received_bytes,5m)>{$GCS.INGRESS.MAX}`|Info||
+|GCP Cloud Storage: GCP API is failing (bucket requests)|<p>No data received from GCP API for the last 30 minutes. Possible query error or API failure.</p>|`nodata(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.requests.get,30m)=1`|High|**Manual close**: Yes|
+|GCP Cloud Storage: High API error rate|<p>GCP Cloud Storage bucket API error rate exceeds the configured threshold.</p>|`min(/GCP Cloud Storage Bucket by HTTP/gcp.storage.bucket.request.error.rate,5m)>{$GCS.API.ERROR.MAX}`|Average||
+
+# GCP Application Load Balancer by HTTP
+
+## Overview
+
+This template is designed to monitor GCP Application Load Balancing using Zabbix.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GCP Application Load Balancing
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+This template will be automatically connected to discovered entities with all their required parameters pre-defined.
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.PROJECT.ID}|<p>GCP project ID.</p>||
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.TIME.WINDOW}|<p>Time interval for data requests.</p><p>Supported usage types:</p><p>- Default update interval for most items.</p><p>- Minimal time window for data requested in Monitoring Query Language REST API request.</p>|`1h`|
+|{$GCP.PROXY}|<p>HTTP proxy. If this macro is empty, then no proxy is used.</p>||
+|{$GCP.APP.LB.TYPE.PREFIX}|<p>Metric prefix for load balancer type.</p><p>Possible values:</p><p>- `https` for global external load balancers</p><p>- `https/external/regional` for regional external load balancers</p><p>- `https/internal` for internal load balancers</p>||
+|{$GCP.APP.LB.P95.LATENCY.MAX}|<p>Sets the maximum latency threshold for alerts.</p>|`1000`|
+|{$GCP.APP.LB.NODATA.TIME}|<p>Time threshold for no data trigger.</p>|`30m`|
+|{$GCP.APP.LB.SUCCESS.RATE.WARN}|<p>Warning severity threshold for request success rate (%).</p>|`95`|
+|{$GCP.APP.LB.SUCCESS.RATE.AVERAGE}|<p>Average severity threshold for request success rate (%).</p>|`90`|
+|{$GCP.APP.LB.SUCCESS.RATE.HIGH}|<p>High severity threshold for request success rate (%).</p>|`75`|
+|{$GCP.APP.LB.RESPONSE.CODE.MATCHES}|<p>Filter to include HTTP response codes for discovery.</p>|`.*`|
+|{$GCP.APP.LB.RESPONSE.CODE.NOT_MATCHES}|<p>Filter to exclude HTTP response codes for discovery.</p>|`CHANGE_IF_NEEDED`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Request bytes count|<p>Request bytes count for the application load balancer.</p>|HTTP agent|gcp.app.lb.request.bytes<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|Response bytes count|<p>Response bytes count for the application load balancer.</p>|HTTP agent|gcp.app.lb.response.bytes<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|Average latency|<p>Average latencies for the application load balancer.</p>|HTTP agent|gcp.app.lb.average.latency<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|P95 latency|<p>P95 latencies for the application load balancer.</p>|HTTP agent|gcp.app.lb.p95.latency<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|Request success rate|<p>Request success rate calculated based on the ratio of successful requests (HTTP response codes 2xx and 3xx) to total requests.</p>|HTTP agent|gcp.app.lb.success.rate<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|Total average request rate|<p>Total average request rate for the application load balancer.</p>|HTTP agent|gcp.app.lb.request.rate<p>**Preprocessing**</p><ul><li><p>Check for not supported value: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set error to: `There was an authentication error while requesting data from GCP API.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.result[0].value[1]`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `30m`</p></li></ul>|
+|Request rates by response code|<p>Request rates by response code for the application load balancer.</p>|HTTP agent|gcp.app.lb.requests.count<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Application Load Balancer: High P95 latency|<p>The 95th percentile latency is above {$GCP.APP.LB.P95.LATENCY.MAX}ms (avg over 5 minutes).</p>|`avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.p95.latency,5m) > {$GCP.APP.LB.P95.LATENCY.MAX}`|Average|**Manual close**: Yes|
+|GCP Application Load Balancer: Request success rate is below warning threshold|<p>Request success rate has dropped below {$GCP.APP.LB.SUCCESS.RATE.WARN}%.<br><br>This may indicate elevated client or backend errors.</p>|`avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.success.rate,5m)<{$GCP.APP.LB.SUCCESS.RATE.WARN} and avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.request.rate,5m)>0`|Warning|**Manual close**: Yes|
+|GCP Application Load Balancer: Request success rate is critically low|<p>Request success rate has dropped below {$GCP.APP.LB.SUCCESS.RATE.AVERAGE}%.<br><br>Users are likely experiencing failed requests.</p>|`avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.success.rate,5m)<{$GCP.APP.LB.SUCCESS.RATE.AVERAGE} and avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.request.rate,5m)>1`|Average|**Manual close**: Yes|
+|GCP Application Load Balancer: Request success rate indicates major outage|<p>Request success rate has dropped below {$GCP.APP.LB.SUCCESS.RATE.HIGH}%.<br><br>Severe service degradation or outage is likely occurring.</p>|`avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.success.rate,5m)<{$GCP.APP.LB.SUCCESS.RATE.HIGH} and avg(/GCP Application Load Balancer by HTTP/gcp.app.lb.request.rate,5m)>5`|High|**Manual close**: Yes|
+|GCP Application Load Balancer: No request rate data|<p>No request rate data received for `{$GCP.APP.LB.NODATA.TIME}`. The load balancer may not be receiving traffic or there may be an issue with data collection.</p>|`nodata(/GCP Application Load Balancer by HTTP/gcp.app.lb.requests.count,{$GCP.APP.LB.NODATA.TIME})=1`|Warning|**Manual close**: Yes|
+
+### LLD rule Response code discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Response code discovery|<p>Discovery of HTTP response codes for the application load balancer.</p>|Dependent item|gcp.app.lb.request.count.discovery<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `2h`</p></li></ul>|
+
+### Item prototypes for Response code discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Requests rate: HTTP {#RESPONSE_CODE}|<p>Request rate for HTTP `{#RESPONSE_CODE}` responses.</p>|Dependent item|gcp.app.lb.request.count[{#RESPONSE_CODE}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `2h`</p></li></ul>|
+
+# GCP Cost Monitoring by HTTP
+
+## Overview
+
+This template monitors Google Cloud Platform (GCP) billing costs using the BigQuery API via Zabbix.
+It works without any external scripts and uses the script items.
+
+The template retrieves cost data aggregated by service and project from Cloud Billing data exported to BigQuery.
+Two master items (monthly and daily) drive all dependent items and LLD discoveries, minimizing the number of BigQuery API calls.
+
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- Google Cloud Platform
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+1. Enable Cloud Billing export to BigQuery in the Google Cloud Console (needs to be done by someone with cost admin permissions).
+See [Export Cloud Billing data to BigQuery](https://cloud.google.com/billing/docs/how-to/export-data-bigquery).
+2. Create a service account in the GCP project that hosts the billing export dataset.
+More on [managing service accounts](https://cloud.google.com/iam/docs/creating-managing-service-accounts).
+3. Grant the service account the `BigQuery Data Viewer` role on the billing export dataset.
+4. Grant `bigquery.jobs.create` permission on the billing project to the service account.
+5. Create and download a JSON key for the service account.
+More on [service account keys](https://cloud.google.com/iam/docs/creating-managing-service-account-keys).
+6. Link this template to a Zabbix host.
+7. Configure the macros: `{$GCP.CLIENT.EMAIL}`, `{$GCP.PRIVATE.KEY.ID}`, `{$GCP.PRIVATE.KEY}`, `{$GCP.COST.BIGQUERY.TABLE}`.
+
+**Notes**
+
+  - `{$GCP.COST.BIGQUERY.TABLE}` must be in the format `project_id.dataset_id.table_id` (no backticks).
+  - If this template is co-hosted with `GCP by HTTP`, the auth macros are shared — configure them once at the host level.
+  - To reduce BigQuery query costs, lower `{$GCP.COST.BILLING.MONTH}` (e.g. to `3`).
+
+More on metrics and used API methods:
+
+  - [BigQuery API](https://cloud.google.com/bigquery/docs/reference/rest/v2/jobs/query)
+  - [Cloud Billing export schema](https://cloud.google.com/billing/docs/how-to/bq-schema)
+
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.CLIENT.EMAIL}|<p>Service account client e-mail.</p>||
+|{$GCP.PRIVATE.KEY.ID}|<p>Service account private key ID.</p>||
+|{$GCP.PRIVATE.KEY}|<p>Service account private key data.</p>||
+|{$GCP.COST.BIGQUERY.TABLE}|<p>BigQuery billing export table path in the format: project_id.dataset_id.table_id.</p>||
+|{$GCP.BILLING.PROJECT.ID}|<p>GCP project ID where BigQuery jobs are created. If empty, the project from {$GCP.COST.BIGQUERY.TABLE} is used. Set this when the service account lacks bigquery.jobs.create on the billing export project.</p>||
+|{$GCP.COST.BILLING.MONTH}|<p>Number of months of historical data to retrieve from BigQuery. Maximum 24.</p>|`11`|
+|{$GCP.AUTH.FREQUENCY}|<p>The update interval for the GCP Cost Authorization item, which also equals to the access token regeneration request frequency.</p><p>The GCP Access Token is available for 1 hour (3600 seconds) after the generation request.</p>|`45m`|
+|{$GCP.COST.SERVICE.MATCHES}|<p>Filter to include discovered services by name.</p>|`.*`|
+|{$GCP.COST.SERVICE.NOT_MATCHES}|<p>Filter to exclude discovered services by name.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.COST.PROJECT.ID.MATCHES}|<p>Filter to include discovered projects by ID.</p>|`.*`|
+|{$GCP.COST.PROJECT.ID.NOT_MATCHES}|<p>Filter to exclude discovered projects by ID.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.COST.REGION.MATCHES}|<p>Filter to include discovered regions.</p>|`.*`|
+|{$GCP.COST.REGION.NOT_MATCHES}|<p>Filter to exclude discovered regions.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.COST.DAILY.MAX}|<p>Daily cost alert threshold.</p>|`1000`|
+|{$GCP.COST.MONTHLY.MAX}|<p>Monthly cost alert threshold.</p>|`10000`|
+|{$GCP.COST.SPIKE.FACTOR}|<p>Multiplier used to detect a cost spike. Daily cost exceeding avg * factor triggers an alert.</p>|`1.5`|
+|{$GCP.COST.WEEKLY.CHANGE.WARN}|<p>Week-over-week cost increase alert threshold (percentage).</p>|`20`|
+|{$GCP.COST.MONTHLY.CHANGE.WARN}|<p>Month-over-month cost increase alert threshold (percentage).</p>|`20`|
+|{$GCP.COST.PROJECT.MONTHLY.MAX}|<p>Per-project monthly cost alert threshold.</p>|`5000`|
+|{$GCP.DATA.TIMEOUT}|<p>API response timeout.</p>|`60s`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items and JavaScript preprocessing: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Cost Monitoring", e.g. {$HTTP.TLS.VERIFY:"GCP Cost Monitoring"}.</p>|`full`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP annual cost|<p>GCP annual cost.</p>|Calculated|gcp.annual.cost<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Authorization|<p>Google Cloud Platform REST authorization with service account authentication parameters and temporary-generated RSA-based JWT-token usage.</p><p>The necessary scopes are pre-defined.</p><p>Returns a signed authorization token with 1 hour lifetime; it is required only once, and is used for all the dependent script items.</p><p>Check the template documentation for the details.</p>|Script|gcp.cost.authorization|
+|Authorization errors check|<p>A list of errors from authorization requests.</p>|Dependent item|gcp.cost.auth.err.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li></ul>|
+|Get monthly costs|<p>Get raw monthly cost data aggregated by service and project from the BigQuery billing export.</p>|Dependent item|gcp.get.monthly.costs<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get daily costs|<p>Get raw daily cost data for the last 31 days aggregated by service from the BigQuery billing export.</p>|Dependent item|gcp.get.daily.costs<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Billing currency|<p>Currency code reported by the BigQuery billing export (e.g. USD, EUR). Used as units on all billing summary items.</p>|Dependent item|gcp.cost.currency<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.currency`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `24h`</p></li></ul>|
+|Yesterday cost|<p>Total cost for the most recent complete billing day.</p>|Dependent item|gcp.cost.yesterday<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.daily_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Service count|<p>Number of GCP services with billing activity on the most recent complete day.</p>|Dependent item|gcp.cost.service.count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.service_count`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Daily avg|<p>Average daily cost over the last 7 billing days.</p>|Calculated|gcp.cost.daily.avg|
+|Monthly avg|<p>Average daily cost over the last 30 days.</p>|Calculated|gcp.cost.monthly.avg|
+|Monthly cost change|<p>Month-over-month cost change as a percentage. Not set when there is no prior month data.</p>|Dependent item|gcp.cost.monthly.change.pct<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.monthly_change_pct`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Weekly cost change|<p>Week-over-week cost change as a percentage. Not set when there is no prior week data.</p>|Dependent item|gcp.cost.weekly.change.pct<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.weekly_delta_pct`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Get monthly costs errors|<p>A list of errors from API requests.</p>|Dependent item|gcp.get.monthly.costs.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get daily costs errors|<p>A list of errors from API requests.</p>|Dependent item|gcp.get.daily.costs.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Monthly cost: Current month|<p>Monthly billing total for the current month.</p>|Dependent item|gcp.cost.monthly.summary.current<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Monthly cost: Previous month|<p>Monthly billing total for the previous month.</p>|Dependent item|gcp.cost.monthly.summary.previous<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Daily cost: Yesterday|<p>Billing total for yesterday.</p>|Dependent item|gcp.cost.daily.summary.yesterday<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Weekly cost: Current week|<p>Billing total for the current week.</p>|Dependent item|gcp.cost.weekly.summary.current<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Weekly cost: Previous week|<p>Billing total for the previous week.</p>|Dependent item|gcp.cost.weekly.summary.previous<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Cost: Authorization has failed|<p>GCP Cost: Authorization has failed.<br>Check the authorization parameters and GCP API availability from a network segment, where Zabbix-server/proxy is located.</p>|`length(last(/GCP Cost Monitoring by HTTP/gcp.cost.auth.err.check)) > 0`|Average||
+|GCP Cost: No billing data received|<p>No billing data has been received in the last 24 hours.</p>|`nodata(/GCP Cost Monitoring by HTTP/gcp.get.monthly.costs,24h)=1`|Info|**Manual close**: Yes|
+|GCP Cost: Daily cost exceeds threshold|<p>Total daily cost has exceeded the configured threshold.</p>|`min(/GCP Cost Monitoring by HTTP/gcp.cost.yesterday,1h)>{$GCP.COST.DAILY.MAX}`|Warning|**Manual close**: Yes|
+|GCP Cost: Cost spike detected|<p>Daily cost significantly exceeds the 7-day historical average.</p>|`last(/GCP Cost Monitoring by HTTP/gcp.cost.yesterday)>avg(/GCP Cost Monitoring by HTTP/gcp.cost.yesterday,7d)*{$GCP.COST.SPIKE.FACTOR}`|Average|**Manual close**: Yes|
+|GCP Cost: Monthly cost increased significantly|<p>The current month's total cost exceeds the prior month by more than the configured threshold.</p>|`min(/GCP Cost Monitoring by HTTP/gcp.cost.monthly.change.pct,1h)>{$GCP.COST.MONTHLY.CHANGE.WARN}`|Warning|**Manual close**: Yes|
+|GCP Cost: Weekly cost increased significantly|<p>The current week's total cost exceeds the prior week by more than the configured threshold.</p>|`min(/GCP Cost Monitoring by HTTP/gcp.cost.weekly.change.pct,1h)>{$GCP.COST.WEEKLY.CHANGE.WARN}`|Warning|**Manual close**: Yes|
+|GCP Cost: There are errors in requests to API|<p>Zabbix has received errors in response to API requests.</p>|`length(last(/GCP Cost Monitoring by HTTP/gcp.get.monthly.costs.errors))>0`|Average||
+|GCP Cost: There are errors in requests to API|<p>Zabbix has received errors in response to API requests.</p>|`length(last(/GCP Cost Monitoring by HTTP/gcp.get.daily.costs.errors))>0`|Average||
+|GCP Cost: Monthly cost exceeds threshold|<p>Monthly billing cost has exceeded the configured threshold.</p>|`min(/GCP Cost Monitoring by HTTP/gcp.cost.monthly.summary.current,1h)>{$GCP.COST.MONTHLY.MAX}`|Average|**Manual close**: Yes|
+
+### LLD rule GCP monthly costs discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP monthly costs discovery|<p>Discovery of total monthly costs per billing month.</p>|Dependent item|gcp.cost.monthly.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.monthly_costs`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP monthly costs discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Month ["{#GCP.COST.MONTH}"] total cost|<p>Total billing cost for month {#GCP.COST.MONTH}.</p>|Dependent item|gcp.cost.monthly["{#GCP.COST.MONTH}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP monthly costs by service discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP monthly costs by service discovery|<p>Discovery of monthly costs by service and billing month.</p>|Dependent item|gcp.cost.service.monthly.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.monthly_service_costs`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP monthly costs by service discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Service ["{#GCP.COST.SERVICE.NAME}"]: Month ["{#GCP.COST.MONTH}"] cost|<p>Monthly cost for service {#GCP.COST.SERVICE.NAME} in month {#GCP.COST.MONTH}.</p>|Dependent item|gcp.cost.service.monthly["{#GCP.COST.SERVICE.NAME}","{#GCP.COST.MONTH}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP monthly costs by project discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP monthly costs by project discovery|<p>Discovery of monthly costs by project and billing month.</p>|Dependent item|gcp.cost.project.monthly.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.monthly_project_costs`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP monthly costs by project discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Project ["{#GCP.COST.PROJECT.ID}"]: Month ["{#GCP.COST.MONTH}"] cost|<p>Monthly cost for project {#GCP.COST.PROJECT.ID} in month {#GCP.COST.MONTH}.</p>|Dependent item|gcp.cost.project.monthly["{#GCP.COST.PROJECT.ID}","{#GCP.COST.MONTH}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Trigger prototypes for GCP monthly costs by project discovery
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Cost: Project [{#GCP.COST.PROJECT.ID}]: Monthly cost exceeds threshold|<p>Monthly cost for project {#GCP.COST.PROJECT.ID} has exceeded the configured threshold.</p>|`min(/GCP Cost Monitoring by HTTP/gcp.cost.project.monthly["{#GCP.COST.PROJECT.ID}","{#GCP.COST.MONTH}"],1h)>{$GCP.COST.PROJECT.MONTHLY.MAX}`|Warning|**Manual close**: Yes|
+
+### LLD rule GCP daily costs by service discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP daily costs by service discovery|<p>Discovery of daily costs by service for the most recent complete billing day.</p>|Dependent item|gcp.cost.daily.service.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.daily_by_service`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP daily costs by service discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Service ["{#GCP.COST.SERVICE.NAME}"]: Daily cost|<p>Daily cost for service {#GCP.COST.SERVICE.NAME} for the most recent complete billing day.</p>|Dependent item|gcp.cost.daily.service["{#GCP.COST.SERVICE.NAME}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP monthly costs by region discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP monthly costs by region discovery|<p>Discovery of monthly costs by region and billing month.</p>|Dependent item|gcp.cost.region.monthly.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.monthly_region_costs`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP monthly costs by region discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Region ["{#GCP.COST.REGION}"]: Month ["{#GCP.COST.MONTH}"] cost|<p>Monthly cost for region {#GCP.COST.REGION} in month {#GCP.COST.MONTH}.</p>|Dependent item|gcp.cost.region.monthly["{#GCP.COST.REGION}","{#GCP.COST.MONTH}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### LLD rule GCP daily costs by region discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|GCP daily costs by region discovery|<p>Discovery of daily costs by region for the most recent complete billing day.</p>|Dependent item|gcp.cost.daily.region.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.daily_by_region`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for GCP daily costs by region discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Region ["{#GCP.COST.REGION}"]: Daily cost|<p>Daily cost for region {#GCP.COST.REGION} for the most recent complete billing day.</p>|Dependent item|gcp.cost.daily.region["{#GCP.COST.REGION}"]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+# GCP Security by HTTP
+
+## Overview
+
+This template monitors the security and compliance posture of a Google Cloud Platform (GCP) project.
+It works without any external scripts and uses the script items.
+
+Six master items collect data from independent Google Cloud APIs, so that a service that is disabled,
+unavailable, or not licensed on a given project degrades on its own without affecting the rest of the template:
+
+  - Cloud Logging - Admin Activity audit log: IAM changes, service account and key lifecycle, firewall and organization policy changes.
+  - Cloud Asset Inventory and IAM - publicly accessible resources, principals able to escalate privileges, service account key age.
+  - Cloud Security Compliance (Compliance Manager) - framework compliance and failing controls.
+  - Security Command Center - active findings by severity, and the number of registered detectors.
+  - Compute Engine - load balancer SSL certificate expiry.
+  - Cloud Monitoring - log entry rate by severity, as a coarse anomaly counter.
+
+A metric that could not be collected is left absent rather than reported as zero, so a failure
+is never mistaken for a clean result.
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- Google Cloud Platform
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+1. Create a service account in the GCP project you want to monitor.
+More on [managing service accounts](https://cloud.google.com/iam/docs/creating-managing-service-accounts).
+2. Grant the service account the following roles on the project:
+
+      `roles/logging.viewer`, `roles/cloudasset.viewer`, `roles/iam.securityReviewer`,
+      `roles/cloudsecuritycompliance.viewer`, `roles/securitycenter.findingsViewer`,
+      `roles/compute.viewer`, `roles/monitoring.viewer`
+
+3. Enable the APIs used by the template:
+
+      `gcloud services enable logging.googleapis.com cloudasset.googleapis.com iam.googleapis.com
+      cloudsecuritycompliance.googleapis.com securitycenter.googleapis.com compute.googleapis.com
+      monitoring.googleapis.com --project=<project_id>`
+
+  (If any of the APIs are not enabled, some metrics will be absent.)
+4. Create and download a JSON key for the service account.
+More on [service account keys](https://cloud.google.com/iam/docs/creating-managing-service-account-keys).
+5. Link this template to a Zabbix host.
+6. Configure the macros: `{$GCP.PROJECT.ID}`, `{$GCP.CLIENT.EMAIL}`, `{$GCP.PRIVATE.KEY.ID}`, `{$GCP.PRIVATE.KEY}`.
+
+**Notes**
+
+  - If this template is co-hosted with `GCP by HTTP`, the authorization macros are shared - configure them once at the host level.
+  - All data is refreshed when the authorization item runs, so `{$GCP.AUTH.FREQUENCY}` also controls how often security metrics are collected.
+  Keep `{$GCP.SECURITY.AUDIT.WINDOW}` longer than `{$GCP.AUTH.FREQUENCY}` so that no audit event falls between two collections.
+  - `roles/cloudsecuritycompliance.viewer` is not included in Project Viewer and must be granted explicitly.
+  - Security Command Center detectors are tier-dependent. On a project with no detectors registered, the findings
+  count is legitimately zero; the `No security detectors registered` trigger exists so that this is not read as a clean result.
+  - Collection runs in JavaScript preprocessing, which Zabbix limits to 10 seconds per script.
+  `{$GCP.SECURITY.BUDGET}` is the share of that used to start new requests; the rest is headroom for the
+  request still in flight, whose duration is governed by the `Timeout` parameter in `zabbix_server.conf`
+  and cannot be set from the template. Keep `{$GCP.SECURITY.BUDGET}` at or below `10 - Timeout`.
+  A project large enough to exhaust the budget reports it through the truncation items rather than failing,
+  and the metrics derived from the incomplete data are withheld.
+  - Data Access audit logs are disabled by default in GCP. Only Admin Activity logs, which cannot be disabled, are required by this template.
+
+See references to the APIs used by the template below:
+
+  - [Cloud Logging](https://cloud.google.com/logging/docs/reference/v2/rest/v2/entries/list)
+  - [Cloud Asset Inventory](https://cloud.google.com/asset-inventory/docs/reference/rest/v1/TopLevel/searchAllIamPolicies)
+  - [IAM](https://cloud.google.com/iam/docs/reference/rest/v1/projects.serviceAccounts.keys)
+  - [Compliance Manager](https://cloud.google.com/security-command-center/docs/compliance-manager-overview)
+  - [Security Command Center](https://cloud.google.com/security-command-center/docs/how-to-api-list-findings)
+  - [Cloud Monitoring](https://cloud.google.com/monitoring/api/ref_v3/rest/v3/projects.timeSeries/list)
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GCP.PROJECT.ID}|<p>GCP project ID.</p>||
+|{$GCP.CLIENT.EMAIL}|<p>Service account client e-mail.</p>||
+|{$GCP.PRIVATE.KEY.ID}|<p>Service account private key ID.</p>||
+|{$GCP.PRIVATE.KEY}|<p>Service account private key data.</p>||
+|{$GCP.AUTH.FREQUENCY}|<p>The update interval for the GCP Cost Authorization item, which also equals to the access token regeneration request frequency.</p><p>The GCP Access Token is available for 1 hour (3600 seconds) after the generation request.</p>|`45m`|
+|{$GCP.SECURITY.NODATA.TIMEOUT}|<p>The period without data after which the "No security data received" trigger fires.</p><p>Items are collected when the authorization token is refreshed, and an unchanged value is stored only once per heartbeat hour, so the gap between two stored values reaches {$GCP.AUTH.FREQUENCY} plus one hour. Keep this macro above that sum or the trigger will fire between two collections.</p>|`3h`|
+|{$GCP.SECURITY.AUDIT.WINDOW}|<p>The period (in minutes) of Admin Activity audit log history examined on every collection.</p><p>Keep it longer than {$GCP.AUTH.FREQUENCY} so that no event falls between two collections.</p>|`60`|
+|{$GCP.SECURITY.PRINCIPAL.MATCHES}|<p>Filter to include audit log events by the principal that performed them.</p><p>The pattern is read by a JavaScript preprocessing step, so a backslash cannot be used: write a character class such as [.] instead of an escape such as \. A pattern containing an unsupported character is ignored, and every principal is then included.</p>|`.*`|
+|{$GCP.SECURITY.PRINCIPAL.NOT_MATCHES}|<p>Filter to exclude audit log events by the principal that performed them.</p><p>The pattern is read by a JavaScript preprocessing step, so a backslash cannot be used: write a character class such as [.] instead of an escape such as \. A pattern containing an unsupported character is ignored, and no principal is then excluded.</p>|`CHANGE_IF_NEEDED`|
+|{$GCP.SECURITY.PRIVILEGED.ROLE.MATCHES}|<p>Regex matching the role names considered privileged when an IAM binding is added.</p><p>The pattern is read by a JavaScript preprocessing step, so a backslash cannot be used: write a character class such as [.] instead of an escape such as \. A pattern containing an unsupported character falls back to the default.</p>|`owner\|editor\|admin`|
+|{$GCP.SECURITY.CERT.SELF_MANAGED.ONLY}|<p>Set to 1 to consider only self-managed certificates when reporting the closest expiry.</p>|`0`|
+|{$GCP.SECURITY.BUDGET}|<p>The number of seconds a master item may spend starting new API requests.</p><p>JavaScript preprocessing has a 10 second execution limit, and a request already in flight cannot be</p><p>shortened from the script, so this must stay below that limit by at least the Zabbix server Timeout</p><p>parameter. With the default server Timeout of 3 seconds, 7 is the highest safe value.</p>|`7`|
+|{$GCP.SECURITY.PAGES.MAX}|<p>The maximum number of API result pages retrieved per request.</p><p>Raising it collects more data per item, but every collection has a fixed time budget: once the budget runs out, paging stops and the affected item reports the truncation in its errors item.</p>|`5`|
+|{$GCP.SECURITY.SA.KEY.LOOKBACK}|<p>The period the key age trigger looks back over.</p><p>On a project with more than {$GCP.SECURITY.SA.MAX} service accounts the accounts are checked in rotating slices,</p><p>so a stale key is seen in only one slice per cycle. This must be long enough to cover a full rotation.</p>|`25h`|
+|{$GCP.SECURITY.SA.MAX}|<p>The maximum number of service accounts checked for user-managed key age.</p><p>Checking a service account costs one request, so a project with many of them can exhaust the collection time budget; the remaining accounts are then reported in the errors item instead of being checked.</p>|`50`|
+|{$GCP.SECURITY.KEY.AGE.MAX}|<p>The age at which a user-managed service account key is considered stale.</p>|`90d`|
+|{$GCP.SECURITY.CERT.WARN}|<p>Warning threshold for the time left before the closest SSL certificate expiry.</p>|`30d`|
+|{$GCP.SECURITY.CERT.CRIT}|<p>Critical threshold for the time left before the closest SSL certificate expiry.</p>|`7d`|
+|{$GCP.SECURITY.CALLER.IPS.MAX}|<p>The number of distinct source addresses expected to perform administrative changes.</p>|`2`|
+|{$GCP.SECURITY.FIREWALL.MAX}|<p>The number of firewall rule changes tolerated during one collection window.</p>|`0`|
+|{$GCP.SECURITY.IAM.CHANGES.MAX}|<p>The number of IAM policy changes tolerated during one collection window.</p>|`5`|
+|{$GCP.SECURITY.FINDING.AGE.MAX}|<p>The period after which a still-active security finding is considered to be going unremediated.</p>|`90d`|
+|{$GCP.SECURITY.DELEGATED.MAX}|<p>The number of impersonated (delegated) configuration changes tolerated during one collection window.</p>|`0`|
+|{$GCP.SECURITY.SCC.HIGH.MAX}|<p>The number of active high severity Security Command Center findings tolerated.</p>|`0`|
+|{$GCP.SECURITY.SCC.MEDIUM.MAX}|<p>The number of active medium severity Security Command Center findings tolerated.</p>|`10`|
+|{$GCP.SECURITY.COMPLIANCE.FAILED.MAX}|<p>The number of failing compliance controls tolerated.</p>|`0`|
+|{$GCP.DATA.TIMEOUT}|<p>Response timeout for API.</p>|`15s`|
+|{$GCP.PROXY}|<p>Sets HTTP proxy value. If this macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items and JavaScript preprocessing: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GCP Security", e.g. {$HTTP.TLS.VERIFY:"GCP Security"}.</p>|`full`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Authorization|<p>Google Cloud Platform REST authorization with service account authentication parameters and temporary-generated RSA-based JWT-token usage.</p><p>The necessary scopes are pre-defined.</p><p>Returns a signed authorization token with 1 hour lifetime; it is required only once, and is used for all the dependent script items.</p><p>Check the template documentation for the details.</p>|Script|gcp.security.authorization|
+|Authorization errors check|<p>A list of errors from authorization requests.</p>|Dependent item|gcp.security.auth.err.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get audit events|<p>Collects the Admin Activity audit log for the period defined in {$GCP.SECURITY.AUDIT.WINDOW}.</p><p>Every entry in the Admin Activity log is a configuration change, so the whole log is collected and classified.</p>|Dependent item|gcp.security.get.audit.events<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get audit events truncation|<p>Reports a Cloud Logging collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.audit.events.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get audit events errors|<p>A list of errors from the Cloud Logging API requests.</p>|Dependent item|gcp.security.get.audit.events.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Total events|<p>The total number of configuration changes recorded in the Admin Activity audit log during the collection window.</p>|Dependent item|gcp.security.audit.events.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.events_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Collected pages|<p>The number of audit log pages retrieved during the last collection.</p>|Dependent item|gcp.security.audit.pages<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pages`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: IAM policy changes|<p>The number of SetIamPolicy calls (IAM permission grants and revocations).</p>|Dependent item|gcp.security.iam.changes<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.iam_changes`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Privileged role grants|<p>The number of IAM bindings added for a role matching {$GCP.SECURITY.PRIVILEGED.ROLE.MATCHES} during the collection window.</p><p>A principal granted such a role can usually escalate its own permissions further.</p><p>Only Resource Manager reports the binding delta in the audit log, so this covers grants made on the project itself, not those made on an individual resource.</p>|Dependent item|gcp.security.privileged.grants<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.privileged_grants`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Service accounts created|<p>The number of service accounts created during the collection window.</p>|Dependent item|gcp.security.sa.created<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_created`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Service accounts deleted|<p>The number of service accounts deleted during the collection window.</p>|Dependent item|gcp.security.sa.deleted<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_deleted`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Service account keys created|<p>The number of user-managed service account keys created during the collection window.</p>|Dependent item|gcp.security.sa.keys.created<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_keys_created`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Firewall rule changes|<p>The number of firewall rule changes during the collection window.</p>|Dependent item|gcp.security.firewall.changes<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.firewall_changes`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Organization policy changes|<p>The number of organization policy changes during the collection window.</p>|Dependent item|gcp.security.orgpolicy.changes<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.orgpolicy_changes`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Administrative source addresses|<p>The number of distinct source addresses that performed configuration changes during the collection window.</p>|Dependent item|gcp.security.caller.ips<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.caller_ips`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Active principals|<p>The number of distinct principals that performed configuration changes during the collection window.</p>|Dependent item|gcp.security.principals.active<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.principals_active`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Services changed|<p>The number of distinct Google Cloud services whose configuration changed during the collection window.</p>|Dependent item|gcp.security.services.touched<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.services_touched`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Resources changed|<p>The number of distinct resources that changed during the collection window, as opposed to the number of API calls.</p>|Dependent item|gcp.security.resources.modified<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.resources_modified`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Administrative writes|<p>The number of operations that exercised an ADMIN_WRITE permission during the collection window.</p><p>An operation is counted once however many permissions it checked, so this never exceeds the number of events.</p>|Dependent item|gcp.security.admin.writes<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.admin_writes`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Failed operations|<p>The number of configuration changes that failed during the collection window, including permission denials,</p><p>quota exhaustion, and precondition failures.</p>|Dependent item|gcp.security.failed.ops<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.failed_ops`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Delegated calls|<p>The number of changes made by one identity impersonating another. Impersonation is legitimate, but it is</p><p>also the usual route by which an initial foothold is widened, so a change in the baseline is worth review.</p>|Dependent item|gcp.security.delegated.calls<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.delegated_calls`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Time of the last event|<p>The time elapsed since the most recent configuration change found in the collection window.</p><p>No value is reported when the window contains no changes, which is the normal state for a quiet project,</p><p>so this item measures recency of activity rather than collection health.</p><p>A broken collection is detected by the 'No security data received' trigger on the master item.</p>|Dependent item|gcp.security.latest.event.time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.latest_event_time`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Last change|<p>The most recent configuration change: when it happened, which method was called, by which principal,</p><p>from which address, and on which resource. Collected so that a trigger can be understood without opening the audit log.</p>|Dependent item|gcp.security.audit.latest.event<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.latest_event`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Active principals list|<p>The principals that changed configuration during the collection window.</p><p>Collected for the dashboards: the first 10 entries are listed followed by the number omitted, so it is an overview rather than a complete record.</p>|Dependent item|gcp.security.principals.list<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.principals_list`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Audit: Source addresses list|<p>The source addresses that configuration changes originated from during the collection window.</p><p>This is the detail behind the administrative source address trigger.</p><p>Collected for the dashboards and for the event name of "Administrative access from more source addresses than expected": the first 10 entries are listed followed by the number omitted, so it is an overview rather than a complete record.</p>|Dependent item|gcp.security.caller.ips.list<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.caller_ips_list`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get posture|<p>Collects publicly accessible resources and privileged bindings from Cloud Asset Inventory, and service account key</p><p>age from the IAM API. Cloud Asset Inventory is free and covers every service in the project with a single call.</p>|Dependent item|gcp.security.get.posture<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get posture truncation|<p>Reports a Cloud Asset Inventory and IAM collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.posture.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get posture errors|<p>A list of errors from the Cloud Asset Inventory and IAM API requests.</p>|Dependent item|gcp.security.get.posture.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Publicly accessible resources|<p>The number of IAM bindings granted to allUsers or allAuthenticatedUsers anywhere in the project,</p><p>such as public storage buckets, public Cloud Run services, or public Pub/Sub topics. Zero is the expected state.</p>|Dependent item|gcp.security.public.bindings<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.public_bindings`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Policies allowing privilege escalation|<p>The number of resource policies that grant a role able to rewrite the IAM policy, custom roles included.</p><p>A principal holding such a role can grant itself any further permission, so the count is expected to be small and stable.</p><p>One policy can name several principals, so this counts the policies rather than the principals; the companion item lists the resources they belong to.</p>|Dependent item|gcp.security.privileged.bindings<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.privileged_bindings`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Resources|<p>The total number of resources in the project, collected as context for the other posture metrics.</p>|Dependent item|gcp.security.assets.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.assets_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Resource types|<p>The number of distinct resource types in the project, that is, how many Google Cloud services are actually in use.</p>|Dependent item|gcp.security.assets.types<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.assets_types`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Resource locations|<p>The number of distinct locations the project's resources live in. A change can mean data has moved jurisdiction.</p>|Dependent item|gcp.security.assets.locations<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.assets_locations`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Unlabeled resources|<p>The number of resources carrying no labels, and therefore no recorded owner.</p>|Dependent item|gcp.security.assets.unlabeled<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.assets_unlabeled`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: User managed service account keys|<p>The number of user-managed service account keys across all service accounts in the project.</p><p>Google's own system-managed keys are excluded: they rotate automatically and are never actionable.</p>|Dependent item|gcp.security.sa.keys.usermanaged<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_keys_usermanaged`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Service accounts|<p>The number of service accounts in the project, which is the identity surface the key checks cover.</p>|Dependent item|gcp.security.sa.accounts.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_accounts_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Service accounts checked for key age|<p>How many service accounts were checked for key age on this run.</p><p>Below the total, the accounts are checked in rotating slices of {$GCP.SECURITY.SA.MAX}, so every account is</p><p>covered within one cycle rather than the accounts past the limit never being checked at all.</p>|Dependent item|gcp.security.sa.accounts.checked<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_accounts_checked`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Oldest service account key age|<p>The age of the oldest user-managed service account key in the project. Reports zero when no user-managed key exists.</p>|Dependent item|gcp.security.sa.keys.max.age<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_keys_max_age`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Posture: Publicly accessible resources list|<p>The resources that are readable by anyone on the internet.</p><p>This is the detail behind the publicly accessible resources trigger.</p><p>Collected for the dashboards and for the event name of "Publicly accessible resources detected": the first 10 entries are listed followed by the number omitted, so it is an overview rather than a complete record.</p>|Dependent item|gcp.security.public.bindings.list<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.public_bindings_list`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Escalation capable resources list|<p>The resources on which a principal holds a role able to rewrite the IAM policy.</p><p>Collected for the dashboards: the first 10 entries are listed followed by the number omitted, so it is an overview rather than a complete record.</p>|Dependent item|gcp.security.privileged.bindings.list<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.privileged_bindings_list`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Posture: Oldest key owner|<p>The service account that owns the oldest user-managed key in the project.</p>|Dependent item|gcp.security.sa.keys.oldest.account<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sa_keys_oldest_account`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get compliance|<p>Collects framework compliance summaries and framework deployments from Compliance Manager.</p>|Dependent item|gcp.security.get.compliance<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get compliance truncation|<p>Reports a Cloud Security Compliance collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.compliance.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get compliance errors|<p>A list of errors from the Cloud Security Compliance API requests.</p>|Dependent item|gcp.security.get.compliance.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Compliance: Frameworks|<p>The number of compliance frameworks reporting a compliance summary for this project.</p>|Dependent item|gcp.security.compliance.frameworks<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.frameworks`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Compliance: Framework deployments|<p>The number of compliance frameworks actually deployed on this project.</p><p>Collected so that an absent compliance result can be told apart from a compliant one.</p>|Dependent item|gcp.security.compliance.deployments<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.deployments`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Compliance: Passing controls|<p>The number of compliance controls currently passing across all deployed frameworks.</p>|Dependent item|gcp.security.compliance.controls.passed<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.passing_controls`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Compliance: Failing controls|<p>The number of compliance controls currently failing across all deployed frameworks.</p>|Dependent item|gcp.security.compliance.controls.failed<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.failing_controls`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Compliance: Score|<p>The share of compliance controls currently passing across all deployed frameworks.</p>|Dependent item|gcp.security.compliance.score<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.score`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get findings|<p>Collects the registered detector list and the active, unmuted findings from Security Command Center.</p><p>The two are collected independently so that the detector count is still reported when findings cannot be read.</p>|Dependent item|gcp.security.get.scc<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get findings truncation|<p>Reports a Security Command Center collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.scc.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get findings errors|<p>A list of errors from the Security Command Center API requests.</p>|Dependent item|gcp.security.get.scc.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Registered detectors|<p>The number of Security Command Center detection services registered for this project.</p><p>Detectors are tier-dependent, and a findings count of zero is only meaningful while this value is above zero.</p>|Dependent item|gcp.security.scc.sources<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.sources`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Total|<p>The total number of active, unmuted Security Command Center findings.</p>|Dependent item|gcp.security.scc.findings.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Critical severity|<p>The number of active findings with CRITICAL severity.</p>|Dependent item|gcp.security.scc.findings.critical<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_critical`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: High severity|<p>The number of active findings with HIGH severity.</p>|Dependent item|gcp.security.scc.findings.high<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_high`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Medium severity|<p>The number of active findings with MEDIUM severity.</p>|Dependent item|gcp.security.scc.findings.medium<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_medium`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Low severity|<p>The number of active findings with LOW severity.</p>|Dependent item|gcp.security.scc.findings.low<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_low`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Categories|<p>The number of distinct finding categories currently active, that is, how many different kinds of problem are reported.</p>|Dependent item|gcp.security.scc.categories<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.categories`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Threats|<p>The number of active findings classified as THREAT, meaning a detector believes something is acting</p><p>against the project rather than that a setting is wrong. These are incidents, not backlog.</p>|Dependent item|gcp.security.scc.findings.threat<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_threat`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Vulnerabilities|<p>The number of active findings classified as VULNERABILITY, such as an exploitable package or image.</p>|Dependent item|gcp.security.scc.findings.vulnerability<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_vulnerability`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Misconfigurations|<p>The number of active findings classified as MISCONFIGURATION. Usually the bulk of the backlog.</p>|Dependent item|gcp.security.scc.findings.misconfiguration<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_misconfiguration`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Muted|<p>The number of findings that have been muted. A muted finding is hidden from the default view, so a</p><p>rising count means risk is being suppressed rather than resolved.</p>|Dependent item|gcp.security.scc.findings.muted<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.findings_muted`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: First raised|<p>The time since the oldest still-active finding was first raised. It measures whether findings are being</p><p>remediated at all: a value that only ever grows means the backlog is untouched.</p>|Dependent item|gcp.security.scc.oldest.finding.time<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.oldest_finding_time`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Findings: Most severe|<p>The most severe active finding, with its category and the resource it was raised on.</p>|Dependent item|gcp.security.scc.top.finding<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.top_finding`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get certificates|<p>Collects the load balancer SSL certificates of the project and the time left before the closest expiry.</p>|Dependent item|gcp.security.get.certificates<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get certificates truncation|<p>Reports a Compute Engine collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.certificates.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get certificates errors|<p>A list of errors from the Compute Engine API requests.</p>|Dependent item|gcp.security.get.certificates.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Certificates: Total|<p>The number of SSL certificates configured on the load balancers of the project.</p>|Dependent item|gcp.security.certs.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Certificates: Time until the closest expiry|<p>The time left before the closest SSL certificate expiry. The value becomes negative once a certificate has expired.</p><p>Set {$GCP.SECURITY.CERT.SELF_MANAGED.ONLY} to 1 to ignore Google-managed certificates, which renew themselves.</p>|Dependent item|gcp.security.certs.expiry.min<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.expiring_soonest`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Certificates: Not serving|<p>The number of Google-managed certificates that are not in the ACTIVE state.</p><p>Such a certificate serves no traffic, and one that reports PROVISIONING_FAILED_PERMANENTLY never will.</p><p>It also carries no expiry date, so it is invisible to the expiry items - which is why it is counted separately.</p>|Dependent item|gcp.security.certs.unhealthy<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.unhealthy`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Certificates: Expired|<p>The number of certificates whose expiry date has already passed.</p>|Dependent item|gcp.security.certs.expired<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.expired`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Certificates: Closest to expiry|<p>The name and type of the certificate that expires soonest.</p>|Dependent item|gcp.security.certs.expiring.name<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.expiring_name`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get log metrics|<p>Collects the log entry rate by severity from Cloud Monitoring, as a coarse anomaly counter.</p><p>Cloud Monitoring cannot combine series that have different monitored resource types, so the per-severity</p><p>totals are summed in the script rather than by the API.</p>|Dependent item|gcp.security.get.logmetrics<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Check for not supported value: `any error`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get log metrics truncation|<p>Reports a Cloud Monitoring collection that returned only part of its data.</p><p>The metrics derived from it are withheld while this is set, so they are absent rather than understated.</p>|Dependent item|gcp.security.get.logmetrics.truncated<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.truncated`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get log metrics errors|<p>A list of errors from the Cloud Monitoring API requests.</p>|Dependent item|gcp.security.get.logmetrics.errors<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Logs: Entry rate, total|<p>The rate of log entries written across every severity and resource type in the project.</p>|Dependent item|gcp.security.log.entries.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rate_total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Logs: Entry rate, error and above|<p>The rate of log entries written with ERROR severity or above.</p><p>Many projects never emit these severities, in which case the value is legitimately zero.</p>|Dependent item|gcp.security.log.entries.error.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rate_error`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Logs: Entry rate, warning|<p>The rate of log entries written with WARNING severity.</p>|Dependent item|gcp.security.log.entries.warning.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rate_warning`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Logs: Entry rate, notice|<p>The rate of log entries written with NOTICE severity.</p><p>Admin Activity audit events are written at this severity, so this tracks the overall rate of configuration change.</p>|Dependent item|gcp.security.log.entries.notice.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rate_notice`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Logs: Entry rate, info|<p>The rate of log entries written with INFO severity.</p>|Dependent item|gcp.security.log.entries.info.rate<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.rate_info`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GCP Security: Authorization has failed|<p>The service account could not exchange its key for an access token, so no data can be collected from any API.<br>Check the authorization parameters and GCP API availability from a network segment, where Zabbix-server/proxy is located.</p>|`length(last(/GCP Security by HTTP/gcp.security.auth.err.check))>0`|Average||
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.audit.events.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.audit.events.errors))>0`|Average||
+|GCP Security: No security data received|<p>No audit log data has been received for longer than {$GCP.SECURITY.NODATA.TIMEOUT}.<br>The master item keeps no history, so the check runs on this item instead. A value is stored on every change and otherwise once per heartbeat hour, and collection happens whenever the authorization token is refreshed, so this period must stay longer than {$GCP.AUTH.FREQUENCY} plus one hour.</p>|`nodata(/GCP Security by HTTP/gcp.security.audit.events.total,{$GCP.SECURITY.NODATA.TIMEOUT})=1`|Warning|**Manual close**: Yes|
+|GCP Security: IAM policy change rate is unusual|<p>An unusual number of IAM policy changes has been recorded, which can indicate scripted permission rewriting.</p>|`last(/GCP Security by HTTP/gcp.security.iam.changes)>{$GCP.SECURITY.IAM.CHANGES.MAX}`|Warning|**Manual close**: Yes|
+|GCP Security: Privileged role granted|<p>An owner, editor, or administrator role binding has been added.<br>This should not normally happen without human intervention. Confirm from the audit log who was granted which role, and by whom.</p>|`last(/GCP Security by HTTP/gcp.security.privileged.grants)>0`|Average|**Manual close**: Yes|
+|GCP Security: Service account deleted|<p>Indicates that a service account has been removed.<br>It is worth confirming the deletion was intended and that no running workload authenticated as it.</p>|`last(/GCP Security by HTTP/gcp.security.sa.deleted)>0`|Warning|**Manual close**: Yes|
+|GCP Security: Service account key created|<p>A user-managed service account key has been created.<br>In most environments this is rare enough to confirm every time.</p>|`last(/GCP Security by HTTP/gcp.security.sa.keys.created)>0`|Average|**Manual close**: Yes|
+|GCP Security: Firewall rules modified|<p>Firewall rules have been changed. Check the audit log for the source ranges and ports of the modified rule.</p>|`last(/GCP Security by HTTP/gcp.security.firewall.changes)>{$GCP.SECURITY.FIREWALL.MAX}`|Warning|**Manual close**: Yes|
+|GCP Security: Organization policy changed|<p>An organization policy constraint has been changed, which can weaken a guardrail that applies to the entire project.</p>|`last(/GCP Security by HTTP/gcp.security.orgpolicy.changes)>0`|Average|**Manual close**: Yes|
+|GCP Security: Administrative access from more source addresses than expected|<p>Configuration changes originated from more distinct source addresses than expected.<br>Check the audit log for the principal and address of the unexpected activity.</p>|`last(/GCP Security by HTTP/gcp.security.caller.ips)>{$GCP.SECURITY.CALLER.IPS.MAX}`|Average|**Manual close**: Yes|
+|GCP Security: Service account impersonation detected|<p>Configuration was changed by an identity acting as another service account.<br>Confirm the delegation chain is expected: this is the standard mechanism for widening access after a compromise.</p>|`last(/GCP Security by HTTP/gcp.security.delegated.calls)>{$GCP.SECURITY.DELEGATED.MAX}`|Warning|**Manual close**: Yes|
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.posture.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.posture.errors))>0`|Average||
+|GCP Security: Publicly accessible resources detected|<p>At least one resource is readable by anyone on the internet.<br>Search Cloud Asset Inventory for policy:(allUsers OR allAuthenticatedUsers) to find which resource is exposed.</p>|`last(/GCP Security by HTTP/gcp.security.public.bindings)>0`|High|**Manual close**: Yes|
+|GCP Security: User-managed service account key is too old|<p>A user-managed service account key has not been rotated within the configured period.<br>User-managed keys never expire on their own, so they remain valid until they are deleted.</p>|`max(/GCP Security by HTTP/gcp.security.sa.keys.max.age,{$GCP.SECURITY.SA.KEY.LOOKBACK})>{$GCP.SECURITY.KEY.AGE.MAX}`|Warning|**Manual close**: Yes|
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.compliance.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.compliance.errors))>0`|Average||
+|GCP Security: No compliance framework deployed|<p>No compliance framework is deployed on this project, so the compliance items report nothing rather than reporting compliance.<br>Deploy the Security Essentials framework, which is available on every Security Command Center service tier.</p>|`last(/GCP Security by HTTP/gcp.security.compliance.deployments)=0`|Info|**Manual close**: Yes|
+|GCP Security: Failing compliance controls|<p>The project does not satisfy every control of the deployed compliance frameworks.</p>|`last(/GCP Security by HTTP/gcp.security.compliance.controls.failed)>{$GCP.SECURITY.COMPLIANCE.FAILED.MAX}`|Average|**Manual close**: Yes|
+|GCP Security: Compliance regression|<p>The number of failing compliance controls has increased.<br>Useful on projects that tolerate a standing number of failures but still need to know when it grows.</p>|`change(/GCP Security by HTTP/gcp.security.compliance.controls.failed)>0`|Warning|**Manual close**: Yes|
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.scc.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.scc.errors))>0`|Average||
+|GCP Security: No security detectors registered|<p>Security Command Center has no detection service registered for this project, so no finding can ever be produced.<br>The findings items are reporting that nothing is looking, not that the project is clean.<br>Check the Security Command Center service tier and whether it is activated for this project or organization.</p>|`last(/GCP Security by HTTP/gcp.security.scc.sources)=0`|Warning|**Manual close**: Yes|
+|GCP Security: Security findings increased|<p>The number of active security findings has increased.<br>This is the most useful findings trigger on a project that carries a standing backlog, since the absolute count alone never returns to zero.</p>|`change(/GCP Security by HTTP/gcp.security.scc.findings.total)>0`|Warning|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP Security: No security detectors registered</li></ul>|
+|GCP Security: Critical security findings|<p>Security Command Center reports at least one critical severity finding for this project.</p>|`last(/GCP Security by HTTP/gcp.security.scc.findings.critical)>0`|High|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP Security: No security detectors registered</li></ul>|
+|GCP Security: High severity security findings|<p>Security Command Center reports high severity findings for this project.<br>Raise {$GCP.SECURITY.SCC.HIGH.MAX} on projects with a known backlog and rely on the increase trigger instead.</p>|`last(/GCP Security by HTTP/gcp.security.scc.findings.high)>{$GCP.SECURITY.SCC.HIGH.MAX}`|Average|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP Security: No security detectors registered</li></ul>|
+|GCP Security: Medium severity security findings|<p>Security Command Center reports more medium severity findings than the configured threshold.</p>|`last(/GCP Security by HTTP/gcp.security.scc.findings.medium)>{$GCP.SECURITY.SCC.MEDIUM.MAX}`|Warning|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP Security: No security detectors registered</li></ul>|
+|GCP Security: Active security threat detected|<p>Security Command Center reports a finding classified as THREAT: an actor or process is acting against this project.<br>Unlike a misconfiguration, this describes something happening now. Check the finding category and the affected resource first.</p>|`last(/GCP Security by HTTP/gcp.security.scc.findings.threat)>0`|High|**Manual close**: Yes|
+|GCP Security: Security findings are not being remediated|<p>A finding has stayed active longer than the configured period, which indicates the backlog is not being worked.<br>Check the 'Findings: Most severe' item, or Security Command Center, to see which findings are outstanding.</p>|`now()-last(/GCP Security by HTTP/gcp.security.scc.oldest.finding.time)>{$GCP.SECURITY.FINDING.AGE.MAX}`|Warning|**Manual close**: Yes|
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.certificates.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.certificates.errors))>0`|Average||
+|GCP Security: Certificate expires soon|<p>An SSL certificate on a load balancer of this project is approaching expiry. Renew or replace it before traffic starts failing.</p>|`last(/GCP Security by HTTP/gcp.security.certs.expiry.min)<{$GCP.SECURITY.CERT.WARN}`|Warning|**Manual close**: Yes<br>**Depends on**:<br><ul><li>GCP Security: Certificate expires imminently</li></ul>|
+|GCP Security: Certificate expires imminently|<p>An SSL certificate on a load balancer of this project is about to expire. Traffic to the affected front end will fail once it does.</p>|`last(/GCP Security by HTTP/gcp.security.certs.expiry.min)<{$GCP.SECURITY.CERT.CRIT}`|Average|**Manual close**: Yes|
+|GCP Security: Certificate is not serving|<p>A managed certificate is not in the ACTIVE state and is therefore serving no traffic.<br>Check the certificate list in the Google Cloud console for the affected certificate and its provisioning status.<br>PROVISIONING_FAILED_PERMANENTLY does not recover on its own: the certificate has to be recreated,<br>usually after correcting the domain's DNS records.</p>|`last(/GCP Security by HTTP/gcp.security.certs.unhealthy)>0`|Average|**Manual close**: Yes|
+|GCP Security: The collection was truncated|<p>A collection reached a limit of this template and returned only part of its data, so the metrics derived from it were not published.<br>This is a capacity limit rather than an API failure. Raise the relevant macro ({$GCP.SECURITY.PAGES.MAX} or {$GCP.SECURITY.SA.MAX}),<br>or narrow what is collected, for example by shortening {$GCP.SECURITY.AUDIT.WINDOW}.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.logmetrics.truncated))>0`|Warning||
+|GCP Security: There are errors in requests to API|<p>There are errors in response to GCP API requests.<br>Check the item value for the failing endpoint, and the service account roles and enabled APIs for that service.</p>|`length(last(/GCP Security by HTTP/gcp.security.get.logmetrics.errors))>0`|Average||
+
+## Feedback
+
+Please report any issues with the template at [`https://support.zabbix.com`](https://support.zabbix.com)
+
+You can also provide feedback, discuss the template, or ask for help at [`ZABBIX forums`](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback)
+

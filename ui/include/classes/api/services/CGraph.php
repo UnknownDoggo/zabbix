@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -53,7 +48,7 @@ class CGraph extends CGraphGeneral {
 
 		$sqlParts = [
 			'select'	=> ['graphs' => 'g.graphid'],
-			'from'		=> ['graphs' => 'graphs g'],
+			'from'		=> 'graphs g',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -79,13 +74,12 @@ class CGraph extends CGraphGeneral {
 			'searchWildcardsEnabled'	=> null,
 			// output
 			'output'					=> API_OUTPUT_EXTEND,
-			'selectGroups'				=> null,
+			'selectHostGroups'			=> null,
+			'selectTemplateGroups'		=> null,
 			'selectTemplates'			=> null,
 			'selectHosts'				=> null,
 			'selectItems'				=> null,
 			'selectGraphItems'			=> null,
-			'selectDiscoveryRule'		=> null,
-			'selectGraphDiscovery'		=> null,
 			'countOutput'				=> false,
 			'groupCount'				=> false,
 			'preservekeys'				=> false,
@@ -93,72 +87,47 @@ class CGraph extends CGraphGeneral {
 			'sortorder'					=> '',
 			'limit'						=> null
 		];
+
 		$options = zbx_array_merge($defOptions, $options);
+
+		self::validateGet($options);
 
 		// permission check
 		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
-			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
-			$userGroups = getUserGroupsByUserId(self::$userData['userid']);
+			if (self::$userData['ugsetid'] == 0) {
+				return $options['countOutput'] ? '0' : [];
+			}
 
-			// check permissions by graph items
+			$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+			$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['hh'] = ['left_table' => 'i', 'table' => 'host_hgset', 'using' => 'hostid'];
+			$sqlParts['join']['p'] = ['left_table' => 'hh', 'table' => 'permission', 'using' => 'hgsetid'];
+			$sqlParts['where'][] = 'p.ugsetid='.self::$userData['ugsetid'];
+
+			if ($options['editable']) {
+				$sqlParts['where'][] = 'p.permission='.PERM_READ_WRITE;
+			}
+
 			$sqlParts['where'][] = 'NOT EXISTS ('.
 				'SELECT NULL'.
-				' FROM graphs_items gi,items i,hosts_groups hgg'.
-					' LEFT JOIN rights r'.
-						' ON r.id=hgg.groupid'.
-							' AND '.dbConditionInt('r.groupid', $userGroups).
-				' WHERE g.graphid=gi.graphid'.
-					' AND gi.itemid=i.itemid'.
-					' AND i.hostid=hgg.hostid'.
-				' GROUP BY i.hostid'.
-				' HAVING MAX(permission)<'.zbx_dbstr($permission).
-					' OR MIN(permission) IS NULL'.
-					' OR MIN(permission)='.PERM_DENY.
-				')';
-			// check permissions by Y min item
-			$sqlParts['where'][] = 'NOT EXISTS ('.
-				'SELECT NULL'.
-				' FROM items i,hosts_groups hgg'.
-					' LEFT JOIN rights r'.
-						' ON r.id=hgg.groupid'.
-							' AND '.dbConditionInt('r.groupid', $userGroups).
-				' WHERE g.ymin_type='.GRAPH_YAXIS_TYPE_ITEM_VALUE.
-					' AND g.ymin_itemid=i.itemid'.
-					' AND i.hostid=hgg.hostid'.
-				' GROUP BY i.hostid'.
-				' HAVING MAX(permission)<'.zbx_dbstr($permission).
-					' OR MIN(permission) IS NULL'.
-					' OR MIN(permission)='.PERM_DENY.
-				')';
-			// check permissions by Y max item
-			$sqlParts['where'][] = 'NOT EXISTS ('.
-				'SELECT NULL'.
-				' FROM items i,hosts_groups hgg'.
-					' LEFT JOIN rights r'.
-						' ON r.id=hgg.groupid'.
-							' AND '.dbConditionInt('r.groupid', $userGroups).
-				' WHERE g.ymax_type='.GRAPH_YAXIS_TYPE_ITEM_VALUE.
-					' AND g.ymax_itemid=i.itemid'.
-					' AND i.hostid=hgg.hostid'.
-				' GROUP BY i.hostid'.
-				' HAVING MAX(permission)<'.zbx_dbstr($permission).
-					' OR MIN(permission) IS NULL'.
-					' OR MIN(permission)='.PERM_DENY.
-				')';
+				' FROM graphs_items gi1'.
+				' JOIN items i1 ON gi1.itemid=i1.itemid'.
+				' JOIN host_hgset hh1 ON i1.hostid=hh1.hostid'.
+				' LEFT JOIN permission p1 ON hh1.hgsetid=p1.hgsetid'.
+					' AND p1.ugsetid=p.ugsetid'.
+				' WHERE g.graphid=gi1.graphid'.
+					' AND p1.hgsetid IS NULL'.
+			')';
 		}
 
 		// groupids
 		if (!is_null($options['groupids'])) {
 			zbx_value2array($options['groupids']);
 
-			$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts_groups'] = 'hosts_groups hg';
+			$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+			$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['hg'] = ['left_table' => 'i', 'table' => 'hosts_groups', 'using' => 'hostid'];
 			$sqlParts['where'][] = dbConditionInt('hg.groupid', $options['groupids']);
-			$sqlParts['where'][] = 'hg.hostid=i.hostid';
-			$sqlParts['where']['gig'] = 'gi.graphid=g.graphid';
-			$sqlParts['where']['igi'] = 'i.itemid=gi.itemid';
-			$sqlParts['where']['hgi'] = 'hg.hostid=i.hostid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['hg'] = 'hg.groupid';
@@ -182,11 +151,9 @@ class CGraph extends CGraphGeneral {
 		if (!is_null($options['hostids'])) {
 			zbx_value2array($options['hostids']);
 
-			$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-			$sqlParts['from']['items'] = 'items i';
+			$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+			$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
 			$sqlParts['where'][] = dbConditionInt('i.hostid', $options['hostids']);
-			$sqlParts['where']['gig'] = 'gi.graphid=g.graphid';
-			$sqlParts['where']['igi'] = 'i.itemid=gi.itemid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['i'] = 'i.hostid';
@@ -204,8 +171,7 @@ class CGraph extends CGraphGeneral {
 		if (!is_null($options['itemids'])) {
 			zbx_value2array($options['itemids']);
 
-			$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-			$sqlParts['where']['gig'] = 'gi.graphid=g.graphid';
+			$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
 			$sqlParts['where'][] = dbConditionInt('gi.itemid', $options['itemids']);
 
 			if ($options['groupCount']) {
@@ -215,12 +181,9 @@ class CGraph extends CGraphGeneral {
 
 		// templated
 		if (!is_null($options['templated'])) {
-			$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where']['igi'] = 'i.itemid=gi.itemid';
-			$sqlParts['where']['ggi'] = 'g.graphid=gi.graphid';
-			$sqlParts['where']['hi'] = 'h.hostid=i.hostid';
+			$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+			$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 
 			if ($options['templated']) {
 				$sqlParts['where'][] = 'h.status='.HOST_STATUS_TEMPLATE;
@@ -260,22 +223,17 @@ class CGraph extends CGraphGeneral {
 			if (isset($options['filter']['host'])) {
 				zbx_value2array($options['filter']['host']);
 
-				$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-				$sqlParts['from']['items'] = 'items i';
-				$sqlParts['from']['hosts'] = 'hosts h';
-				$sqlParts['where']['gig'] = 'gi.graphid=g.graphid';
-				$sqlParts['where']['igi'] = 'i.itemid=gi.itemid';
-				$sqlParts['where']['hi'] = 'h.hostid=i.hostid';
+				$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+				$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
+				$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 				$sqlParts['where']['host'] = dbConditionString('h.host', $options['filter']['host']);
 			}
 
 			if (isset($options['filter']['hostid'])) {
 				zbx_value2array($options['filter']['hostid']);
 
-				$sqlParts['from']['graphs_items'] = 'graphs_items gi';
-				$sqlParts['from']['items'] = 'items i';
-				$sqlParts['where']['gig'] = 'gi.graphid=g.graphid';
-				$sqlParts['where']['igi'] = 'i.itemid=gi.itemid';
+				$sqlParts['join']['gi'] = ['table' => 'graphs_items', 'using' => 'graphid'];
+				$sqlParts['join']['i'] = ['left_table' => 'gi', 'table' => 'items', 'using' => 'itemid'];
 				$sqlParts['where']['hostid'] = dbConditionInt('i.hostid', $options['filter']['hostid']);
 			}
 		}
@@ -315,14 +273,25 @@ class CGraph extends CGraphGeneral {
 
 		if ($result) {
 			$result = $this->addRelatedObjects($options, $result);
-		}
 
-		// removing keys (hash -> array)
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
 		return $result;
+	}
+
+	private static function validateGet(array &$options): void {
+		$api_input_rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+			'selectDiscoveryRule' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', CDiscoveryRule::OUTPUT_FIELDS), 'default' => null],
+			'selectGraphDiscovery' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE | API_DEPRECATED, 'in' => implode(',', self::DISCOVERY_DATA_OUTPUT_FIELDS), 'default' => null],
+			'selectDiscoveryData' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', self::DISCOVERY_DATA_OUTPUT_FIELDS), 'default' => null]
+		]];
+
+		if (!CApiInputValidator::validate($api_input_rules, $options, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
 	}
 
 	/**
@@ -350,7 +319,7 @@ class CGraph extends CGraphGeneral {
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	private function validateDelete(array &$graphids, array &$db_graphs = null) {
+	private function validateDelete(array &$graphids, ?array &$db_graphs = null) {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 		if (!CApiInputValidator::validate($api_input_rules, $graphids, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
@@ -379,175 +348,136 @@ class CGraph extends CGraphGeneral {
 	protected function addRelatedObjects(array $options, array $result) {
 		$result = parent::addRelatedObjects($options, $result);
 
-		$graphids = array_keys($result);
-
 		// adding Items
 		if ($options['selectItems'] !== null && $options['selectItems'] !== API_OUTPUT_COUNT) {
-			$relationMap = $this->createRelationMap($result, 'graphid', 'itemid', 'graphs_items');
+			$relation_map = $this->createRelationMap($result, 'graphid', 'itemid', 'graphs_items');
 			$items = API::Item()->get([
 				'output' => $options['selectItems'],
-				'itemids' => $relationMap->getRelatedIds(),
+				'itemids' => $relation_map->getRelatedIds(),
 				'webitems' => true,
 				'nopermissions' => true,
 				'preservekeys' => true
 			]);
-			$result = $relationMap->mapMany($result, $items, 'items');
+			$result = $relation_map->mapMany($result, $items, 'items');
 		}
 
-		// adding discoveryRule
-		if ($options['selectDiscoveryRule'] !== null) {
-			$discoveryRules = [];
-			$relationMap = new CRelationMap();
-			$dbRules = DBselect(
-				'SELECT id.parent_itemid,gd.graphid'.
-					' FROM graph_discovery gd,item_discovery id,graphs_items gi,items i'.
-					' WHERE '.dbConditionInt('gd.graphid', $graphids).
-					' AND gd.parent_graphid=gi.graphid'.
-						' AND gi.itemid=id.itemid'.
-						' AND id.parent_itemid=i.itemid'.
-						' AND i.flags='.ZBX_FLAG_DISCOVERY_RULE
-			);
-
-			while ($relation = DBfetch($dbRules)) {
-				$relationMap->addRelation($relation['graphid'], $relation['parent_itemid']);
-			}
-
-			$related_ids = $relationMap->getRelatedIds();
-
-			if ($related_ids) {
-				$discoveryRules = API::DiscoveryRule()->get([
-					'output' => $options['selectDiscoveryRule'],
-					'itemids' => $related_ids,
-					'nopermissions' => true,
-					'preservekeys' => true
-				]);
-			}
-			$result = $relationMap->mapOne($result, $discoveryRules, 'discoveryRule');
-		}
-
-		// adding graph discovery
-		if ($options['selectGraphDiscovery'] !== null) {
-			$graphDiscoveries = API::getApiService()->select('graph_discovery', [
-				'output' => $this->outputExtend($options['selectGraphDiscovery'], ['graphid']),
-				'filter' => ['graphid' => array_keys($result)],
-				'preservekeys' => true
-			]);
-			$relationMap = $this->createRelationMap($graphDiscoveries, 'graphid', 'graphid');
-
-			$graphDiscoveries = $this->unsetExtraFields($graphDiscoveries, ['graphid'],
-				$options['selectGraphDiscovery']
-			);
-			$result = $relationMap->mapOne($result, $graphDiscoveries, 'graphDiscovery');
-		}
+		self::addRelatedDiscoveryRules($options, $result);
+		self::addRelatedGraphDiscovery($options, $result);
+		self::addRelatedDiscoveryData($options, $result);
 
 		return $result;
 	}
 
-	/**
-	 * Validate create.
-	 *
-	 * @param array $graphs
-	 */
-	protected function validateCreate(array &$graphs) {
-		$itemIds = $this->validateItemsCreate($graphs);
-		$this->validateItems($itemIds, $graphs);
+	private static function addRelatedGraphDiscovery(array $options, array &$result): void {
+		if ($options['selectGraphDiscovery'] === null) {
+			return;
+		}
 
-		parent::validateCreate($graphs);
-	}
-
-	/**
-	 * Validate update.
-	 *
-	 * @param array $graphs
-	 * @param array $dbGraphs
-	 */
-	protected function validateUpdate(array $graphs, array $dbGraphs) {
-		// check for "itemid" when updating graph with only "gitemid" passed
-		foreach ($graphs as &$graph) {
-			if (isset($graph['gitems'])) {
-				foreach ($graph['gitems'] as &$gitem) {
-					if (isset($gitem['gitemid']) && !isset($gitem['itemid'])) {
-						$dbGitems = zbx_toHash($dbGraphs[$graph['graphid']]['gitems'], 'gitemid');
-						$gitem['itemid'] = $dbGitems[$gitem['gitemid']]['itemid'];
-					}
-				}
-				unset($gitem);
-			}
+		foreach ($result as &$graph) {
+			$graph['graphDiscovery'] = [];
 		}
 		unset($graph);
 
-		$itemIds = $this->validateItemsUpdate($graphs);
-		$this->validateItems($itemIds, $graphs);
+		$_options = [
+			'output' => array_merge(['graphid'], $options['selectGraphDiscovery']),
+			'graphids' => array_keys($result)
+		];
+		$resource = DBselect(DB::makeSql('graph_discovery', $_options));
 
-		parent::validateUpdate($graphs, $dbGraphs);
+		while ($graph_discovery = DBfetch($resource)) {
+			$result[$graph_discovery['graphid']]['graphDiscovery'] =
+				array_diff_key($graph_discovery, array_flip(['graphid']));
+		}
 	}
 
 	/**
-	 * Validates items.
-	 *
-	 * @param array $itemIds
-	 * @param array $graphs
+	 * @inheritdoc
 	 */
-	protected function validateItems(array $itemIds, array $graphs) {
-		$dbItems = API::Item()->get([
-			'output' => ['name', 'value_type'],
-			'itemids' => $itemIds,
-			'webitems' => true,
-			'editable' => true,
-			'preservekeys' => true
-		]);
+	protected static function checkDuplicates(array $graphs): void {
+		$_graph_indexes = [];
 
-		// check if items exist and user has permission to access those items
-		foreach ($itemIds as $itemId) {
-			if (!isset($dbItems[$itemId])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('No permissions to referred object or it does not exist!'));
+		foreach ($graphs as $i => $graph) {
+			foreach ($graph['gitems'] as $gitem) {
+				$_graph_indexes[$gitem['itemid']][] = $i;
 			}
 		}
 
-		$allowedValueTypes = [ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_UINT64];
+		$options = [
+			'output' => ['itemid', 'hostid'],
+			'itemids' => array_keys($_graph_indexes),
+			'filter' => ['flags' => [ZBX_FLAG_DISCOVERY_NORMAL, ZBX_FLAG_DISCOVERY_CREATED]]
+		];
+		$result = DBselect(DB::makeSql('items', $options));
 
-		// get value type and name for these items
-		foreach ($graphs as $graph) {
-			// graph items
-			foreach ($graph['gitems'] as $graphItem) {
-				$item = $dbItems[$graphItem['itemid']];
+		$graph_indexes = [];
 
-				if (!in_array($item['value_type'], $allowedValueTypes)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s(
-						'Cannot add a non-numeric item "%1$s" to graph "%2$s".',
-						$item['name'],
-						$graph['name']
+		while ($row = DBfetch($result)) {
+			foreach ($_graph_indexes[$row['itemid']] as $i) {
+				if (array_key_exists($row['hostid'], $graph_indexes)
+						&& array_key_exists($graphs[$i]['name'], $graph_indexes[$row['hostid']])
+						&& $graph_indexes[$row['hostid']][$graphs[$i]['name']] != $i) {
+					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Invalid parameter "%1$s": %2$s.', '/'.($i + 1),
+						_s('value %1$s already exists', '(name)=('.$graphs[$i]['name'].')')
 					));
 				}
+
+				$graph_indexes[$row['hostid']][$graphs[$i]['name']] = $i;
 			}
+		}
 
-			// Y axis min
-			if (isset($graph['ymin_itemid']) && $graph['ymin_itemid']
-					&& isset($graph['ymin_type']) && $graph['ymin_type'] == GRAPH_YAXIS_TYPE_ITEM_VALUE) {
-				$item = $dbItems[$graph['ymin_itemid']];
+		$result = DBselect(
+			'SELECT DISTINCT g.graphid,g.name,i.hostid'.
+			' FROM graphs g,graphs_items gi,items i'.
+			' WHERE g.graphid=gi.graphid'.
+				' AND gi.itemid=i.itemid'.
+				' AND '.dbConditionString('g.name', array_unique(array_column($graphs, 'name'))).
+				' AND '.dbConditionInt('g.flags', [ZBX_FLAG_DISCOVERY_NORMAL, ZBX_FLAG_DISCOVERY_CREATED]).
+				' AND '.dbConditionId('i.hostid', array_keys($graph_indexes))
+		);
 
-				if (!in_array($item['value_type'], $allowedValueTypes)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s(
-						'Cannot add a non-numeric item "%1$s" to graph "%2$s".',
-						$item['name'],
-						$graph['name']
-					));
+		while ($row = DBfetch($result)) {
+			if (array_key_exists($row['hostid'], $graph_indexes)
+					&& array_key_exists($row['name'], $graph_indexes[$row['hostid']])) {
+				$graph = $graphs[$graph_indexes[$row['hostid']][$row['name']]];
+
+				if (!array_key_exists('graphid', $graph) || bccomp($row['graphid'], $graph['graphid']) != 0) {
+					$hosts = DB::select('hosts', [
+						'output' => ['host', 'status'],
+						'hostids' => $row['hostid']
+					]);
+
+					$error = in_array($hosts[0]['status'], [HOST_STATUS_MONITORED, HOST_STATUS_NOT_MONITORED])
+						? _('Graph "%1$s" already exists on the host "%2$s".')
+						: _('Graph "%1$s" already exists on the template "%2$s".');
+
+					self::exception(ZBX_API_ERROR_PARAMETERS, sprintf($error, $graph['name'], $hosts[0]['host']));
 				}
 			}
+		}
+	}
 
-			// Y axis max
-			if (isset($graph['ymax_itemid']) && $graph['ymax_itemid']
-					&& isset($graph['ymax_type']) && $graph['ymax_type'] == GRAPH_YAXIS_TYPE_ITEM_VALUE) {
-				$item = $dbItems[$graph['ymax_itemid']];
+	/**
+	 * Inherit template graphs from to hosts.
+	 *
+	 * @param array $templateids
+	 * @param array $hostids
+	 */
+	public function linkTemplateObjects(array $templateids, array $hostids): void {
+		$output = ['graphid', 'name', 'width', 'height', 'yaxismin', 'yaxismax', 'templateid', 'show_work_period',
+			'show_triggers', 'graphtype', 'show_legend', 'show_3d', 'percent_left', 'percent_right', 'ymin_type',
+			'ymax_type', 'ymin_itemid', 'ymax_itemid'
+		];
 
-				if (!in_array($item['value_type'], $allowedValueTypes)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s(
-						'Cannot add a non-numeric item "%1$s" to graph "%2$s".',
-						$item['name'],
-						$graph['name']
-					));
-				}
-			}
+		$graphs = $this->get([
+			'output' => $output,
+			'selectGraphItems' => ['itemid', 'drawtype', 'sortorder', 'color', 'yaxisside', 'calc_fnc', 'type'],
+			'hostids' => $templateids,
+			'preservekeys' => true,
+			'nopermissions' => true
+		]);
+
+		if ($graphs) {
+			$this->inherit($graphs, $hostids);
 		}
 	}
 }

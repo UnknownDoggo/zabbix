@@ -1,26 +1,23 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/../CElement.php';
+require_once 'vendor/autoload.php';
+require_once __DIR__.'/../CElement.php';
+
+use Facebook\WebDriver\Exception\ElementClickInterceptedException;
 
 /**
  * Dashboard widget element.
@@ -33,21 +30,45 @@ class CWidgetElement extends CElement {
 	 * @return integer
 	 */
 	public function getRefreshInterval() {
-		$this->query('xpath:.//button[@class="btn-widget-action"]')->waitUntilPresent()->one()->click(true);
-		$selected = $this->query('xpath://ul[@role="menu"]//a[contains(@aria-label, "selected")]')->one();
-		$aria_label = explode(', ', $selected->getAttribute('aria-label'), 3);
+		$this->getHeader()->hoverMouse();
+		$this->query('xpath:.//button[contains(@class, "js-widget-action")]')->waitUntilPresent()->one()->forceClick();
+		$menu = CPopupMenuElement::find()->waitUntilVisible()->one();
+		$aria_label = explode(', ', $menu->getSelected()->getAttribute('aria-label'), 3);
 
 		return $aria_label[1];
 	}
 
 	/**
+	 * Get time interval of widget.
+	 *
+	 * @return string
+	 */
+	public function getTimeInterval() {
+		$this->getHeader()->hoverMouse();
+		$this->query('xpath:.//li[@class="widget-info-button"]/button')->waitUntilPresent()->one()->click(true);
+		$hintbox = $this->query('xpath://div[contains(@class, "overlay-dialogue hintbox wordbreak")]')->waitUntilVisible()->one();
+		$hint_text = $hintbox->getText();
+
+		return $hint_text;
+	}
+
+	/**
 	 * Get header of widget.
+	 *
+	 * @return CElement
+	 */
+	public function getHeader() {
+		return $this->query('xpath:.//div[contains(@class, "dashboard-grid-widget-header") or'.
+				' contains(@class, "dashboard-grid-iterator-header")]/h4')->one();
+	}
+
+	/**
+	 * Get header text of widget.
 	 *
 	 * @return string
 	 */
 	public function getHeaderText() {
-		return $this->query('xpath:.//div[contains(@class, "dashboard-grid-widget-head") or'.
-				' contains(@class, "dashboard-grid-iterator-head")]/h4')->one()->getText();
+		return $this->getHeader()->getText();
 	}
 
 	/**
@@ -56,8 +77,8 @@ class CWidgetElement extends CElement {
 	 * @return CElement
 	 */
 	public function getContent() {
-		return $this->query('xpath:.//div[contains(@class, "dashboard-grid-widget-content") or'.
-				' contains(@class, "dashboard-grid-iterator-content")]')->one();
+		return $this->query('xpath:.//div[contains(@class, "dashboard-grid-widget-contents") or'.
+				' contains(@class, "dashboard-grid-iterator-contents")]')->one();
 	}
 
 	/**
@@ -66,7 +87,7 @@ class CWidgetElement extends CElement {
 	 * @return boolean
 	 */
 	public function isEditable() {
-		return $this->query('xpath:.//button[@class="btn-widget-edit"]')->one()->isPresent();
+		return $this->query('xpath:.//button[contains(@class, "js-widget-edit")]')->one()->isPresent();
 	}
 
 	/**
@@ -75,23 +96,34 @@ class CWidgetElement extends CElement {
 	 * @return CFormElement
 	 */
 	public function edit() {
-		// Edit can sometimes fail so we have to retry this operation.
-		for ($i = 0; $i < 2; $i++) {
-			$this->query('xpath:.//button[@class="btn-widget-edit"]')->waitUntilPresent()->one()->click(true);
+		/*
+		 * Query the button first: it reloads the widget if the dashboard re-rendered (the mouse actions below would
+		 * throw on a stale widget instead of reloading it).
+		 */
+		$button = $this->query('xpath:.//button[contains(@class, "js-widget-edit")]')->waitUntilPresent()->one();
+		$this->hoverMouse();
+		$button->hoverMouse();
 
-			try {
-				return $this->query('xpath://div[@data-dialogueid="widget_properties"]//form')->waitUntilVisible()->asForm()->one();
-			}
-			catch (\Exception $e) {
-				if ($i === 1) {
-					throw $e;
-				}
-			}
+		/*
+		 * Hovering a widget in edit mode adds resize handles, and the top resize border (ui-resizable-border-n) can
+		 * overlap the edit button and intercept the click. If that happens, re-query the button (the widget may have
+		 * re-rendered), scroll it into view to clear the overlap, then click again.
+		 */
+		try {
+			$button->click();
 		}
+		catch (ElementClickInterceptedException $exception) {
+			$button = $this->query('xpath:.//button[contains(@class, "js-widget-edit")]')->waitUntilPresent()->one();
+			$button->scrollIntoView();
+			$button->click();
+		}
+
+		return $this->query('xpath://div[@data-dialogueid="widget_form"]//form')->waitUntilVisible()
+				->asForm()->one();
 	}
 
 	/**
-	 * @inheritdoc
+	 * @inheritDoc
 	 */
 	public function getReadyCondition() {
 		$target = $this;
@@ -99,5 +131,12 @@ class CWidgetElement extends CElement {
 		return function () use ($target) {
 			return ($target->query('xpath:.//div[contains(@class, "is-loading")]')->one(false)->isValid() === false);
 		};
+	}
+
+	/**
+	 * @inheritDoc
+	 */
+	public function isReady() {
+		return call_user_func([$this, 'getReadyCondition']);
 	}
 }

@@ -1,22 +1,16 @@
 <?php declare(strict_types = 0);
-
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -25,11 +19,8 @@
  */
 abstract class CControllerHost extends CController {
 
-	// Filter idx prefix.
-	const FILTER_IDX = 'web.monitoring.hosts';
-
 	// Filter fields default values.
-	const FILTER_FIELDS_DEFAULT = [
+	public const FILTER_FIELDS_DEFAULT = [
 		'name' => '',
 		'groupids' => [],
 		'ip' => '',
@@ -39,28 +30,28 @@ abstract class CControllerHost extends CController {
 		'evaltype' => TAG_EVAL_TYPE_AND_OR,
 		'tags' => [],
 		'severities' => [],
-		'show_suppressed' => ZBX_PROBLEM_SUPPRESSED_FALSE,
 		'maintenance_status' => HOST_MAINTENANCE_STATUS_ON,
-		'page' => null,
-		'sort' => 'name',
-		'sortorder' => ZBX_SORT_UP
+		'page' => null
 	];
+
+	public const DEFAULT_SORT = 'name';
+	public const DEFAULT_SORTORDER = ZBX_SORT_UP;
 
 	/**
 	 * Get host list results count for passed filter.
 	 *
 	 * @param array  $filter                        Filter options.
-	 * @param string $filter['name']                Filter hosts by name.
-	 * @param array  $filter['groupids']            Filter hosts by host groups.
-	 * @param string $filter['ip']                  Filter hosts by IP.
-	 * @param string $filter['dns']	                Filter hosts by DNS.
-	 * @param string $filter['port']                Filter hosts by port.
-	 * @param string $filter['status']              Filter hosts by status.
-	 * @param string $filter['evaltype']            Filter hosts by tags.
-	 * @param string $filter['tags']                Filter hosts by tag names and values.
-	 * @param string $filter['severities']          Filter problems on hosts by severities.
-	 * @param string $filter['show_suppressed']     Filter suppressed problems.
-	 * @param int    $filter['maintenance_status']  Filter hosts by maintenance.
+	 *        string $filter['name']                Filter hosts by name.
+	 *        array  $filter['groupids']            Filter hosts by host groups.
+	 *        string $filter['ip']                  Filter hosts by IP.
+	 *        string $filter['dns']	                Filter hosts by DNS.
+	 *        string $filter['port']                Filter hosts by port.
+	 *        string $filter['status']              Filter hosts by status.
+	 *        string $filter['evaltype']            Filter hosts by tags.
+	 *        string $filter['tags']                Filter hosts by tag names and values.
+	 *        string $filter['severities']          Filter problems on hosts by severities.
+	 *        string $filter['show_suppressed']     Filter suppressed problems.
+	 *        int    $filter['maintenance_status']  Filter hosts by maintenance.
 	 *
 	 * @return int
 	 */
@@ -70,12 +61,12 @@ abstract class CControllerHost extends CController {
 		return (int) API::Host()->get([
 			'countOutput' => true,
 			'evaltype' => $filter['evaltype'],
-			'tags' => $filter['tags'],
+			'tags' => $filter['tags'] ?: null,
 			'inheritedTags' => true,
 			'groupids' => $groupids,
-			'severities' => $filter['severities'] ? $filter['severities'] : null,
+			'severities' => $filter['severities'] ?: null,
 			'withProblemsSuppressed' => $filter['severities']
-				? (($filter['show_suppressed'] == ZBX_PROBLEM_SUPPRESSED_TRUE) ? null : false)
+				? ($filter['show_suppressed'] == ZBX_PROBLEM_SUPPRESSED_TRUE ? null : false)
 				: null,
 			'search' => [
 				'name' => ($filter['name'] === '') ? null : $filter['name'],
@@ -97,20 +88,20 @@ abstract class CControllerHost extends CController {
 	 * Prepares the host list based on the given filter and sorting options.
 	 *
 	 * @param array  $filter                        Filter options.
-	 * @param string $filter['name']                Filter hosts by name.
-	 * @param array  $filter['groupids']            Filter hosts by host groups.
-	 * @param string $filter['ip']                  Filter hosts by IP.
-	 * @param string $filter['dns']	                Filter hosts by DNS.
-	 * @param string $filter['port']                Filter hosts by port.
-	 * @param string $filter['status']              Filter hosts by status.
-	 * @param string $filter['evaltype']            Filter hosts by tags.
-	 * @param string $filter['tags']                Filter hosts by tag names and values.
-	 * @param string $filter['severities']          Filter problems on hosts by severities.
-	 * @param string $filter['show_suppressed']     Filter suppressed problems.
-	 * @param int    $filter['maintenance_status']  Filter hosts by maintenance.
-	 * @param int    $filter['page']                Page number.
-	 * @param string $filter['sort']                Sorting field.
-	 * @param string $filter['sortorder']           Sorting order.
+	 *        string $filter['name']                Filter hosts by name.
+	 *        array  $filter['groupids']            Filter hosts by host groups.
+	 *        string $filter['ip']                  Filter hosts by IP.
+	 *        string $filter['dns']	                Filter hosts by DNS.
+	 *        string $filter['port']                Filter hosts by port.
+	 *        string $filter['status']              Filter hosts by status.
+	 *        string $filter['evaltype']            Filter hosts by tags.
+	 *        string $filter['tags']                Filter hosts by tag names and values.
+	 *        string $filter['severities']          Filter problems on hosts by severities.
+	 *        string $filter['show_suppressed']     Filter suppressed problems.
+	 *        int    $filter['maintenance_status']  Filter hosts by maintenance.
+	 *        int    $filter['page']                Page number.
+	 *        string $filter['sort']                Sorting field.
+	 *        string $filter['sortorder']           Sorting order.
 	 *
 	 * @return array
 	 */
@@ -120,7 +111,7 @@ abstract class CControllerHost extends CController {
 		$hosts = API::Host()->get([
 			'output' => ['hostid', 'name', 'status'],
 			'evaltype' => $filter['evaltype'],
-			'tags' => $filter['tags'],
+			'tags' => $filter['tags'] ?: null,
 			'inheritedTags' => true,
 			'groupids' => $groupids,
 			'severities' => $filter['severities'] ? $filter['severities'] : null,
@@ -159,7 +150,9 @@ abstract class CControllerHost extends CController {
 			'output' => ['hostid', 'name', 'status', 'maintenance_status', 'maintenanceid', 'maintenance_type',
 				'active_available'
 			],
-			'selectInterfaces' => ['ip', 'dns', 'port', 'main', 'type', 'useip', 'available', 'error', 'details'],
+			'selectInterfaces' => ['interfaceid', 'ip', 'dns', 'port', 'main', 'type', 'useip', 'available', 'error',
+				'details'
+			],
 			'selectGraphs' => API_OUTPUT_COUNT,
 			'selectHttpTests' => API_OUTPUT_COUNT,
 			'selectTags' => ['tag', 'value'],
@@ -170,19 +163,18 @@ abstract class CControllerHost extends CController {
 		// Re-sort the results again.
 		CArrayHelper::sort($hosts, [['field' => $filter['sort'], 'order' => $filter['sortorder']]]);
 
-		// Get count for every host with item type ITEM_TYPE_ZABBIX_ACTIVE (7).
-		$db_items_active_count = API::Item()->get([
-			'groupCount' => true,
-			'countOutput' => true,
-			'filter' => ['type' => ITEM_TYPE_ZABBIX_ACTIVE],
-			'hostids' => array_column($hosts, 'hostid')
-		]);
+		CTagHelper::mergeOwnAndInheritedTags($hosts);
 
-		$item_active_by_hostid = [];
+		$interfaceids = [];
+		$hostids = [];
 
-		foreach ($db_items_active_count as $value) {
-			$item_active_by_hostid[$value['hostid']] = $value['rowscount'];
+		foreach ($hosts as $host) {
+			$hostids[] = $host['hostid'];
+			$interfaceids = array_merge($interfaceids, array_column($host['interfaces'], 'interfaceid'));
 		}
+
+		$interface_enabled_items_count = getEnabledItemsCountByInterfaceIds($interfaceids);
+		$active_item_count_by_hostid = getEnabledItemTypeCountByHostId(ITEM_TYPE_ZABBIX_ACTIVE, $hostids);
 
 		$maintenanceids = [];
 
@@ -198,20 +190,21 @@ abstract class CControllerHost extends CController {
 
 		$problems = API::Problem()->get([
 			'output' => ['eventid', 'objectid', 'severity'],
-			'objectids' => array_keys($triggers),
 			'source' => EVENT_SOURCE_TRIGGERS,
 			'object' => EVENT_OBJECT_TRIGGER,
-			'suppressed' => ($filter['show_suppressed'] == ZBX_PROBLEM_SUPPRESSED_TRUE) ? null : false
+			'objectids' => array_keys($triggers),
+			'suppressed' => ($filter['show_suppressed'] == ZBX_PROBLEM_SUPPRESSED_TRUE) ? null : false,
+			'symptom' => false
 		]);
 
-		$items = API::Item()->get([
+		$items_count = API::Item()->get([
 			'countOutput' => true,
 			'groupCount' => true,
 			'hostids' => array_keys($hosts),
 			'webitems' =>true,
 			'monitored' => true
 		]);
-		$items_count = array_combine(array_column($items, 'hostid'), array_column($items, 'rowscount'));
+		$items_count = $items_count ? array_column($items_count, 'rowscount', 'hostid') : [];
 
 		// Group all problems per host per severity.
 		$host_problems = [];
@@ -221,22 +214,38 @@ abstract class CControllerHost extends CController {
 			}
 		}
 
+		if ($hosts) {
+			$dashboard_count = API::HostDashboard()->get([
+				'countOutput' => true,
+				'groupCount' => true,
+				'hostids' => array_keys($hosts)
+			]);
+
+			$dashboard_count = array_column($dashboard_count, 'rowscount', 'hostid');
+		}
+
 		foreach ($hosts as &$host) {
+			foreach ($host['interfaces'] as &$interface) {
+				$interfaceid = $interface['interfaceid'];
+				$interface['has_enabled_items'] = array_key_exists($interfaceid, $interface_enabled_items_count)
+					&& $interface_enabled_items_count[$interfaceid] > 0;
+			}
+			unset($interface);
+
 			// Add active checks interface if host have items with type ITEM_TYPE_ZABBIX_ACTIVE (7).
-			if (array_key_exists($host['hostid'], $item_active_by_hostid)
-					&& $item_active_by_hostid[$host['hostid']] > 0) {
+			if (array_key_exists($host['hostid'], $active_item_count_by_hostid)
+					&& $active_item_count_by_hostid[$host['hostid']] > 0) {
 				$host['interfaces'][] = [
 					'type' => INTERFACE_TYPE_AGENT_ACTIVE,
 					'available' => $host['active_available'],
+					'has_enabled_items' => true,
 					'error' => ''
 				];
 			}
 			unset($host['active_available']);
 
 			$host['items_count'] = array_key_exists($host['hostid'], $items_count) ? $items_count[$host['hostid']] : 0;
-
-			// Count number of dashboards for each host.
-			$host['dashboards'] = count(getHostDashboards($host['hostid']));
+			$host['dashboards'] = $dashboard_count[$host['hostid']];
 
 			CArrayHelper::sort($host['interfaces'], [['field' => 'main', 'order' => ZBX_SORT_DOWN]]);
 
@@ -255,30 +264,6 @@ abstract class CControllerHost extends CController {
 					? count($host_problems[$host['hostid']][$severity])
 					: 0;
 			}
-
-			// Merge host tags with template tags, and skip duplicate tags and values.
-			if (!$host['inheritedTags']) {
-				$tags = $host['tags'];
-			}
-			elseif (!$host['tags']) {
-				$tags = $host['inheritedTags'];
-			}
-			else {
-				$tags = $host['tags'];
-
-				foreach ($host['inheritedTags'] as $template_tag) {
-					foreach ($tags as $host_tag) {
-						// Skip tags with same name and value.
-						if ($host_tag['tag'] === $template_tag['tag']
-								&& $host_tag['value'] === $template_tag['value']) {
-							continue 2;
-						}
-					}
-					$tags[] = $template_tag;
-				}
-			}
-
-			$host['tags'] = $tags;
 		}
 		unset($host);
 
@@ -292,7 +277,7 @@ abstract class CControllerHost extends CController {
 			]);
 		}
 
-		$tags = makeTags($hosts, true, 'hostid', ZBX_TAG_COUNT_DEFAULT, $filter['tags']);
+		$tags = CTagHelper::getTagsHtml($hosts, ZBX_TAG_OBJECT_HOST, ['filter_tags' => $filter['tags']]);
 
 		foreach ($hosts as &$host) {
 			$host['tags'] = $tags[$host['hostid']];
@@ -328,17 +313,40 @@ abstract class CControllerHost extends CController {
 	}
 
 	/**
-	 * Clean passed filter fields in input from default values required for HTML presentation. Convert field
+	 * Clean the filter from non-existing host group IDs.
+	 *
+	 * @param array $filter
+	 *
+	 * $filter = [
+	 *     'groupids' => (array)  Group IDs from filter to check.
+	 * ]
+	 *
+	 * @return array
+	 */
+	public static function sanitizeFilter(array $filter): array {
+		if ($filter['groupids']) {
+			$groups = API::HostGroup()->get([
+				'output' => [],
+				'groupids' => $filter['groupids'],
+				'preservekeys' => true
+			]);
+
+			$filter['groupids'] = array_filter($filter['groupids'], static fn($groupid) =>
+				array_key_exists($groupid, $groups)
+			);
+		}
+
+		return $filter;
+	}
+
+	/**
+	 * Clean and convert passed filter input fields from default values required for HTML presentation.
 	 *
 	 * @param array $input  Filter fields values.
 	 *
 	 * @return array
 	 */
 	protected function cleanInput(array $input): array {
-		if (array_key_exists('filter_reset', $input) && $input['filter_reset']) {
-			return array_intersect_key(['filter_name' => ''], $input);
-		}
-
 		if (array_key_exists('tags', $input) && $input['tags']) {
 			$input['tags'] = array_filter($input['tags'], function($tag) {
 				return !($tag['tag'] === '' && $tag['value'] === '');

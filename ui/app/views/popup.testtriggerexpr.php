@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -31,7 +26,31 @@ $data_table = (new CTable())
 		_('Value')
 	]);
 
-foreach ($data['data_table_rows'] as $row) {
+foreach ($data['test_data_rows'] as $i => $macro) {
+	$row = (new CRow())->addItem(
+		(new CCol($macro['macro']))
+			->addClass(ZBX_STYLE_OVERFLOW_ELLIPSIS)
+			->addStyle('max-width: '.ZBX_TEXTAREA_BIG_WIDTH.'px;')
+	);
+
+	if ($macro['error'] !== null) {
+		$row->addItem((new CCol($macro['error']))->addClass(ZBX_STYLE_RED)->setColspan(2));
+	}
+	else {
+		$name = 'test_data['.$i.'][value]';
+
+		$control = $macro['values'] !== null
+			? (new CSelect($name))
+				->addOptions(CSelect::createOptionsFromArray($macro['values']))
+				->setValue($macro['value'])
+			: (new CTextBox($name, $macro['value']))->setWidth(ZBX_TEXTAREA_SMALL_WIDTH);
+
+		$row->addItem([
+			$macro['value_type'],
+			[(new CVar('test_data['.$i.'][key]', $macro['key']))->removeId(), $control]
+		]);
+	}
+
 	$data_table->addRow($row);
 }
 
@@ -110,13 +129,12 @@ $output = [
 	'body' => (new CDiv([
 		$data['messages'],
 		(new CForm())
-			->cleanItems()
 			->setId('expression_testing_from')
 			->addItem((new CVar('expression', $data['expression']))->removeId())
 			->addItem((new CVar('test_expression', 1))->removeId())
 			->addItem([
 				$form_list,
-				(new CInput('submit', 'submit'))->addStyle('display: none;')
+				(new CSubmitButton())->addClass(ZBX_STYLE_FORM_SUBMIT_HIDDEN)
 			])
 		]))->toString(),
 	'buttons' => [

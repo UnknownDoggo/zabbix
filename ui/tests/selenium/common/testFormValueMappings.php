@@ -1,45 +1,45 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CWebTest.php';
-require_once dirname(__FILE__).'/../behaviors/CMessageBehavior.php';
-require_once dirname(__FILE__).'/../traits/TableTrait.php';
-require_once dirname(__FILE__).'/../../include/helpers/CDataHelper.php';
+
+require_once __DIR__.'/../../include/CWebTest.php';
+require_once __DIR__.'/../behaviors/CMessageBehavior.php';
+require_once __DIR__.'/../behaviors/CTableBehavior.php';
+require_once __DIR__.'/../behaviors/CDatatableBehavior.php';
+require_once __DIR__.'/../../include/helpers/CDataHelper.php';
 
 /**
  * Base class for Value mappings function tests.
+ *
+ * @onBefore prepareData
  */
 class testFormValueMappings extends CWebTest {
 
-	use TableTrait;
-
 	/**
-	 * Attach MessageBehavior to the test.
+	 * Attach MessageBehavior, TableBehavior and DatatableBehavior to the test.
 	 *
 	 * @return array
 	 */
 	public function getBehaviors() {
-		return [CMessageBehavior::class];
+		return [
+			CMessageBehavior::class,
+			CTableBehavior::class,
+			CDatatableBehavior::class
+		];
 	}
 
-	const HOSTID = 99134;	// ID of the host for valuemap update.
 	const TEMPLATEID = 40000;	// ID of the template for valuemap update.
 	const UPDATE_VALUEMAP1 = 'Valuemap for update 1';
 	const UPDATE_VALUEMAP2 = 'Valuemap for update 2';
@@ -48,8 +48,8 @@ class testFormValueMappings extends CWebTest {
 		[
 			'Name' => 'Valuemap for delete',
 			'Value' => "=1010101010101010101010101010101\n⇒\ndefault value1010101010101010101010101010101".
-					"\n424242424242424242424242424242424242424242424242\n⇒\nAnswer to the Ultimate Question of Life, ".
-					"Universe and Everything\n123458945-987653341\n⇒\nfrom 123458945 to 987653341\n…",
+				"\n424242424242424242424242424242424242424242424242\n⇒\nAnswer to the Ultimate Question of Life, ".
+				"Universe and Everything\n123458945-987653341\n⇒\nfrom 123458945 to 987653341\n…",
 			'Action' => 'Remove'
 		],
 		[
@@ -64,9 +64,13 @@ class testFormValueMappings extends CWebTest {
 		]
 	];
 
-	private static $previous_valuemap_name = self::UPDATE_VALUEMAP1;
+	protected static $previous_valuemap_name = self::UPDATE_VALUEMAP1;
+	protected static $previous_class = null;
+	protected static $hostids;
 
-	private static $previous_class = null;
+	public static function prepareData() {
+		self::$hostids = CDataHelper::get('HostAvailabilityWidget.hostids');
+	}
 
 	/**
 	 * Function that checks the layout of the Value mappings tab in Host or Template configuration forms.
@@ -78,13 +82,13 @@ class testFormValueMappings extends CWebTest {
 		$this->openValueMappingTab($source);
 
 		// Check value mapping table headers and content.
-		$table = $this->query('id:valuemap-table')->asTable()->one();
+		$table = $this->query('id', ($source === 'template' ? 'template-' : '').'valuemap-table')->asTable()->one();
 		$this->assertEquals(['Name', 'Value', 'Action'], $table->getHeadersText());
 		$this->assertTableData(self::EXISTING_VALUEMAPS, 'id:valuemap-formlist');
 
 		// Check value mapping configuration form layout.
 		$this->query('name:valuemap_add')->one()->click();
-		$dialog = COverlayDialogElement::find()->waitUntilReady()->one();
+		$dialog = COverlayDialogElement::find()->waitUntilReady()->all()->last();
 		$this->assertEquals('Value mapping', $dialog->getTitle());
 		$mapping_form = $dialog->getContent()->asForm();
 
@@ -93,26 +97,26 @@ class testFormValueMappings extends CWebTest {
 		$this->assertEquals('64', $mapping_form->query('id:name')->one()->getAttribute('maxlength'));
 
 		// Check mappings table layout.
-		$mappings_table = $mapping_form->query('id:mappings_table')->asTable()->one();
-		$this->assertEquals(['', 'Type', 'Value', '', 'Mapped to', 'Action', ''], $mappings_table->getHeadersText());
+		$mappings_table = $mapping_form->query('id:mappings-table')->asTable()->one();
+		$this->assertEquals(['', 'Type', 'Value', '', 'Mapped to', ''], $mappings_table->getHeadersText());
 		$row = $mappings_table->getRow(0);
 		foreach (['Value', 'Mapped to'] as $mapping_column) {
-			$mapping_field = $row->getColumn($mapping_column)->query('xpath:.//input')->one();
+			$mapping_field = $row->getColumn($mapping_column)->query('xpath:.//z-textarea-flexible')->one();
 			$this->assertEquals('64', $mapping_field->getAttribute('maxlength'));
 		}
 		$this->assertEquals(1, $row->query('xpath:.//td[text()="⇒"]')->all()->count());
 		$this->assertTrue($row->query('button:Remove')->one()->isClickable());
 
 		// Check types.
-		$value_column = $row->getColumn('Value')->query('xpath:.//input')->one();
-		$dropdown = $row->query('name:mappings[1][type]')->asDropdown()->one();
+		$value_column = $row->getColumn('Value')->query('xpath:.//z-textarea-flexible')->one();
+		$dropdown = $row->query('name:mappings[0][type]')->asDropdown()->one();
 		$types = ['equals', 'is greater than or equals', 'is less than or equals', 'in range', 'regexp', 'default'];
 		$this->assertEquals($types, $dropdown->getOptions()->asText());
 
 		foreach ($types as $type) {
 			$dropdown->select($type);
 			if ($type === 'default') {
-				$this->assertEquals('visibility-hidden', $value_column->getAttribute('class'));
+				$this->assertTrue($value_column->hasClass('visibility-hidden'));
 			}
 			else {
 				$placeholder = ($type === 'regexp') ? 'regexp' : 'value';
@@ -122,43 +126,42 @@ class testFormValueMappings extends CWebTest {
 
 		// Check that both overlay control buttons are clickable.
 		$this->assertEquals(2, $dialog->getFooter()->query('button', ['Add', 'Cancel'])->all()
-				->filter(new CElementFilter(CElementFilter::CLICKABLE))->count());
+				->filter(new CElementFilter(CElementFilter::CLICKABLE))->count()
+		);
+
+		$dialog->close();
+		COverlayDialogElement::find()->one()->close();
 	}
 
 	/**
-	 * Function that create clone and full clone of a host/template and verifies that value mappings were copied.
+	 * Creates a clone of a host/template and verifies that value mappings were copied.
 	 *
 	 * @param string $source	Entity (host or template) for which the scenario is executed.
 	 */
-	public function checkClone($source, $action = 'Clone') {
-		// Create a clone and or a full clone of an existing host/template with value mappings.
-		$form = $this->openValueMappingTab($source, true, false);
-		$this->query('button', $action)->one()->click();
-		$form->getField(ucfirst($source).' name')->fill($action.' Valuemap Test');
+	public function checkClone($source) {
+		// Create a clone of an existing host/template with value mappings.
+		$this->openValueMappingTab($source, true, false);
+		$this->query('button', 'Clone')->one()->click()->waitUntilNotVisible();
+		$form = COverlayDialogElement::find()->asForm()->waitUntilReady()->one();
+		$form->getField(ucfirst($source).' name')->fill('Clone Valuemap Test');
 		$form->submit();
 		$this->page->waitUntilReady();
 		$this->assertMessage(TEST_GOOD);
 
-		// Get the id of the created host/template clone.
-		$hostid = CDBHelper::getValue('SELECT hostid FROM hosts WHERE name='.zbx_dbstr($action.' Valuemap Test'));
+		// Host and template lists use different filter field names.
+		$filter_field = ($source === 'host') ? 'filter_host' : 'filter_name';
+		$this->page->open('zabbix.php?action='.$source.'.list&'.$filter_field.'='.urlencode('Clone Valuemap Test').
+				'&filter_set=1')->waitUntilReady();
 
-		// Check value mappings were copied correctly.
-		if ($source === 'host') {
-			$this->page->login()->open('zabbix.php?action=host.edit&hostid='.$hostid);
-			$cloned_form = $this->query('id:host-form')->asForm()->waitUntilVisible()->one();
-		}
-		else {
-			$this->page->open($source.'s.php?form=update&'.$source.'id='.$hostid);
-			$cloned_form = $this->query('name:'.$source.'sForm')->asForm()->waitUntilVisible()->one();
-		}
-
-		$cloned_form->selectTab('Value mapping');
+		$this->query('link', 'Clone Valuemap Test')->waitUntilClickable()->one()->click();
+		COverlayDialogElement::find()->asForm()->one()->waitUntilVisible()->selectTab('Value mapping');
 		$this->assertTableData(self::EXISTING_VALUEMAPS, 'id:valuemap-formlist');
+		COverlayDialogElement::find()->one()->close();
 	}
 
 	public function getValuemapData() {
 		return [
-			// Mapping type - default.
+			// #0 Mapping type - default.
 			[
 				[
 					'name' => 'default',
@@ -172,7 +175,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update of value mapping with multiple mappings and type equals.
+			// #1 Successful creation/update of value mapping with multiple mappings and type equals.
 			[
 				[
 					'name' => 'ABC!@#$%^&*()_+=[].абвгдеёжзāīōēūšķļ€‡Œ™£¥©µ¾ÆÖÕæƩƴƵɷʁΔβφψϾֆ۝ܫज',
@@ -208,7 +211,7 @@ class testFormValueMappings extends CWebTest {
 					'trim' => true
 				]
 			],
-			// Successful creation/update of value mapping with all available types.
+			// #2 Successful creation/update of value mapping with all available types.
 			[
 				[
 					'name' => 'all types together',
@@ -248,7 +251,7 @@ class testFormValueMappings extends CWebTest {
 					'screenshot_id' => 'ValuemapScreenshot1'
 				]
 			],
-			// Successful creation/update of value mapping with empty value field.
+			// #3 Successful creation/update of value mapping with empty value field.
 			[
 				[
 					'name' => 'Equals without value',
@@ -263,7 +266,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update of value mapping with type - is greater than or equals.
+			// #4 Successful creation/update of value mapping with type - is greater than or equals.
 			[
 				[
 					'name' => 'greater than or equals',
@@ -303,7 +306,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update of value mapping with type - is less than or equals.
+			// #5 Successful creation/update of value mapping with type - is less than or equals.
 			[
 				[
 					'name' => 'less than or equals',
@@ -343,7 +346,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update of value mapping with type - in range.
+			// #6 Successful creation/update of value mapping with type - in range.
 			[
 				[
 					'name' => 'in range',
@@ -388,7 +391,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update of value mapping with type - regex.
+			// #7 Successful creation/update of value mapping with type - regex.
 			[
 				[
 					'name' => 'regex',
@@ -413,7 +416,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Successful creation/update for value mapping with same value and types - in range, equals.
+			// #8 Successful creation/update for value mapping with same value and types - in range, equals.
 			[
 				[
 					'name' => 'equals and inrange',
@@ -433,7 +436,7 @@ class testFormValueMappings extends CWebTest {
 					]
 				]
 			],
-			// Value mapping with duplicate name.
+			// #9 Value mapping with duplicate name.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -454,10 +457,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => '3'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Name": value (Valuemap for delete) already exists.'
+					'inline_error' => [
+						'Name' => 'Given valuemap name is already taken.'
+					]
 				]
 			],
-			// Empty name.
+			// #10 Empty name.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -470,19 +475,23 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => '1'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Name": cannot be empty.'
+					'inline_error' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// No mappings.
+			// #11 No mappings.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Valuemap without mappings',
 					'remove_all' => true,
-					'error_details' => 'Incorrect value for field "Mappings": cannot be empty.'
+					'inline_error' => [
+						'xpath:.//div[@data-field-name="mappings"]' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Empty Mapped to field.
+			// #12 Empty Mapped to field.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -503,10 +512,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_{index}_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Space in Name field.
+			// #13 Space in Name field.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -519,10 +530,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => '1'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Name": cannot be empty.'
+					'inline_error' => [
+						'Name' => 'This field cannot be empty.'
+					]
 				]
 			],
-			// Space in mapped to field.
+			// #14 Space in mapped to field.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -543,10 +556,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => '    '
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_{index}_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Duplicate value field values within the same value mapping.
+			// #15 Duplicate value field values within the same value mapping.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -567,10 +582,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => '1 again'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": value (one) already exists.'
+					'inline_error' => [
+						'name:mappings[{index}][type]' => 'Mapping type and value combination is not unique.'
+					]
 				]
 			],
-			// Text in value field with type - is greater than or equals.
+			// #16 Text in value field with type - is greater than or equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -584,10 +601,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'this is text'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": a floating point value is expected.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This value is not a valid floating-point value.'
+					]
 				]
 			],
-			// Text in value field with type - is less than or equals.
+			// #17 Text in value field with type - is less than or equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -601,10 +620,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'this is text'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": a floating point value is expected.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This value is not a valid floating-point value.'
+					]
 				]
 			],
-			// Incorrect value for - in range.
+			// #18 Incorrect value for - in range.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -613,15 +634,17 @@ class testFormValueMappings extends CWebTest {
 						[
 							'action' => USER_ACTION_UPDATE,
 							'index' => 0,
-							'type' => 'in range',
 							'value' => '5---10',
+							'type' => 'in range',
 							'newvalue' => 'several symbols'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": invalid range expression.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: Invalid range.'
+					]
 				]
 			],
-			// Empty value for - regexp.
+			// #19 Empty value for - regexp.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -635,10 +658,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'empty value'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty value for - is greater or equals.
+			// #20 Empty value for - is greater or equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -652,10 +677,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'empty value'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": a floating point value is expected.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty value for - is less than or equals.
+			// #21 Empty value for - is less than or equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -669,10 +696,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'empty value'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": a floating point value is expected.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty value for - in range.
+			// #22 Empty value for - in range.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -686,10 +715,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'empty value'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_value' => 'Value: This field cannot be empty.'
+					]
 				]
 			],
-			// 2 empty values for - equals.
+			// #23 Two empty values for - equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -708,10 +739,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => 'empty value2'
 						]
 					],
-					'error_details' => 'Incorrect value for field "Value": value () already exists.'
+					'inline_error' => [
+						'name:mappings[{index}][type]' => 'Mapping type and value combination is not unique.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - in range.
+			// #24 Empty "Mapped to" field for type - in range.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -720,15 +753,17 @@ class testFormValueMappings extends CWebTest {
 						[
 							'action' => USER_ACTION_UPDATE,
 							'index' => 0,
-							'type' => 'in range',
 							'value' => '1-10',
+							'type' => 'in range',
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - less.
+			// #25 Empty "Mapped to" field for type - less.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -737,15 +772,17 @@ class testFormValueMappings extends CWebTest {
 						[
 							'action' => USER_ACTION_UPDATE,
 							'index' => 0,
-							'type' => 'is less than or equals',
 							'value' => '11',
+							'type' => 'is less than or equals',
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - greater.
+			// #26 Empty "Mapped to" field for type - greater.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -754,15 +791,17 @@ class testFormValueMappings extends CWebTest {
 						[
 							'action' => USER_ACTION_UPDATE,
 							'index' => 0,
-							'type' => 'is greater than or equals',
 							'value' => '12',
+							'type' => 'is greater than or equals',
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - regex.
+			// #27 Empty "Mapped to" field for type - regex.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -771,15 +810,17 @@ class testFormValueMappings extends CWebTest {
 						[
 							'action' => USER_ACTION_UPDATE,
 							'index' => 0,
-							'type' => 'regexp',
 							'value' => 'regexp',
+							'type' => 'regexp',
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - equals.
+			// #28 Empty "Mapped to" field for type - equals.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -793,10 +834,12 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			],
-			// Empty "Mapped to" field for type - default.
+			// #29 Empty "Mapped to" field for type - default.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -809,7 +852,9 @@ class testFormValueMappings extends CWebTest {
 							'newvalue' => ''
 						]
 					],
-					'error_details' => 'Incorrect value for field "Mapped to": cannot be empty.'
+					'inline_error' => [
+						'id:mappings_0_newvalue' => 'Mapped to: This field cannot be empty.'
+					]
 				]
 			]
 		];
@@ -840,13 +885,14 @@ class testFormValueMappings extends CWebTest {
 		$this->query(($action === 'create')
 			? 'name:valuemap_add'
 			: 'link:'.($expected === TEST_GOOD ? self::$previous_valuemap_name : self::UPDATE_VALUEMAP2
-		))->one()->click();
+		))->WaitUntilVisible()->one()->click();
 
 		// Fill in the name of the valuemap and the parameters of its mappings.
-		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->one();
-		$dialog->query('xpath:.//input[@id="name"]')->one()->fill($data['name']);
+		$dialog = COverlayDialogElement::find()->waitUntilVisible()->all()->last();
+		$form = $dialog->asForm();
+		$form->query('xpath:.//input[@id="name"]')->one()->fill($data['name']);
 
-		$mapping_table = $dialog->query('id:mappings_table')->asMultifieldTable()->one();
+		$mapping_table = $form->query('id:mappings-table')->asMultifieldTable()->one();
 		if (CTestArrayHelper::get($data, 'remove_all')) {
 			$mapping_table->clear();
 		}
@@ -857,15 +903,36 @@ class testFormValueMappings extends CWebTest {
 			}
 			$mapping_table->fill($data['mappings']);
 		}
-		$dialog->submit();
+
+		if (array_key_exists('inline_error', $data)) {
+			$this->page->removeFocus();
+		}
+		else {
+			$form->submit();
+			$this->page->waitUntilReady();
+		}
 
 		if ($expected === TEST_BAD) {
-			$this->assertMessage(TEST_BAD, null, $data['error_details']);
+			$inline_error = [];
+			$key = array_key_first($data['inline_error']);
+
+			if (str_contains($key, '{index}')) {
+				// Mapping index is by 1 less than the count of mappings.
+				$new_key = str_replace('{index}', $mapping_table->getRows()->count() - 1, $key);
+				$inline_error[$new_key] = $data['inline_error'][$key];
+			}
+			else {
+				$inline_error = $data['inline_error'];
+			}
+
+			$this->assertInlineError($form, $inline_error);
 			$this->assertEquals($old_hash, CDBHelper::getHash($sql));
+
+			$dialog->close();
 		}
 		else {
 			// Save the configuration of the host with created/updated value mappings.
-			COverlayDialogElement::ensureNotPresent();
+			$dialog->waitUntilNotVisible();
 			$this->query('button:Update')->waitUntilClickable()->one()->click();
 			$this->assertMessage(TEST_GOOD, ucfirst($source).' updated');
 
@@ -879,12 +946,34 @@ class testFormValueMappings extends CWebTest {
 			$this->query('link', $data['name'])->one()->click();
 			$this->checkMappings($data);
 
-			// Check the screenshot of the whole value mappings tab.
+			// Check the value mapping screenshots after form submit.
 			if (CTestArrayHelper::get($data, 'screenshot_id')) {
+				// Viewport update needed because of an unexpected viewport shift.
+				$this->page->removeFocus();
+				$this->page->updateViewport();
+
+				$mapping_dialog = COverlayDialogElement::find()->waitUntilReady()->all()->last();
+
+				// Take a screenshot to test draggable object position in overlay dialog.
+				if ($action === 'create') {
+					$this->assertScreenshot($mapping_dialog->query('id:mappings-table')->asMultifieldTable()->one(),
+							'Value mappings popup'.$data['screenshot_id']
+					);
+				}
+
+				$mapping_dialog->close();
+				COverlayDialogElement::find()->one()->close();
+
+				// Check the screenshot of the whole value mappings tab.
 				$this->openValueMappingTab($source, false);
-				$this->assertScreenshot($this->query('id:valuemap-tab')->one(), $action.$data['screenshot_id']);
+				$this->assertScreenshot($this->query('id', ($source === 'template' ? 'template-' : '').'valuemap-table')->one(),
+						$action.$source.$data['screenshot_id']
+				);
+				COverlayDialogElement::find()->one()->close();
 			}
 		}
+
+		COverlayDialogElement::closeAll();
 	}
 
 	/**
@@ -893,8 +982,8 @@ class testFormValueMappings extends CWebTest {
 	 * @param array $data	Data provider
 	 */
 	private function checkMappings($data) {
-		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->one();
-		$mappings_table = $this->query('id:mappings_table')->asMultifieldTable()->one();
+		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->all()->last();
+		$mappings_table = $this->query('id:mappings-table')->asMultifieldTable()->one();
 
 		// Check value mapping name.
 		$this->assertEquals($data['name'], $dialog->query('xpath:.//input[@id="name"]')->one()->getValue());
@@ -923,19 +1012,21 @@ class testFormValueMappings extends CWebTest {
 	 * @return CFormElement|CFluidFormElemt    $form
 	 */
 	private function openValueMappingTab($source, $login = true, $open_tab = true) {
-		$sourceid = ($source === 'host') ? self::HOSTID : self::TEMPLATEID;
+		$sourceid = ($source === 'host') ? self::$hostids['Available host'] : self::TEMPLATEID;
 		if ($login) {
 			$this->page->login();
 		}
 
-		if ($source === 'host') {
-			$this->page->open('zabbix.php?action=host.edit&hostid='.$sourceid);
-			$form = $this->query('id:host-form')->asForm()->waitUntilVisible()->one();
-		}
-		else {
-			$this->page->open($source.'s.php?form=update&'.$source.'id='.$sourceid);
-			$form = $this->query('name:'.$source.'sForm')->asForm()->waitUntilVisible()->one();
-		}
+		// Get name of host or template for the filter and link.
+		$name = CDBHelper::getValue('SELECT host FROM hosts WHERE hostid='.zbx_dbstr($sourceid));
+
+		// Host and template lists use different filter field names.
+		$filter_field = ($source === 'host') ? 'filter_host' : 'filter_name';
+		$this->page->open('zabbix.php?action='.$source.'.list&'.$filter_field.'='.urlencode($name).'&filter_set=1')
+				->waitUntilReady();
+		$this->query('class:datatable-scrollable')->asDatatable()->one()->waitUntilReady();
+		$this->query('link', $name)->one()->scrollIntoView(50)->click();
+		$form = COverlayDialogElement::find()->asForm()->one()->waitUntilVisible();
 
 		if ($open_tab) {
 			$form->selectTab('Value mapping');
@@ -957,9 +1048,10 @@ class testFormValueMappings extends CWebTest {
 		// Open configuration of a value mapping and save it without making any changes.
 		$this->openValueMappingTab($source);
 		$this->query('link', self::UPDATE_VALUEMAP1)->one()->click();
-		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->one();
+		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->all()->last();
 		$dialog->submit()->waitUntilNotVisible();
 		$this->query('button:Update')->one()->click();
+		$this->assertMessage(TEST_GOOD, ucfirst($source).' updated');
 
 		// Check that no changes occurred in the database.
 		$this->assertEquals($old_hash, CDBHelper::getHash($sql));
@@ -999,9 +1091,9 @@ class testFormValueMappings extends CWebTest {
 		// Open value mapping configuration and update its fields.
 		$this->openValueMappingTab($source);
 		$this->query('link', self::UPDATE_VALUEMAP2)->one()->click();
-		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->one();
+		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->all()->last();
 		$dialog->query('xpath:.//input[@id="name"]')->one()->fill($fields['name']);
-		$dialog->query('id:mappings_table')->asMultifieldTable()->one()->fill($fields['mappings']);
+		$dialog->query('id:mappings-table')->asMultifieldTable()->one()->fill($fields['mappings']);
 
 		// Submit the value mapping configuration dialog, but Cancel the update of the host/template.
 		$dialog->submit()->waitUntilNotVisible();
@@ -1024,7 +1116,7 @@ class testFormValueMappings extends CWebTest {
 
 		// Delete the value mapping.
 		$form = $this->openValueMappingTab($source);
-		$table = $this->query('id:valuemap-table')->asTable()->one();
+		$table = $this->query('id', ($source === 'template' ? 'template-' : '').'valuemap-table')->asTable()->one();
 		$table->findRow('Name', self::DELETE_VALUEMAP)->query('button:Remove')->one()->click();
 		$form->submit();
 
@@ -1062,32 +1154,67 @@ class testFormValueMappings extends CWebTest {
 			]
 		];
 
-		// Create a new host/template, populate the hosthroup but leave the name empty.
-		if ($source === 'host') {
-			$this->page->login()->open('zabbix.php?action=host.edit');
-			$form = $this->query('id:host-form')->asForm()->waitUntilVisible()->one();
-		}
-		else {
-			$this->page->login()->open($source.'s.php?form=create');
-			$form = $this->query('name:'.$source.'sForm')->asForm()->waitUntilVisible()->one();
-		}
+		// Create a new host/template, populate the hosthgroup but leave the name empty.
+		$this->page->login()->open('zabbix.php?action='.$source.'.list')->waitUntilReady();
+		$this->query('button:Create '.$source)->one()->click();
 
-		$form->getField('Groups')->fill('Discovered hosts');
+		$form = COverlayDialogElement::find()->asForm()->one()->waitUntilVisible();
+		$form->getField(ucfirst($source).' name')->fill('Test '.$source);
 
 		// Open value mappings tab and add a value mapping.
 		$form->selectTab('Value mapping');
 		$this->query('name:valuemap_add')->one()->click();
-		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->one();
+		$dialog = COverlayDialogElement::find()->asForm()->waitUntilVisible()->all()->last();
 		$dialog->query('xpath:.//input[@id="name"]')->one()->fill($valuemap['name']);
-		$dialog->query('id:mappings_table')->asMultifieldTable()->one()->fill($valuemap['mappings']);
+		$dialog->query('id:mappings-table')->asMultifieldTable()->one()->fill($valuemap['mappings']);
 		$dialog->submit()->waitUntilNotVisible();
 
 		// Submit host/template configuration and wait for the error message to appear.
 		$form->submit();
 		$this->page->waitUntilReady();
-		$this->assertMessage(TEST_BAD);
+
+		if ($source === 'host') {
+			$errors = [
+				'Host name' => 'This object already exists.',
+				'Host groups' => 'This field cannot be empty.'
+			];
+			$this->assertInlineError($form, $errors);
+			$this->assertEquals('Host', $form->getSelectedTab());
+			$form->selectTab('Value mapping');
+		}
+		else {
+			$this->assertInlineError($form, ['Template groups' => 'This field cannot be empty.']);
+			$form->selectTab('Value mapping');
+		}
 
 		// Check that the value mapping data is still populated.
 		$this->assertTableData($reference_valuemaps, 'id:valuemap-formlist');
+
+		COverlayDialogElement::find()->one()->close();
+	}
+
+	/**
+	 * Function that checks a screenshot of draggable element in hosts/templates value mapping while mass updating.
+	 *
+	 * @param string $source		Entity (hosts or templates) for which the scenario is executed.
+	 */
+	public function checkMassValuemappingScreenshot($source) {
+		$this->page->login()->open(($source === 'hosts') ? 'zabbix.php?action=host.list' : 'zabbix.php?action=template.list')->waitUntilReady();
+		$this->selectDatatableRows();
+		$this->query('button:Mass update')->one()->click();
+		$update_form = COverlayDialogElement::find()->asForm()->one()->waitUntilReady();
+		$update_form->selectTab('Value mapping');
+		$update_form->query('id:visible_valuemaps')->asCheckbox()->one()->check();
+		$update_form->query('id:valuemap_add')->one()->click();
+		$mapping_form = COverlayDialogElement::find()->all()->last()->waitUntilReady()->asForm();
+
+		// Take a screenshot to test draggable object position of value mapping field.
+		$this->page->removeFocus();
+
+		// It is necessary because of unexpected viewport shift.
+		$this->page->updateViewport();
+		$this->assertScreenshot($mapping_form->query('id:mappings-table')->waitUntilVisible()->one(), 'Value mapping mass update');
+
+		COverlayDialogElement::closeAll();
 	}
 }

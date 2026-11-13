@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -23,50 +18,44 @@ class CControllerTokenUpdate extends CController {
 
 	protected function init(): void {
 		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
 	}
 
-	protected function checkInput() {
-		$fields = [
-			'tokenid'       => 'db token.tokenid|required|fatal',
-			'name'          => 'db token.name|required|not_empty',
-			'description'   => 'db token.description',
-			'expires_state' => 'in 0,1|required',
-			'expires_at'    => 'abs_time',
-			'status'        => 'db token.status|required|in '.ZBX_AUTH_TOKEN_ENABLED.','.ZBX_AUTH_TOKEN_DISABLED,
-			'admin_mode'    => 'required|in 0,1',
-			'regenerate'    => 'in 1'
+	public static function getValidationRules(): array {
+		$api_uniq = [
+			['token.get', ['name' => '{name}', 'userid' => '{userid}'], 'tokenid']
 		];
 
-		$ret = $this->validateInput($fields);
+		return ['object', 'api_uniq' => $api_uniq, 'fields' => [
+			'userid' => ['db users.userid', 'required'],
+			'tokenid' => ['db token.tokenid', 'required'],
+			'name' => ['db token.name', 'required', 'not_empty'],
+			'description' => ['db token.description'],
+			'admin_mode' => ['boolean'],
+			'expires_state' => ['boolean'],
+			'regenerate' => ['integer', 'in' => [1]],
+			'expires_at' => ['string', 'required', 'not_empty',
+				'use' => [CAbsoluteTimeValidator::class, ['min' => 0, 'max' => ZBX_MAX_DATE]],
+				'when' => ['expires_state', 'in' => [1]]
+			],
+			'status' => ['db token.status', 'required', 'in' => [ZBX_AUTH_TOKEN_ENABLED, ZBX_AUTH_TOKEN_DISABLED]]
+		]];
+	}
 
-		if ($ret) {
-			$fields = [];
-
-			if ($this->getInput('expires_state') == 1) {
-				$fields['expires_at'] = 'required';
-			}
-
-			if ($fields) {
-				$validator = new CNewValidator($this->getInputAll(), $fields);
-
-				foreach ($validator->getAllErrors() as $error) {
-					info($error);
-				}
-
-				if ($validator->isErrorFatal() || $validator->isError()) {
-					$ret = false;
-				}
-			}
-		}
+	protected function checkInput(): bool {
+		$ret = $this->validateInput(self::getValidationRules());
 
 		if (!$ret) {
+			$form_errors = $this->getValidationError();
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'title' => _('Cannot update API token'),
+					'messages' => array_column(get_and_clear_messages(), 'message')
+				]];
+
 			$this->setResponse(
-				new CControllerResponseData(['main_block' => json_encode([
-					'error' => [
-						'title' => _('Cannot update API token'),
-						'messages' => array_column(get_and_clear_messages(), 'message')
-					]
-				])])
+				new CControllerResponseData(['main_block' => json_encode($response)])
 			);
 		}
 

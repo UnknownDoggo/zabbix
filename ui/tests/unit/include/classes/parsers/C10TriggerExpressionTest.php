@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -1864,27 +1859,27 @@ class C10TriggerExpressionTest extends TestCase {
 			],
 			['{host:key["{$USERMACRO1}",{$USERMACRO2}].str()}', null, true],
 			['{host:key[].str("{$USERMACRO1}",{$USERMACRO2})}', null, true],
-			['{host:key["{HOSTNAME1}",{HOSTNAME2}].str()}', null, true],
+			['{host:key["{HOST.HOST1}",{HOST.HOST2}].str()}', null, true],
 			[
-				'{host:key[].str("{HOSTNAME1}",{HOSTNAME2})}',
+				'{host:key[].str("{HOST.HOST1}",{HOST.HOST2})}',
 				[
 					'error' => '',
 					'expressions' => [
 						0 => [
-							'expression' => '{host:key[].str("{HOSTNAME1}",{HOSTNAME2})}',
+							'expression' => '{host:key[].str("{HOST.HOST1}",{HOST.HOST2})}',
 							'pos' => 0,
 							'host' => 'host',
 							'item' => 'key[]',
-							'function' => 'str("{HOSTNAME1}",{HOSTNAME2})',
+							'function' => 'str("{HOST.HOST1}",{HOST.HOST2})',
 							'functionName' => 'str',
-							'functionParam' => '"{HOSTNAME1}",{HOSTNAME2}',
-							'functionParamList' => ['{HOSTNAME1}', '{HOSTNAME2}']
+							'functionParam' => '"{HOST.HOST1}",{HOST.HOST2}',
+							'functionParamList' => ['{HOST.HOST1}', '{HOST.HOST2}']
 						]
 					]
 				],
 				true
 			],
-			['{host:key[].count(1,"{HOSTNAME1}",{HOSTNAME2})}', null, true],
+			['{host:key[].count(1,"{HOST.HOST1}",{HOST.HOST2})}', null, true],
 			['{host:key[].str()}=-1=--2=---3=----4=-----5', null, false],
 			['{host:key[].str()}=-1=--2=---3=----4=-----5', null, false],
 			['{host:key[].str()}=-1', null, true],
@@ -1900,10 +1895,10 @@ class C10TriggerExpressionTest extends TestCase {
 			['{host:key[{$USERMACRO1},"{$USERMACRO2}abc"].str()}', null, true],
 			['{host:key[].count(1,{$USERMACRO1}abc,"{$USERMACRO2}")}', null, true],
 			['{host:key[].count(1,{$USERMACRO1},"{$USERMACRO2}abc")}', null, true],
-			['{host:key[abc{HOSTNAME1},"{HOSTNAME2}"].str()}', null, true],
-			['{host:key[{HOSTNAME1},"abc{HOSTNAME2}"].str()}', null, true],
-			['{host:key[].count(1,abc{HOSTNAME1},"{HOSTNAME2}")}', null, true],
-			['{host:key[].count(1,{HOSTNAME1},"abc{HOSTNAME2}")}', null, true],
+			['{host:key[abc{HOST.HOST1},"{HOST.HOST2}"].str()}', null, true],
+			['{host:key[{HOST.HOST1},"abc{HOST.HOST2}"].str()}', null, true],
+			['{host:key[].count(1,abc{HOST.HOST1},"{HOST.HOST2}")}', null, true],
+			['{host:key[].count(1,{HOST.HOST1},"abc{HOST.HOST2}")}', null, true],
 			['{host:key[{host:key.last(0)},"{host:key.last(0)}"].str()}', null, true],
 			['{host:key[].count(1,{host:key.last(0)},"{host:key.last(0)}")}', null, false],
 			['{host:key[].count(1,{host:key.last(0},"{host:key.last(0)}")}', null, true],

@@ -1,44 +1,122 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
-
 
 /**
  * @var CView $this
  */
 ?>
 
-<script type="text/x-jquery-tmpl" id="filter-tag-row-tmpl">
-	<?= CTagFilterFieldHelper::getTemplate() ?>
-</script>
-
 <script>
-	const view = {
-		applied_filter_groupids: [],
+	const view = new class {
+		#applied_filter_groupids = [];
+		#datatable = null;
+		#csrf_token = null;
 
-		init({applied_filter_groupids}) {
-			this.applied_filter_groupids = applied_filter_groupids;
+		init({
+			applied_filter_groupids,
+			csrf_token,
+			default_sort_field,
+			default_sort_order,
+			filter,
+			page,
+			sort_field,
+			sort_order,
+			storage_idx,
+			user_configs
+		}) {
+			this.#applied_filter_groupids = applied_filter_groupids;
+			this.#csrf_token = csrf_token;
 
-			this.initFilter();
-		},
+			this.#initFilter();
+			this.#initEvents();
+			this.#initPopupListeners();
+			this.#initDataTable({filter, page, default_sort_field, default_sort_order, sort_field, sort_order,
+				storage_idx, user_configs});
+		}
 
-		initFilter() {
+		enable(target, parameters, callback) {
+			const url = zabbixUrl({action: 'host.enable'});
+
+			target.classList.add(ZBX_STYLE_LOADING);
+
+			this.postAction(url, parameters)
+				.then(response => callback(response))
+				.catch(() => {
+					target.classList.remove(ZBX_STYLE_LOADING);
+					target.blur();
+				});
+		}
+
+		disable(target, parameters, callback) {
+			const url = zabbixUrl({action: 'host.disable'});
+
+			target.classList.add(ZBX_STYLE_LOADING);
+
+			this.postAction(url, parameters)
+				.then(response => callback(response))
+				.catch(() => {
+					target.classList.remove(ZBX_STYLE_LOADING);
+					target.blur();
+				});
+		}
+
+		postAction(url, data) {
+			return fetch(url, {
+				method: 'POST',
+				headers: {'Content-Type': 'application/json'},
+				body: JSON.stringify({
+					...data,
+					[CSRF_TOKEN_NAME]: this.#csrf_token
+				})
+			})
+				.then(response => response.json())
+				.catch(error => {
+					clearMessages();
+
+					const message_box = makeMessageBox('bad', [<?= json_encode(_('Unexpected server error.')); ?>]);
+
+					addMessage(message_box);
+
+					throw error;
+				});
+		}
+
+		reload(result) {
+			if ('error' in result) {
+				if ('title' in result.error) {
+					postMessageError(result.error.title);
+				}
+
+				postMessageDetails('error', result.error.messages);
+
+				uncheckTableRows('hosts', result.keepids ?? []);
+			}
+			else if ('success' in result) {
+				postMessageOk(result.success.title);
+
+				if ('messages' in result.success) {
+					postMessageDetails('success', result.success.messages);
+				}
+
+				uncheckTableRows('hosts');
+			}
+
+			location.reload();
+		}
+
+		#initFilter() {
 			$('#filter-tags')
 				.dynamicRows({template: '#filter-tag-row-tmpl'})
 				.on('afteradd.dynamicRows', function () {
@@ -51,129 +129,806 @@
 				new CTagFilterItem(row);
 			});
 
-			$('#filter_monitored_by').on('change', function() {
-				const filter_monitored_by = $('input[name=filter_monitored_by]:checked').val();
+			$('#filter_monitored_by')
+				.on('change', function () {
+					const filter_monitored_by = $('input[name=filter_monitored_by]:checked').val();
 
-				if (filter_monitored_by == <?= ZBX_MONITORED_BY_PROXY ?>) {
-					$('#filter_proxyids_').multiSelect('enable');
-				}
-				else {
-					$('#filter_proxyids_').multiSelect('disable');
-				}
-			});
-		},
+					for (const field of document.querySelectorAll('.js-filter-proxyids')) {
+						field.style.display = filter_monitored_by == <?= ZBX_MONITORED_BY_PROXY ?> ? '' : 'none';
+					}
 
-		createHost() {
-			const host_data = this.applied_filter_groupids
-				? {groupids: this.applied_filter_groupids}
-				: {};
+					$('#filter_proxyids_').multiSelect(
+						filter_monitored_by == <?= ZBX_MONITORED_BY_PROXY ?> ? 'enable' : 'disable'
+					);
 
-			this.openHostPopup(host_data);
-		},
+					for (const field of document.querySelectorAll('.js-filter-proxy-groupids')) {
+						field.style.display = filter_monitored_by == <?= ZBX_MONITORED_BY_PROXY_GROUP ?> ? '' : 'none';
+					}
 
-		editHost(e, hostid) {
-			e.preventDefault();
-			const host_data = {hostid};
+					$('#filter_proxy_groupids_').multiSelect(
+						filter_monitored_by == <?= ZBX_MONITORED_BY_PROXY_GROUP ?> ? 'enable' : 'disable'
+					);
+				})
+				.trigger('change');
+		}
 
-			this.openHostPopup(host_data);
-		},
-
-		openHostPopup(host_data) {
-			const original_url = location.href;
-			const overlay = PopUp('popup.host.edit', host_data, {
-				dialogueid: 'host_edit',
-				dialogue_class: 'modal-popup-large',
-				prevent_navigation: true
+		#initEvents() {
+			document.querySelector('.js-host-wizard').addEventListener('click', () => {
+				ZABBIX.PopupManager.open('host.wizard.edit');
 			});
 
-			overlay.$dialogue[0].addEventListener('dialogue.create', this.events.hostSuccess, {once: true});
-			overlay.$dialogue[0].addEventListener('dialogue.update', this.events.hostSuccess, {once: true});
-			overlay.$dialogue[0].addEventListener('dialogue.delete', this.events.hostDelete, {once: true});
-			overlay.$dialogue[0].addEventListener('overlay.close', () => {
-				history.replaceState({}, '', original_url);
-			}, {once: true});
-		},
+			document.querySelector('.js-create-host').addEventListener('click', () => {
+				ZABBIX.PopupManager.open('host.edit', {groupids: this.#applied_filter_groupids});
+			});
+
+			const form = document.forms['hosts'];
+
+			form.querySelector('.js-massenable-host').addEventListener('click', e => {
+				const hostids = Object.keys(chkbxRange.getSelectedIds());
+
+				const message = hostids.length > 1
+					? <?= json_encode(_('Enable selected hosts?')); ?>
+					: <?= json_encode(_('Enable selected host?')); ?>;
+
+				if (window.confirm(message)) {
+					this.enable(e.target, {hostids}, this.reload);
+				}
+			});
+
+			form.querySelector('.js-massdisable-host').addEventListener('click', e => {
+				const hostids = Object.keys(chkbxRange.getSelectedIds());
+
+				const message = hostids.length > 1
+					? <?= json_encode(_('Disable selected hosts?')); ?>
+					: <?= json_encode(_('Disable selected host?')); ?>;
+
+				if (window.confirm(message)) {
+					this.disable(e.target, {hostids}, this.reload);
+				}
+			});
+
+			form.querySelector('.js-massupdate-host').addEventListener('click', e => {
+				const overlay = openMassupdatePopup('popup.massupdate.host', {
+					[CSRF_TOKEN_NAME]: this.#csrf_token
+				}, {
+					dialogue_class: 'modal-popup-static',
+					trigger_element: e.target
+				})
+
+				overlay.$dialogue[0].addEventListener('dialogue.submit', e => {
+					chkbxRange.clearSelectedOnFilterChange();
+
+					this.reload({success: e.detail});
+				});
+			});
+
+			form.querySelector('.js-massdelete-host').addEventListener('click', e => {
+				this.massDeleteHosts(e.target);
+			});
+		}
+
+		#initPopupListeners() {
+			ZABBIX.EventHub.subscribe({
+				require: {
+					context: CPopupManager.EVENT_CONTEXT,
+					event: CPopupManagerEvent.EVENT_SUBMIT
+				},
+				callback: () => uncheckTableRows('hosts')
+			});
+
+			ZABBIX.EventHub.subscribe({
+				require: {
+					context: CPopupManager.EVENT_CONTEXT,
+					event: CPopupManagerEvent.EVENT_SUBMIT,
+					action: 'host.wizard.edit'
+				},
+				callback: ({data, event}) => {
+					if (data.submit.redirect_latest) {
+						const url = zabbixUrl({
+							action: 'latest.view',
+							hostids: [data.submit.hostid],
+							filter_set: 1
+						});
+
+						event.setRedirectUrl(url);
+					}
+				}
+			});
+		}
+
+		#initDataTable({filter, page, default_sort_field, default_sort_order, sort_field, sort_order, storage_idx,
+				user_configs}) {
+
+			const data_provider_url = zabbixUrl({
+				action: 'host.list.data',
+				[CSRF_TOKEN_NAME]: this.#csrf_token
+			});
+
+			const data_provider = new CDefaultDataProvider(data_provider_url);
+
+			this.#datatable = new CDataTable(document.getElementById('datatable-hosts'), data_provider)
+				.setColumns([
+					new CDataTableColumn('name', <?= json_encode(_('Name')); ?>)
+						.setFields(['hostid', 'name', 'discovery', 'flags', 'maintenance', 'status', 'discoveryData',
+							'discoveryRule', 'maintenanceid', 'maintenance_type', 'maintenance_status'])
+						.setRenderer('name')
+						.setSortable(true)
+						.setTogglable(false)
+						.setWidth('auto'),
+					new CDataTableColumn('items', <?= json_encode(_('Items')); ?>)
+						.setFields(['hostid', 'items'])
+						.setRenderer('items'),
+					new CDataTableColumn('triggers', <?= json_encode(_('Triggers')); ?>)
+						.setFields(['hostid', 'triggers'])
+						.setRenderer('triggers'),
+					new CDataTableColumn('graphs', <?= json_encode(_('Graphs')); ?>)
+						.setFields(['hostid', 'graphs'])
+						.setRenderer('graphs'),
+					new CDataTableColumn('discovery', <?= json_encode(_('Discovery')); ?>)
+						.setFields(['hostid', 'discoveryRules'])
+						.setRenderer('discovery'),
+					new CDataTableColumn('web', <?= json_encode(_('Web')); ?>)
+						.setFields(['hostid', 'httpTests'])
+						.setRenderer('web'),
+					new CDataTableColumn('interface', <?= json_encode(_('Interface')); ?>)
+						.setFields(['interface'])
+						.setRenderer('interface'),
+					new CDataTableColumn('proxy', <?= json_encode(_('Proxy')); ?>)
+						.setFields(['monitored_by', 'proxyid', 'proxy_groupid', 'assigned_proxyid', 'proxy',
+							'proxy_group', 'assigned_proxy'])
+						.setRenderer('proxy'),
+					new CDataTableColumn('templates', <?= json_encode(_('Templates')); ?>)
+						.setFields(['templates', 'parentTemplates'])
+						.setRenderer('templates'),
+					new CDataTableColumn('status', <?= json_encode(_('Status')); ?>)
+						.setFields(['hostid', 'status', 'disabled_by_lld', 'disable_source', 'flags',
+							'maintenance_status', 'discoveryData'])
+						.setRenderer('status')
+						.setSortable(true),
+					new CDataTableColumn('availability', <?= json_encode(_('Availability')); ?>)
+						.setFields(['availability', 'active_available']),
+					new CDataTableColumn('encryption', <?= json_encode(_('Agent encryption')); ?>)
+						.setFields(['tls_accept', 'tls_connect'])
+						.setRenderer('encryption'),
+					new CDataTableColumn('info', <?= json_encode(_('Info')); ?>)
+						.setFields(['info_icons'])
+						.setRenderer('info'),
+					new CDataTableColumnTags('tags', <?= json_encode(_('Tags')); ?>),
+					new CDataTableColumnTagValue('tagvalue', <?= json_encode(_('Tag value')); ?>),
+					new CDataTableColumnCustomText('custom_text', <?= json_encode(_('Custom text')); ?>)
+				])
+				.setPage(page)
+				.setFilter(filter)
+				.setSelectable('hosts', 'hostids', ['hostid', 'data_actions'])
+				.setDefaultSortField(default_sort_field)
+				.setDefaultSortOrder(default_sort_order)
+				.setSortField(sort_field)
+				.setSortOrder(sort_order)
+				.setStorageIdx(storage_idx)
+				.setStickyHeader(true)
+				.setStickyFooter(true)
+				.setCellRenderer(CDataTableColumn.CHECKBOX, ({column, cell_data, cell}) => {
+					const [object_id, data_actions] = cell_data;
+
+					if (!object_id) {
+						return;
+					}
+
+					const input_id = `${column.getId()}_${object_id}`;
+
+					const checkbox = document.createElement('input');
+					checkbox.classList.add(ZBX_STYLE_CHECKBOX_RADIO);
+					checkbox.setAttribute('type', 'checkbox');
+					checkbox.setAttribute('id', input_id);
+					checkbox.setAttribute('name', `${column.getId()}[${object_id}]`);
+					checkbox.setAttribute('data-field-type', 'checkbox');
+					checkbox.value = object_id.toString();
+
+					if (data_actions) {
+						checkbox.setAttribute('data-actions', Object.keys(data_actions).join(' '));
+					}
+
+					const label = document.createElement('label');
+					label.setAttribute('for', input_id);
+					label.appendChild(document.createElement('span'));
+
+					const button = document.createElement('button');
+					button.classList.add(ZBX_STYLE_BTN_ICON, ZBX_ICON_MORE);
+					button.setAttribute('data-menu-popup', JSON.stringify({
+						type: 'host',
+						data: {hostid: object_id}
+					}));
+					button.setAttribute('aria-expanded', 'false');
+					button.setAttribute('aria-haspopup', 'true');
+
+					const flex_wrapper = document.createElement('div');
+					flex_wrapper.classList.add(ZBX_STYLE_FLEX_WRAPPER);
+					flex_wrapper.append(checkbox, label, button);
+
+					cell.classList.add(CDataTable.ZBX_STYLE_CELL_CHECKBOX);
+					cell.appendChild(flex_wrapper);
+				})
+				.setCellRenderer('name', ({cell_data, cell}) => {
+					const [hostid, name, discovery, flags, maintenance, status] = cell_data;
+
+					if (flags == ZBX_FLAG_DISCOVERY_CREATED) {
+						if (discovery.rule) {
+							if (discovery.editable) {
+								const host_prototype_url = zabbixUrl({
+									action: 'popup',
+									popup: 'host.prototype.edit',
+									parent_discoveryid: discovery.rule.itemid,
+									hostid: discovery.data.parent_hostid,
+									context: 'host'
+								});
+
+								const discovery_rule_link = document.createElement('a');
+								discovery_rule_link.classList.add(ZBX_STYLE_LINK_ALT, ZBX_STYLE_ORANGE,
+									ZBX_STYLE_WORDBREAK);
+								discovery_rule_link.setAttribute('href', host_prototype_url);
+								discovery_rule_link.textContent = discovery.rule.name;
+
+								cell.appendChild(discovery_rule_link);
+							}
+							else {
+								const discovery_rule = document.createElement('span');
+								discovery_rule.classList.add(ZBX_STYLE_ORANGE, ZBX_STYLE_WORDBREAK);
+								discovery_rule.textContent = discovery.rule.name;
+
+								cell.appendChild(discovery_rule);
+							}
+						}
+						else {
+							const discovery_rule = document.createElement('span');
+							discovery_rule.classList.add(ZBX_STYLE_ORANGE, ZBX_STYLE_WORDBREAK);
+							discovery_rule.textContent = <?= json_encode(_('Inaccessible discovery rule')); ?>;
+
+							cell.appendChild(discovery_rule);
+						}
+
+						cell.innerHTML += NAME_DELIMITER;
+					}
+
+					const url = zabbixUrl({
+						action: 'popup',
+						popup: 'host.edit',
+						hostid
+					});
+
+					const edit_link = document.createElement('a');
+					edit_link.classList.add(ZBX_STYLE_WORDBREAK);
+					edit_link.setAttribute('href', url);
+					edit_link.textContent = name;
+
+					cell.appendChild(edit_link);
+
+					if (maintenance && status == HOST_STATUS_MONITORED) {
+						const maintenance_icon = document.createElement('button');
+						maintenance_icon.classList.add(ZBX_STYLE_BTN_ICON, ZBX_ICON_WRENCH_ALT_SMALL,
+							ZBX_STYLE_COLOR_WARNING, ZBX_STYLE_NO_INDENT);
+						maintenance_icon.setAttribute('type', 'button');
+						maintenance_icon.setAttribute('role', 'button');
+
+						if (maintenance.status == HOST_MAINTENANCE_STATUS_ON) {
+							let hint = `${escapeHtml(maintenance.name)} [${
+								maintenance.type == MAINTENANCE_TYPE_NODATA
+									? <?= json_encode(_('Maintenance without data collection')); ?>
+									: <?= json_encode(_('Maintenance with data collection')); ?>}]`;
+
+							if (maintenance.description != '') {
+								hint += "\n" + escapeHtml(maintenance.description);
+							}
+
+							maintenance_icon.setAttribute('data-hintbox-html', hint);
+						}
+						else {
+							maintenance_icon.setAttribute('data-hintbox-html',
+								<?= json_encode(_('Inaccessible maintenance')); ?>);
+						}
+
+						maintenance_icon.setAttribute('data-hintbox', '1');
+						maintenance_icon.setAttribute('data-hintbox-class', ZBX_STYLE_HINTBOX_WRAP);
+						maintenance_icon.setAttribute('data-hintbox-static', '1');
+						maintenance_icon.setAttribute('aria-expanded', 'false');
+
+						cell.appendChild(maintenance_icon);
+					}
+				})
+				.setCellRenderer('items', ({cell_data, cell}) => {
+					const [hostid, items] = cell_data;
+
+					const url = zabbixUrl({
+						action: 'item.list',
+						filter_set: 1,
+						filter_hostids: [hostid],
+						context: 'host'
+					});
+
+					const item_link = document.createElement('a');
+					item_link.classList.add(ZBX_STYLE_WORDBREAK);
+					item_link.setAttribute('href', url);
+					item_link.textContent = <?= json_encode(_('Items')); ?>;
+
+					cell.appendChild(item_link);
+
+					if (items > 0) {
+						const count = document.createElement('sup');
+						count.textContent = items;
+
+						cell.append(' ', count);
+					}
+				})
+				.setCellRenderer('triggers', ({cell_data, cell}) => {
+					const [hostid, items] = cell_data;
+
+					const url = zabbixUrl({
+						action: 'trigger.list',
+						filter_set: 1,
+						filter_hostids: [hostid],
+						context: 'host'
+					});
+
+					const item_link = document.createElement('a');
+					item_link.classList.add(ZBX_STYLE_WORDBREAK);
+					item_link.setAttribute('href', url);
+					item_link.textContent = <?= json_encode(_('Triggers')); ?>;
+
+					cell.appendChild(item_link);
+
+					if (items > 0) {
+						const count = document.createElement('sup');
+						count.textContent = items;
+
+						cell.append(' ', count);
+					}
+				})
+				.setCellRenderer('graphs', ({cell_data, cell}) => {
+					const [hostid, items] = cell_data;
+
+					const url = zabbixUrl({
+						action: 'graph.list',
+						filter_set: 1,
+						filter_hostids: [hostid],
+						context: 'host'
+					});
+
+					const item_link = document.createElement('a');
+					item_link.classList.add(ZBX_STYLE_WORDBREAK);
+					item_link.setAttribute('href', url);
+					item_link.textContent = <?= json_encode(_('Graphs')); ?>;
+
+					cell.appendChild(item_link);
+
+					if (items > 0) {
+						const count = document.createElement('sup');
+						count.textContent = items;
+
+						cell.append(' ', count);
+					}
+				})
+				.setCellRenderer('discovery', ({cell_data, cell}) => {
+					const [hostid, items] = cell_data;
+
+					const url = zabbixUrl({
+						action: 'lldrule.list',
+						filter_set: 1,
+						filter_hostids: [hostid],
+						context: 'host'
+					});
+
+					const item_link = document.createElement('a');
+					item_link.classList.add(ZBX_STYLE_WORDBREAK);
+					item_link.setAttribute('href', url);
+					item_link.textContent = <?= json_encode(_('Discovery')); ?>;
+
+					cell.appendChild(item_link);
+
+					if (items > 0) {
+						const count = document.createElement('sup');
+						count.textContent = items;
+
+						cell.append(' ', count);
+					}
+				})
+				.setCellRenderer('web', ({cell_data, cell}) => {
+					const [hostid, items] = cell_data;
+
+					const url = zabbixUrl({
+						filter_set: 1,
+						filter_hostids: [hostid],
+						context: 'host'
+					}, 'httpconf.php');
+
+					const item_link = document.createElement('a');
+					item_link.classList.add(ZBX_STYLE_WORDBREAK);
+					item_link.setAttribute('href', url);
+					item_link.textContent = <?= json_encode(_('Web')); ?>;
+
+					cell.appendChild(item_link);
+
+					if (items > 0) {
+						const count = document.createElement('sup');
+						count.textContent = items;
+
+						cell.append(' ', count);
+					}
+				})
+				.setCellRenderer('interface', ({cell_data, cell}) => {
+					const [host_port] = cell_data;
+
+					const wordbreak = document.createElement('span');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+					wordbreak.textContent = host_port;
+
+					cell.appendChild(wordbreak);
+				})
+				.setCellRenderer('status', ({cell_data, cell}) => {
+					const [hostid, status, disabled_by_lld] = cell_data;
+					const is_monitored = status == HOST_STATUS_MONITORED;
+
+					const status_link = document.createElement('a');
+					status_link.classList.add(ZBX_STYLE_LINK_ACTION, is_monitored ? ZBX_STYLE_GREEN : ZBX_STYLE_RED,
+						ZBX_STYLE_WORDBREAK);
+					status_link.setAttribute('href', 'javascript:void(0);');
+					status_link.textContent = is_monitored
+						? <?= json_encode(_('Enabled')); ?>
+						: <?= json_encode(_('Disabled')); ?>;
+					status_link.addEventListener('click', e => {
+						e.preventDefault();
+
+						status_link.classList.add(ZBX_STYLE_LOADING);
+
+						const parameters = {hostids: [hostid]};
+						const callback = response => {
+							this.#datatable.dispatchEvent(CDataTable.EVENT_INIT, {force_load: true});
+
+							if (response.error) {
+								const title = response.error.title ?? '';
+								CMessageHelper.error(this.#datatable.getElement(), response.error.messages, title);
+							}
+							else {
+								const title = response.success.title ?? '';
+								CMessageHelper.success(this.#datatable.getElement(), response.success.messages, title);
+							}
+						};
+
+						if (is_monitored) {
+							this.disable(status_link, parameters, callback);
+						}
+						else {
+							this.enable(status_link, parameters, callback);
+						}
+					});
+
+					cell.appendChild(status_link);
+
+					if (disabled_by_lld != 0) {
+						const description_icon = document.createElement('button');
+						description_icon.classList.add('btn-icon', ZBX_ICON_ALERT_WITH_CONTENT, ZBX_STYLE_HINTBOX_WRAP,
+							ZBX_STYLE_NO_INDENT);
+						description_icon.setAttribute('role', 'button');
+						description_icon.setAttribute('data-content', '?');
+						description_icon.setAttribute('data-hintbox-html',
+							<?= json_encode(_('Disabled automatically by an LLD rule.')); ?>);
+						description_icon.setAttribute('data-hintbox', '1');
+						description_icon.setAttribute('data-hintbox-class', ZBX_STYLE_HINTBOX_WRAP);
+						description_icon.setAttribute('data-hintbox-static', '1');
+						description_icon.setAttribute('aria-expanded', 'false');
+
+						cell.append(' ', description_icon);
+					}
+				})
+				.setCellRenderer('proxy', ({cell_data, cell, response}) => {
+					const [monitored_by, proxyid, proxy_groupid, assigned_proxyid, proxy, proxy_group,
+						assigned_proxy] = cell_data;
+
+					if (!monitored_by) {
+						return;
+					}
+
+					const {can_edit_proxies, can_edit_proxy_groups} = response;
+
+					if (monitored_by == ZBX_MONITORED_BY_PROXY) {
+						if (can_edit_proxies && !proxy.inaccessible) {
+							const proxy_url = zabbixUrl({
+								action: 'popup',
+								popup: 'proxy.edit',
+								proxyid
+							});
+
+							const proxy_link = document.createElement('a');
+							proxy_link.setAttribute('href', proxy_url);
+							proxy_link.classList.add(ZBX_STYLE_LINK_ALT, ZBX_STYLE_GREY, ZBX_STYLE_WORDBREAK);
+							proxy_link.textContent = proxy.name;
+
+							cell.appendChild(proxy_link);
+						}
+						else {
+							const proxy_name = document.createElement('span');
+							proxy_name.classList.add(ZBX_STYLE_WORDBREAK);
+							proxy_name.textContent = proxy.name;
+
+							cell.appendChild(proxy_name);
+						}
+					}
+					else if (monitored_by == ZBX_MONITORED_BY_PROXY_GROUP) {
+						if (can_edit_proxy_groups && !proxy_group.inaccessible) {
+							const proxy_group_url = zabbixUrl({
+								action: 'popup',
+								popup: 'proxygroup.edit',
+								proxy_groupid
+							});
+
+							const proxy_group_link = document.createElement('a');
+							proxy_group_link.setAttribute('href', proxy_group_url);
+							proxy_group_link.classList.add(ZBX_STYLE_LINK_ALT, ZBX_STYLE_GREY, ZBX_STYLE_WORDBREAK);
+							proxy_group_link.textContent = proxy_group.name;
+
+							cell.appendChild(proxy_group_link);
+						}
+						else {
+							const proxy_group_name = document.createElement('span');
+							proxy_group_name.classList.add(ZBX_STYLE_WORDBREAK);
+							proxy_group_name.textContent = proxy_group.name;
+
+							cell.appendChild(proxy_group_name);
+						}
+
+						if (assigned_proxyid != 0 && !proxy_group.inaccessible) {
+							cell.innerHTML += NAME_DELIMITER;
+
+							if (can_edit_proxies && !assigned_proxy.inaccessible) {
+								const proxy_url = zabbixUrl({
+									action: 'popup',
+									popup: 'proxy.edit',
+									proxyid: assigned_proxyid
+								});
+
+								const proxy_link = document.createElement('a');
+								proxy_link.setAttribute('href', proxy_url);
+								proxy_link.classList.add(ZBX_STYLE_LINK_ALT, ZBX_STYLE_GREY, ZBX_STYLE_WORDBREAK);
+								proxy_link.textContent = assigned_proxy.name;
+
+								cell.appendChild(proxy_link);
+							}
+							else {
+								const assigned_proxy_name = document.createElement('span');
+								assigned_proxy_name.classList.add(ZBX_STYLE_WORDBREAK);
+								assigned_proxy_name.textContent = assigned_proxy.name;
+
+								cell.appendChild(assigned_proxy_name);
+							}
+						}
+					}
+				})
+				.setCellRenderer('templates', ({cell_data, cell, response}) => {
+					const [templates] = cell_data;
+					const {max_in_table} = response;
+					const max_in_table_exceeded = templates.length > max_in_table;
+					const visible_templates = Object.values(templates).slice(0, max_in_table);
+
+					visible_templates.forEach(({templateid, name, parentTemplates, editable}, i) => {
+						const element = editable ? document.createElement('a') : document.createElement('span');
+
+						if (editable) {
+							const url = zabbixUrl({
+								action: 'popup',
+								popup: 'template.edit',
+								templateid
+							});
+
+							element.classList.add(ZBX_STYLE_LINK_ALT);
+							element.setAttribute('href', url);
+						}
+
+						element.classList.add(ZBX_STYLE_GREY, ZBX_STYLE_WORDBREAK);
+						element.textContent = String(name);
+
+						cell.appendChild(element);
+
+						if (parentTemplates.length > 0) {
+							cell.innerHTML += ' (';
+
+							parentTemplates.forEach(({templateid, name, editable}, j) => {
+								const element = editable ? document.createElement('a') : document.createElement('span');
+
+								if (editable) {
+									const url = zabbixUrl({
+										action: 'popup',
+										popup: 'template.edit',
+										templateid
+									});
+
+									element.classList.add(ZBX_STYLE_LINK_ALT);
+									element.setAttribute('href', url);
+								}
+
+								element.classList.add(ZBX_STYLE_GREY, ZBX_STYLE_WORDBREAK);
+								element.textContent = name;
+
+								cell.appendChild(element);
+
+								if (j < parentTemplates.length - 1) {
+									cell.innerHTML += ', ';
+								}
+							});
+
+							cell.innerHTML += ')';
+						}
+
+						if (i < visible_templates.length - 1) {
+							cell.innerHTML += ', ';
+						}
+					});
+
+					if (max_in_table_exceeded) {
+						cell.innerHTML += ' &hellip;';
+					}
+				})
+				.setCellRenderer('info', ({cell_data, cell}) => {
+					const [info_icons] = cell_data;
+
+					const info = document.createElement('div');
+					info.classList.add(ZBX_STYLE_REL_CONTAINER);
+
+					info_icons.forEach(icon => info.innerHTML += icon);
+
+					cell.appendChild(info);
+				})
+				.setCellRenderer('encryption', ({cell_data, cell}) => {
+					const [tls_accept, tls_connect] = cell_data;
+
+					if (tls_connect == HOST_ENCRYPTION_NONE
+						&& (tls_accept & HOST_ENCRYPTION_NONE) == HOST_ENCRYPTION_NONE
+						&& (tls_accept & HOST_ENCRYPTION_PSK) != HOST_ENCRYPTION_PSK
+						&& (tls_accept & HOST_ENCRYPTION_CERTIFICATE) != HOST_ENCRYPTION_CERTIFICATE) {
+
+						const none = document.createElement('div');
+						none.classList.add(ZBX_STYLE_STATUS_GREEN);
+						none.textContent = <?= json_encode(_('None')); ?>;
+
+						const encryption = document.createElement('div');
+						encryption.classList.add(ZBX_STYLE_STATUS_CONTAINER);
+						encryption.appendChild(none);
+
+						cell.appendChild(encryption);
+					}
+					else {
+						const in_encryption = document.createElement('span');
+						in_encryption.classList.add(ZBX_STYLE_STATUS_GREEN);
+
+						// Incoming encryption.
+						if (tls_connect == HOST_ENCRYPTION_NONE) {
+							in_encryption.textContent = <?= json_encode(_('None')); ?>;
+						}
+						else if (tls_connect == HOST_ENCRYPTION_PSK) {
+							in_encryption.textContent = <?= json_encode(_('PSK')); ?>;
+						}
+						else {
+							in_encryption.textContent = <?= json_encode(_('CERT')); ?>;
+						}
+
+						in_encryption.classList.add('in');
+
+						const out_encryption = document.createElement('div');
+						out_encryption.classList.add('out');
+
+						const none = document.createElement('div');
+						none.textContent = <?= json_encode(_('None')); ?>;
+
+						if ((tls_accept & HOST_ENCRYPTION_NONE) == HOST_ENCRYPTION_NONE) {
+							none.classList.add(ZBX_STYLE_STATUS_GREEN);
+						}
+						else {
+							none.classList.add(ZBX_STYLE_STATUS_GREY);
+						}
+
+						out_encryption.appendChild(none);
+
+						const psk = document.createElement('div');
+						psk.textContent = <?= json_encode(_('PSK')); ?>;
+
+						if ((tls_accept & HOST_ENCRYPTION_PSK) == HOST_ENCRYPTION_PSK) {
+							psk.classList.add(ZBX_STYLE_STATUS_GREEN);
+						}
+						else {
+							psk.classList.add(ZBX_STYLE_STATUS_GREY);
+						}
+
+						out_encryption.appendChild(psk);
+
+						const cert = document.createElement('div');
+						cert.textContent = <?= json_encode(_('CERT')); ?>;
+
+						if ((tls_accept & HOST_ENCRYPTION_CERTIFICATE) == HOST_ENCRYPTION_CERTIFICATE) {
+							cert.classList.add(ZBX_STYLE_STATUS_GREEN);
+						}
+						else {
+							cert.classList.add(ZBX_STYLE_STATUS_GREY);
+						}
+
+						out_encryption.appendChild(cert);
+
+						const encryption = document.createElement('div');
+						encryption.classList.add(ZBX_STYLE_STATUS_CONTAINER);
+						encryption.appendChild(in_encryption);
+						encryption.innerHTML += ' ';
+						encryption.appendChild(out_encryption);
+
+						cell.appendChild(encryption);
+					}
+				})
+				.on(CMessageHelper.EVENT_MESSAGE, e => {
+					e.stopPropagation();
+
+					const {type, title, messages} = e.detail;
+
+					clearMessages();
+					addMessage(makeMessageBox(type, messages, title));
+				})
+				.on(CPager.EVENT_STATE_CHANGE, e => {
+					const {page} = e.detail;
+
+					new CState().setParams({page});
+				})
+				.on(CDataTable.EVENT_RENDER, e => {
+					const {response} = e.detail;
+
+					if ('debug' in response) {
+						this.#refreshDebug(response.debug);
+					}
+				})
+				.init(user_configs);
+
+			this.#datatable.getCheckboxColumn()
+				.setWidth('58px')
+				.getDefaults().setWidth('58px');
+		}
+
+		#refreshDebug(debug) {
+			const debug_output = document
+				.querySelector(`.wrapper > main > .${ZBX_STYLE_DEBUG_OUTPUT_TABLE_REFRESH}`);
+
+			if (debug_output) {
+				debug_output.classList.add(ZBX_STYLE_DEBUG_OUTPUT);
+				debug_output.innerHTML = new DOMParser().parseFromString(debug, 'text/html')
+					.querySelector(`.${ZBX_STYLE_DEBUG_OUTPUT}`).innerHTML;
+			}
+		}
 
 		massDeleteHosts(button) {
-			const confirm_text = button.getAttribute('confirm');
+			const confirm_text = Object.keys(chkbxRange.getSelectedIds()).length > 1
+				? <?= json_encode(_('Delete selected hosts?')); ?>
+				: <?= json_encode(_('Delete selected host?')); ?>;
+
 			if (!confirm(confirm_text)) {
 				return;
 			}
 
 			button.classList.add('is-loading');
 
-			const curl = new Curl('zabbix.php');
-			curl.setArgument('action', 'host.massdelete');
+			const url = zabbixUrl({
+				action: 'host.massdelete',
+				[CSRF_TOKEN_NAME]: this.#csrf_token
+			});
 
-			fetch(curl.getUrl(), {
+			fetch(url, {
 				method: 'POST',
 				headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
 				body: urlEncodeData({hostids: Object.keys(chkbxRange.getSelectedIds())})
 			})
-				.then((response) => response.json())
-				.then((response) => {
-					if ('error' in response) {
-						if ('title' in response.error) {
-							postMessageError(response.error.title);
-						}
-
-						postMessageDetails('error', response.error.messages);
-
-						uncheckTableRows('hosts', response.keepids ?? []);
-					}
-					else if ('success' in response) {
-						postMessageOk(response.success.title);
-
-						if ('messages' in response.success) {
-							postMessageDetails('success', response.success.messages);
-						}
-
-						uncheckTableRows('hosts');
-					}
-
-					location.href = location.href;
-				})
+				.then(response => response.json())
+				.then(response => this.reload(response))
 				.catch(() => {
 					clearMessages();
 
-					const message_box = makeMessageBox('bad', [<?= json_encode(_('Unexpected server error.')) ?>]);
+					const message_box = makeMessageBox('bad', [<?= json_encode(_('Unexpected server error.')); ?>]);
 
 					addMessage(message_box);
 				})
 				.finally(() => {
 					button.classList.remove('is-loading');
 				});
-		},
-
-		events: {
-			hostSuccess(e) {
-				const data = e.detail;
-
-				if ('success' in data) {
-					postMessageOk(data.success.title);
-
-					if ('messages' in data.success) {
-						postMessageDetails('success', data.success.messages);
-					}
-				}
-
-				location.href = location.href;
-			},
-
-			hostDelete(e) {
-				const data = e.detail;
-
-				if ('success' in data) {
-					postMessageOk(data.success.title);
-
-					if ('messages' in data.success) {
-						postMessageDetails('success', data.success.messages);
-					}
-				}
-
-				uncheckTableRows('hosts');
-				location.href = location.href;
-			}
 		}
 	};
 </script>

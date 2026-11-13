@@ -1,28 +1,23 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerServiceListEditRefresh extends CControllerServiceListGeneral {
 
 	protected function init(): void {
-		$this->disableSIDValidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput(): bool {
@@ -60,7 +55,7 @@ class CControllerServiceListEditRefresh extends CControllerServiceListGeneral {
 			return false;
 		}
 
-		return parent::checkPermissions();
+		return true;
 	}
 
 	/**
@@ -68,6 +63,18 @@ class CControllerServiceListEditRefresh extends CControllerServiceListGeneral {
 	 */
 	protected function doAction(): void {
 		parent::doAction();
+
+		if ($this->is_inaccessible) {
+			$this->setResponse(
+				(new CControllerResponseData(['main_block' => json_encode([
+					'error' => [
+						'messages' => [_('No permissions to referred object or it does not exist!')]
+					]
+				])]))->disableView()
+			);
+
+			return;
+		}
 
 		$path = $this->getPath();
 
@@ -126,7 +133,7 @@ class CControllerServiceListEditRefresh extends CControllerServiceListGeneral {
 				->setArgument('filter_set', 1);
 		}
 
-		$data['back_url'] = (clone $paging_curl)
+		$data['return_url'] = (clone $paging_curl)
 			->setArgument('action', 'service.list.edit')
 			->setArgument('page', $this->hasInput('page') ? $this->getInput('page') : null)
 			->getUrl();
@@ -149,7 +156,8 @@ class CControllerServiceListEditRefresh extends CControllerServiceListGeneral {
 
 		self::extendProblemEvents($data['services']);
 
-		$data['tags'] = makeTags($data['services'], true, 'serviceid', ZBX_TAG_COUNT_DEFAULT, $filter['tags']);
+		$data['tags'] =
+			CTagHelper::getTagsHtml($data['services'], ZBX_TAG_OBJECT_SERVICE, ['filter_tags' => $filter['tags']]);
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Services'));

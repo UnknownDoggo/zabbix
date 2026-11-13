@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package memcached
@@ -24,15 +19,15 @@ import (
 	"testing"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/uri"
+	"golang.zabbix.com/sdk/uri"
 )
 
 func TestConnManager_closeUnused(t *testing.T) {
-	connMgr := NewConnManager(1*time.Microsecond, 30*time.Second, hkInterval*time.Second)
+	connMgr := NewConnManager(1*time.Microsecond, 30*time.Second)
 	defer connMgr.Destroy()
 
 	uri, _ := uri.New("tcp://127.0.0.1", nil)
-	_ = connMgr.create(*uri)
+	_ = connMgr.create(*uri, hkInterval)
 
 	t.Run("Unused connections should have been deleted", func(t *testing.T) {
 		connMgr.closeUnused()
@@ -43,11 +38,11 @@ func TestConnManager_closeUnused(t *testing.T) {
 }
 
 func TestConnManager_closeAll(t *testing.T) {
-	connMgr := NewConnManager(300*time.Second, 30*time.Second, hkInterval*time.Second)
+	connMgr := NewConnManager(300*time.Second, 30*time.Second)
 	defer connMgr.Destroy()
 
 	uri, _ := uri.New("tcp://127.0.0.1", nil)
-	_ = connMgr.create(*uri)
+	_ = connMgr.create(*uri, hkInterval)
 
 	t.Run("All connections should have been deleted", func(t *testing.T) {
 		connMgr.closeAll()
@@ -60,7 +55,7 @@ func TestConnManager_closeAll(t *testing.T) {
 func TestConnManager_create(t *testing.T) {
 	u, _ := uri.New("tcp://127.0.0.1", nil)
 
-	connMgr := NewConnManager(300*time.Second, 30*time.Second, hkInterval*time.Second)
+	connMgr := NewConnManager(300*time.Second, 30*time.Second)
 	defer connMgr.Destroy()
 
 	type args struct {
@@ -100,7 +95,7 @@ func TestConnManager_create(t *testing.T) {
 				}()
 			}
 
-			if got := tt.c.create(tt.args.uri); reflect.TypeOf(got) != reflect.TypeOf(tt.want) {
+			if got := tt.c.create(tt.args.uri, hkInterval); reflect.TypeFor[*MCConn]() != reflect.TypeFor[*MCConn]() {
 				t.Errorf("ConnManager.create() = %v, want %v", got, tt.want)
 			}
 		})
@@ -110,20 +105,20 @@ func TestConnManager_create(t *testing.T) {
 func TestConnManager_get(t *testing.T) {
 	u, _ := uri.New("tcp://127.0.0.1", nil)
 
-	connMgr := NewConnManager(300*time.Second, 30*time.Second, hkInterval*time.Second)
+	connMgr := NewConnManager(300*time.Second, 30*time.Second)
 	defer connMgr.Destroy()
 
 	t.Run("Should return nil if connection does not exist", func(t *testing.T) {
-		if got := connMgr.get(*u); got != nil {
+		if got := connMgr.get(*u, hkInterval); got != nil {
 			t.Errorf("ConnManager.get() = %v, want <nil>", got)
 		}
 	})
 
-	conn := connMgr.create(*u)
+	conn := connMgr.create(*u, hkInterval)
 	lastTimeAccess := conn.lastTimeAccess
 
 	t.Run("Should return connection if it exists", func(t *testing.T) {
-		got := connMgr.get(*u)
+		got := connMgr.get(*u, hkInterval)
 		if !reflect.DeepEqual(got, conn) {
 			t.Errorf("ConnManager.get() = %v, want %v", got, conn)
 		}
@@ -138,11 +133,11 @@ func TestConnManager_GetConnection(t *testing.T) {
 
 	u, _ := uri.New("tcp://127.0.0.1", nil)
 
-	connMgr := NewConnManager(300*time.Second, 30*time.Second, hkInterval*time.Second)
+	connMgr := NewConnManager(300*time.Second, 30*time.Second)
 	defer connMgr.Destroy()
 
 	t.Run("Should create connection if it does not exist", func(t *testing.T) {
-		got := connMgr.GetConnection(*u)
+		got := connMgr.GetConnection(*u, hkInterval)
 		if reflect.TypeOf(got) != reflect.TypeOf(conn) {
 			t.Errorf("ConnManager.GetConnection() = %s, want *MCConn", reflect.TypeOf(got))
 		}
@@ -150,7 +145,7 @@ func TestConnManager_GetConnection(t *testing.T) {
 	})
 
 	t.Run("Should return previously created connection", func(t *testing.T) {
-		got := connMgr.GetConnection(*u)
+		got := connMgr.GetConnection(*u, hkInterval)
 		if !reflect.DeepEqual(got, conn) {
 			t.Errorf("ConnManager.GetConnection() = %v, want %v", got, conn)
 		}

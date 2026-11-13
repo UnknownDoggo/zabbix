@@ -1,27 +1,22 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerProfileUpdate extends CController {
 
-	protected function checkInput() {
+	protected function checkInput(): bool {
 		$fields = [
 			'idx' =>		'required|string',
 			'value_int' =>	'int32',
@@ -33,25 +28,38 @@ class CControllerProfileUpdate extends CController {
 
 		if ($ret) {
 			switch ($this->getInput('idx')) {
-				case 'web.actionconf.filter.active':
+				case 'web.action.list.filter.active':
+				case 'web.actionlog.filter.active':
+				case 'web.apm.trace.filter.active':
+				case 'web.apm.metric.filter.active':
+				case 'web.apm.log.filter.active':
+				case 'web.apm.log.datatable':
+				case 'web.apm.log.side_drawer.position':
+				case 'web.apm.metric.datatable':
+				case 'web.apm.metric.side_drawer.position':
+				case 'web.apm.trace.datatable':
+				case 'web.apm.trace.side_drawer.position':
 				case 'web.auditacts.filter.active':
 				case 'web.auditlog.filter.active':
-				case 'web.avail_report.filter.active':
+				case 'web.availabilityreport.filter.active':
 				case 'web.charts.filter.active':
-				case 'web.correlation.filter.active':
+				case 'web.connector.filter.active':
+				case 'web.ceprule.filter.active':
 				case 'web.dashboard.filter.active':
 				case 'web.dashboard.hostid':
+				case 'web.dashboard.last_widget_type':
 				case 'web.discovery.filter.active':
 				case 'web.discoveryconf.filter.active':
-				case 'web.groups.filter.active':
+				case 'web.host.wizard.show.welcome':
+				case 'web.hostgroups.filter.active':
 				case 'web.hostinventories.filter.active':
 				case 'web.hostinventoriesoverview.filter.active':
 				case 'web.hosts.filter.active':
-				case 'web.hosts.graphs.filter.active':
-				case 'web.hosts.host_discovery.filter.active':
+				case 'web.hosts.graph.list.filter.active':
 				case 'web.hosts.httpconf.filter.active':
-				case 'web.hosts.items.filter.active':
-				case 'web.hosts.triggers.filter.active':
+				case 'web.hosts.items.list.filter.active':
+				case 'web.hosts.lldrules.filter.active':
+				case 'web.hosts.trigger.list.filter.active':
 				case 'web.hostsmon.filter.active':
 				case 'web.httpdetails.filter.active':
 				case 'web.item.graph.filter.active':
@@ -61,37 +69,46 @@ class CControllerProfileUpdate extends CController {
 				case 'web.modules.filter.active':
 				case 'web.problem.filter.active':
 				case 'web.proxies.filter.active':
+				case 'web.proxygroups.filter.active':
 				case 'web.scheduledreport.filter.active':
 				case 'web.scripts.filter.active':
-				case 'web.search.hats.'.WIDGET_SEARCH_HOSTS.'.state':
-				case 'web.search.hats.'.WIDGET_SEARCH_TEMPLATES.'.state':
-				case 'web.search.hats.'.WIDGET_SEARCH_HOSTGROUP.'.state':
+				case 'web.search.hats.'.SECTION_SEARCH_HOSTS.'.state':
+				case 'web.search.hats.'.SECTION_SEARCH_TEMPLATES.'.state':
+				case 'web.search.hats.'.SECTION_SEARCH_HOSTGROUP.'.state':
 				case 'web.service.filter.active':
 				case 'web.service_actions.filter.active':
 				case 'web.sidebar.mode':
 				case 'web.sla.list.filter.active':
 				case 'web.slareport.list.filter.active':
 				case 'web.sysmapconf.filter.active':
+				case 'web.templategroups.filter.active':
 				case 'web.templates.filter.active':
-				case 'web.templates.graphs.filter.active':
-				case 'web.templates.host_discovery.filter.active':
+				case 'web.templates.graph.list.filter.active':
 				case 'web.templates.httpconf.filter.active':
-				case 'web.templates.items.filter.active':
-				case 'web.templates.triggers.filter.active':
+				case 'web.templates.items.list.filter.active':
+				case 'web.templates.lldrules.filter.active':
+				case 'web.templates.trigger.list.filter.active':
 				case 'web.token.filter.active':
 				case 'web.toptriggers.filter.active':
-				case 'web.tr_events.hats.'.WIDGET_HAT_EVENTACTIONS.'.state':
-				case 'web.tr_events.hats.'.WIDGET_HAT_EVENTLIST.'.state':
+				case 'web.tr_events.hats.'.SECTION_HAT_EVENTACTIONS.'.state':
+				case 'web.tr_events.hats.'.SECTION_HAT_EVENTLIST.'.state':
 				case 'web.user.filter.active':
 				case 'web.user.token.filter.active':
+				case 'web.user.device.list.filter.active':
 				case 'web.usergroup.filter.active':
 				case 'web.web.filter.active':
+				case 'web.monitoring.hosts.datatable':
+				case 'web.monitoring.latest.datatable':
+				case 'web.monitoring.problem.datatable':
+				case 'web.hosts.datatable':
+				case 'web.templates.datatable':
+				case 'web.banner.dismissed_ids':
 					$ret = true;
 					break;
 
 				case 'web.dashboard.widget.geomap.default_view':
 				case 'web.dashboard.widget.geomap.severity_filter':
-				case (bool) preg_match('/web.dashboard.widget.navtree.item-\d+.toggle/', $this->getInput('idx')):
+				case (bool) preg_match('/^web.dashboard.widget.navtree.item-\d+.toggle$/', $this->getInput('idx')):
 				case 'web.dashboard.widget.navtree.item.selected':
 					$ret = $this->hasInput('idx2');
 					break;
@@ -103,8 +120,21 @@ class CControllerProfileUpdate extends CController {
 
 		if ($ret) {
 			switch ($this->getInput('idx')) {
+				case 'web.apm.log.datatable':
+				case 'web.apm.log.side_drawer.position':
+				case 'web.apm.metric.datatable':
+				case 'web.apm.metric.side_drawer.position':
+				case 'web.apm.trace.datatable':
+				case 'web.apm.trace.side_drawer.position':
+				case 'web.dashboard.last_widget_type':
 				case 'web.dashboard.widget.geomap.default_view':
 				case 'web.dashboard.widget.geomap.severity_filter':
+				case 'web.monitoring.hosts.datatable':
+				case 'web.monitoring.latest.datatable':
+				case 'web.monitoring.problem.datatable':
+				case 'web.hosts.datatable':
+				case 'web.templates.datatable':
+				case 'web.banner.dismissed_ids':
 					$ret = $this->hasInput('value_str');
 					break;
 
@@ -121,18 +151,40 @@ class CControllerProfileUpdate extends CController {
 		return $ret;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		return ($this->getUserType() >= USER_TYPE_ZABBIX_USER);
 	}
 
-	protected function doAction() {
+	protected function doAction(): void {
 		$idx = $this->getInput('idx');
 
 		DBstart();
 		switch ($idx) {
 			// PROFILE_TYPE_STR
+			case 'web.apm.log.side_drawer.position':
+			case 'web.apm.metric.side_drawer.position':
+			case 'web.apm.trace.side_drawer.position':
+			case 'web.dashboard.last_widget_type':
+			case 'web.banner.dismissed_ids':
+				$value_str = $this->getInput('value_str');
+				if ($value_str === '') {
+					CProfile::delete($idx);
+				}
+				else {
+					CProfile::update($idx, $value_str, PROFILE_TYPE_STR);
+				}
+				break;
+
+			case 'web.apm.log.datatable':
+			case 'web.apm.metric.datatable':
+			case 'web.apm.trace.datatable':
 			case 'web.dashboard.widget.geomap.default_view':
 			case 'web.dashboard.widget.geomap.severity_filter':
+			case 'web.monitoring.hosts.datatable':
+			case 'web.monitoring.latest.datatable':
+			case 'web.monitoring.problem.datatable':
+			case 'web.hosts.datatable':
+			case 'web.templates.datatable':
 				$value_str = $this->getInput('value_str');
 				if ($value_str === '') { // default value
 					CProfile::delete($idx, $this->getInput('idx2'));
@@ -145,7 +197,7 @@ class CControllerProfileUpdate extends CController {
 				break;
 
 			// PROFILE_TYPE_INT
-			case (bool) preg_match('/web.dashboard.widget.navtree.item-\d+.toggle/', $this->getInput('idx')):
+			case (bool) preg_match('/^web.dashboard.widget.navtree.item-\d+.toggle$/', $this->getInput('idx')):
 				$value_int = $this->getInput('value_int');
 				if ($value_int == 1) { // default value
 					CProfile::delete($idx, $this->getInput('idx2'));

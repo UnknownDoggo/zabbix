@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -26,41 +21,96 @@ class CControllerPopup extends CController {
 
 	/**
 	 * List of supported popups.
-	 *
-	 * @var array
 	 */
-	protected $supported_popups;
+	protected array $supported_popups;
 
 	/**
 	 * Controller instance of the popup.
-	 *
-	 * @var CController
 	 */
-	protected $popup_controller;
+	protected CController $popup_controller;
 
-	protected function init() {
-		$this->disableSIDValidation();
+	/**
+	 * Current action name.
+	 */
+	private string $action;
+
+	protected function init(): void {
+		$this->disableCsrfValidation();
 
 		$this->supported_popups = [
-			'acknowledge.edit' => _('Update problem')
+			'acknowledge.edit' => _('Update problem'),
+			'action.edit' => _('Action edit'),
+			'ceprule.edit' => _('CEP rule edit'),
+			'connector.edit' => _('Connector edit'),
+			'correlation.edit' => _('Correlation edit'),
+			'discovery.edit' => _('Discovery rule edit'),
+			'graph.edit' => _('Graph edit'),
+			'graph.prototype.edit' => _('Graph prototype edit'),
+			'host.edit' => _('Host edit'),
+			'host.prototype.edit' => _('Host prototype edit'),
+			'host.wizard.edit' => _('Host Wizard'),
+			'hostgroup.edit' => _('Host group edit'),
+			'item.edit' => _('Item edit'),
+			'item.prototype.edit' => _('Item prototype edit'),
+			'lldrule.edit' => _('Discovery rule edit'),
+			'lldrule.prototype.edit' => _('Discovery prototype edit'),
+			'maintenance.edit' => _('Maintenance edit'),
+			'mediatype.edit' => _('Media type edit'),
+			'module.edit' => _('Module edit'),
+			'proxy.edit' => _('Proxy edit'),
+			'proxygroup.edit' => _('Proxy group edit'),
+			'regex.edit' => _('Configuration of regular expressions'),
+			'templategroup.edit' => _('Template group edit'),
+			'scheduledreport.edit' => _('Scheduled report edit'),
+			'script.edit' => _('Script edit'),
+			'service.edit' => _('Service edit'),
+			'sla.edit' => _('SLA edit'),
+			'template.edit' => _('Template edit'),
+			'token.edit' => _('Token edit'),
+			'trigger.edit' => _('Trigger edit'),
+			'trigger.prototype.edit' => _('Trigger prototype edit')
 		];
 	}
 
-	protected function checkInput() {
+	protected function checkInput(): bool {
 		$fields = [
-			'popup_action' => 'required|in '.implode(',', array_keys($this->supported_popups))
+			'popup' => 'required|in '.implode(',', array_keys($this->supported_popups))
 		];
 
 		$ret = $this->validateInput($fields);
 
 		if ($ret) {
-			/** @var CRouter $router */
-			$router = clone APP::Component()->get('router');
-			$router->setAction('popup.'.$this->getInput('popup_action'));
+			$router = clone CRouter::getInstance();
+
+			$this->action = $this->getInput('popup');
+			$router->setAction($this->action);
+
 			$popup_controller_class = $router->getController();
 			$this->popup_controller = new $popup_controller_class;
 
 			$ret = $this->popup_controller->checkInput();
+
+			if (!$ret) {
+				$response = $this->popup_controller->getResponse();
+
+				if ($response instanceof CControllerResponseData) {
+					$data = $response->getData();
+
+					if (array_key_exists('main_block', $data)) {
+						$main_block = json_decode($data['main_block'], true);
+
+						if (array_key_exists('error', $main_block)) {
+							if (array_key_exists('title', $main_block['error'])) {
+								CMessageHelper::setErrorTitle($main_block['error']['title']);
+							}
+
+							foreach ($main_block['error']['messages'] as $message) {
+								CMessageHelper::addError($message);
+							}
+						}
+					}
+				}
+			}
 		}
 
 		if (!$ret) {
@@ -70,20 +120,20 @@ class CControllerPopup extends CController {
 		return $ret;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		return $this->popup_controller->checkPermissions();
 	}
 
-	protected function doAction() {
+	protected function doAction(): void {
 		$data = [
 			'popup' => [
-				'action' => 'popup.'.$this->getInput('popup_action'),
-				'options' => $this->popup_controller->getInputAll()
+				'action' => $this->action,
+				'action_parameters' => $this->popup_controller->getInputAll()
 			]
 		];
 
 		$response = (new CControllerResponseData($data));
-		$response->setTitle($this->supported_popups[$this->getInput('popup_action')]);
+		$response->setTitle($this->supported_popups[$this->getInput('popup')]);
 
 		$this->setResponse($response);
 	}

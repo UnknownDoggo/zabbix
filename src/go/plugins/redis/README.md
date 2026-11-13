@@ -6,12 +6,8 @@ memory usage. Best for use in conjunction with the official
 [Redis template.](https://git.zabbix.com/projects/ZBX/repos/zabbix/browse/templates/db/redis)
 You can extend it or create your template for your specific needs. 
 
-## Requirements
-* Zabbix Agent 2
-* Go >= 1.13 (required only to build from source)
-
 ## Supported versions
-* Redis, version 3.0+
+* Redis, version 3.0+ (TLS support starting 6.0.0)
 
 ## Installation
 The plugin is supplied as a part of Zabbix Agent 2, and it does not require any special installation steps. Once 
@@ -25,15 +21,34 @@ The Zabbix Agent's configuration file is used to configure plugins.
 *Default value:* 300 sec.  
 *Limits:* 60-900
 
-**Plugins.Redis.Timeout** — The maximum time for waiting when a request has to be done.  
+**Plugins.Redis.Timeout** — The maximum time for waiting when a request has to be done.
+
+> The value is now *deprecated*, and used only for requests coming from Zabbix servers older than 7.0 version.
+
 *Default value:* equals the global Timeout configuration parameter.  
+*Limits:* 1-30
+
+**Plugins.Redis.Sessions.TLSConnect** — Encryption type for the Redis connection.  
+*Default value:*  
+*Limits:* `required`, `verify_ca`, `verify_full`
+
+**Plugins.Redis.Sessions.TLSCAFile** — Full pathname of a file containing the top-level CA certificates for Redis.  
+*Default value:*
+
+**Plugins.Redis.Sessions.TLSCertFile** — Full pathname of a file containing the Redis certificate or certificate chain.  
+*Default value:*
+
+**Plugins.Redis.Sessions.TLSKeyFile** — Full pathname of a file containing the Redis private key.  
+*Default value:*
+
+**Plugins.Redis.Sessions.ConnectionTimeout** — Full pathname of a file containing the Redis private key.  
+*Default value:* equals the global Timeout configuration parameter.
 *Limits:* 1-30
 
 ### Configuring connection
 A connection can be configured using either keys' parameters or named sessions.     
 
 *Notes*:  
-* It is not possible to mix configuration using named sessions and keys' parameters simultaneously.
 * You can leave any connection parameter empty, a default hard-coded value will be used in the such case.
 * Embedded URI credentials (userinfo) are forbidden and will be ignored. So, you can't pass the credentials by this:   
   
@@ -41,7 +56,7 @@ A connection can be configured using either keys' parameters or named sessions.
   
   The correct way is:
     
-      redis.ping[tcp://127.0.0.1,password]
+      redis.ping[tcp://127.0.0.1,password,user]
       
 * The only supported network schemas for a URI are "tcp" and "unix".  
 Examples of valid URIs:
@@ -52,24 +67,41 @@ Examples of valid URIs:
     - /var/run/redis.sock
       
 #### Using keys' parameters
-The common parameters for all keys are: [ConnString][,Password]  
-Where ConnString can be either a URI or a session name.   
-ConnString will be treated as a URI if no session with the given name is found.  
-If you use ConnString as a session name, just skip the rest of the connection parameters.  
+The common parameters for all keys are: [ConnString][,Password][,...][,User]
+Where ConnString can be either a URI or a session name.
+ConnString will be treated as a URI if no session with the given name is found.
+If you use ConnString as a session name, just skip the rest of the connection parameters.
+User name defaults to "default" if not set.
+
+User is added as last parameter to keep backward compatibility. User must be added as the final parameter in the whole
+item and not just last connection parameter if there are more non connection parameters.
  
 #### Using named sessions
-Named sessions allow you to define specific parameters for each Redis instance. Currently, there are only two supported 
-parameters: Uri and Password. It's a bit more secure way to store credentials compared to item keys or macros.  
+Named sessions allow you to define specific parameters for each Redis instance. Currently, there are only three
+supported parameters: Uri, Password and User. It's a bit more secure way to store credentials compared to item keys or
+macros.  
 
-E.g: suppose you have two Redis instances: "Prod" and "Test". 
+E.g: suppose you have two Redis instances: "Prod" and "Test" and server is configured to authenticate clients.
 You should add the following options to the agent configuration file:   
 
     Plugins.Redis.Sessions.Prod.Uri=tcp://192.168.1.1:6379  
     Plugins.Redis.Sessions.Prod.Password=<PasswordForProd>  
-      
+    Plugins.Redis.Sessions.Prod.User=<UserForProd>
+    Plugins.Redis.Sessions.Prod.TLSConnect=verify_full
+    Plugins.Redis.Sessions.Prod.TLSCAFile=/path/to/ca_file
+    Plugins.Redis.Sessions.Prod.TLSCertFile=/path/to/cert_file
+    Plugins.Redis.Sessions.Prod.TLSKeyFile=/path/to/key_file
+    Plugins.Redis.Sessions.Prod.ConnectionTimeout=10
+
     Plugins.Redis.Sessions.Test.Uri=tcp://192.168.0.1:6379   
     Plugins.Redis.Sessions.Test.Password=<PasswordForTest>  
-        
+    Plugins.Redis.Sessions.Test.User=<UserForTest>
+    Plugins.Redis.Sessions.Test.TLSConnect=verify_ca
+    Plugins.Redis.Sessions.Test.TLSCAFile=/path/to/test/ca_file
+    Plugins.Redis.Sessions.Test.TLSCertFile=/path/to/test/cert_file
+    Plugins.Redis.Sessions.Test.TLSKeyFile=/path/to/test/key_file
+    Plugins.Redis.Sessions.Test.ConnectionTimeout=10
+
 Then you will be able to use these names as the 1st parameter (ConnString) in keys instead of URIs, e.g:
 
     redis.ping[Prod]
@@ -78,14 +110,18 @@ Then you will be able to use these names as the 1st parameter (ConnString) in ke
 *Note*: sessions names are case-sensitive.
 
 ## Supported keys
-**redis.config[\<commonParams\>[,pattern]]** — Gets a configuration parameters of a Redis instance matching pattern.  
+**redis.config[\<commonParams\>[,pattern][,user]]** — Gets a configuration parameters of a Redis instance matching pattern.  
 *Params:*  
 pattern — Glob-style pattern. The default value is "*".  
 *Returns:*
 - JSON if a glob-style pattern is specified.
 - Single value if a pattern did not contain any wildcard character.
 
-**redis.info[\<commonParams\>[,section]]** — Returns an output of the INFO command serialized to JSON.  
+*Note:*
+-   Security warning: `redis.config` runs the Redis `CONFIG GET` command and may return sensitive configuration parameters (for example `requirepass`, `masterauth`, TLS-related settings, and other secrets).  
+Using the default pattern (`*`) or wide patterns may expose these secrets to anyone with permission to view item values in Zabbix.
+
+**redis.info[\<commonParams\>[,section][,user]]** — Returns an output of the INFO command serialized to JSON.  
 *Params:*  
 section — Section of information. The default section name is "default".
 

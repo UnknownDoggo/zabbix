@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -29,7 +24,6 @@ if ($data['uncheck']) {
 }
 
 $this->includeJsFile('administration.token.list.js.php');
-$this->addJsFile('class.calendar.js');
 
 $filter = (new CFilter())
 	->setResetUrl((new CUrl('zabbix.php'))->setArgument('action', 'token.list'))
@@ -41,7 +35,6 @@ $filter = (new CFilter())
 			->addRow(_('Name'),
 				(new CTextBox('filter_name', $data['filter']['name']))
 					->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
-					->setAttribute('autofocus', 'autofocus')
 			)
 			->addRow(new CLabel(_('Users'), 'filter_userids__ms'), [
 				(new CMultiSelect([
@@ -54,7 +47,7 @@ $filter = (new CFilter())
 							'srctbl' => 'users',
 							'srcfld1' => 'userid',
 							'srcfld2' => 'fullname',
-							'dstfrm' => 'zbx_filter',
+							'dstfrm' => CFilter::FORM_NAME,
 							'dstfld1' => 'filter_userids_'
 						]
 					]
@@ -66,7 +59,7 @@ $filter = (new CFilter())
 					->setId('filter-expires-state')
 					->onClick('view.expiresDaysHandler()'),
 				(new CDiv())->addClass(ZBX_STYLE_FORM_INPUT_MARGIN),
-				(new CNumericBox('filter_expires_days', $data['filter']['expires_days'], 3, false, false, false))
+				(new CNumericBox('filter_expires_days', $data['filter']['expires_days'], 3, false, false))
 					->setId('filter-expires-days')
 					->setEnabled($data['filter']['expires_state'])
 					->setWidth(ZBX_TEXTAREA_NUMERIC_STANDARD_WIDTH),
@@ -85,7 +78,7 @@ $filter = (new CFilter())
 							'srctbl' => 'users',
 							'srcfld1' => 'userid',
 							'srcfld2' => 'fullname',
-							'dstfrm' => 'zbx_filter',
+							'dstfrm' => CFilter::FORM_NAME,
 							'dstfld1' => 'filter_creator_userids_'
 						]
 					]
@@ -100,10 +93,9 @@ $filter = (new CFilter())
 			)
 	]);
 
-$widget = (new CWidget())
+$html_page = (new CHtmlPage())
 	->setTitle(_('API tokens'))
-	->setTitleSubmenu(getAdministrationGeneralSubmenu())
-	->setDocUrl(CDocHelper::getUrl(CDocHelper::ADMINISTRATION_TOKEN_LIST))
+	->setDocUrl(CDocHelper::getUrl(CDocHelper::USERS_TOKEN_LIST))
 	->setControls(
 		(new CTag('nav', true,
 			(new CList())->addItem(
@@ -113,7 +105,7 @@ $widget = (new CWidget())
 	)
 	->addItem($filter);
 
-$token_form = (new CForm('get'))
+$token_form = (new CForm())
 	->addVar('action_src', 'token.list')
 	->setName('token_form');
 
@@ -154,12 +146,20 @@ $token_table = (new CTableInfo())
 				->setArgument('action', 'token.list')
 				->getUrl()
 		)
-	]);
+	])
+	->setPageNavigation($data['paging']);
+
+$csrf_token = CCsrfTokenHelper::get('token');
 
 foreach ($data['tokens'] as $token) {
-	$name = (new CLink($token['name'], 'javascript:void(0)'))
-		->addClass('js-edit-token')
-		->setAttribute('data-tokenid', $token['tokenid']);
+	$token_url = (new CUrl('zabbix.php'))
+		->setArgument('action', 'popup')
+		->setArgument('popup', 'token.edit')
+		->setArgument('tokenid', $token['tokenid'])
+		->setArgument('admin_mode', 1)
+		->getUrl();
+
+	$name = new CLink($token['name'], $token_url);
 
 	$token_table->addRow([
 		new CCheckBox('tokenids['.$token['tokenid'].']', $token['tokenid']),
@@ -169,9 +169,7 @@ foreach ($data['tokens'] as $token) {
 			$token['is_expired'] ? ZBX_STYLE_RED : ZBX_STYLE_GREEN
 		),
 		zbx_date2str(DATE_TIME_FORMAT_SECONDS, $token['created_at']),
-		($token['creator'] === null)
-			? italic(_('Unknown'))
-			: $token['creator'],
+		$token['creator'] === null ? italic(_('Unknown')) : $token['creator'],
 		zbx_date2str(DATE_TIME_FORMAT_SECONDS, $token['lastaccess']),
 		($token['status'] == ZBX_AUTH_TOKEN_ENABLED)
 			? (new CLink(_('Enabled'), (new CUrl('zabbix.php'))
@@ -180,38 +178,47 @@ foreach ($data['tokens'] as $token) {
 					->setArgument('tokenids', (array) $token['tokenid'])
 					->getUrl()
 			))
+				->addCsrfToken($csrf_token)
 				->addClass(ZBX_STYLE_LINK_ACTION)
 				->addClass(ZBX_STYLE_GREEN)
-				->addSID()
 			: (new CLink(_('Disabled'), (new CUrl('zabbix.php'))
 					->setArgument('action_src', 'token.list')
 					->setArgument('action', 'token.enable')
 					->setArgument('tokenids', (array) $token['tokenid'])
 					->getUrl()
 			))
+				->addCsrfToken($csrf_token)
 				->addClass(ZBX_STYLE_LINK_ACTION)
 				->addClass(ZBX_STYLE_RED)
-				->addSID()
 	]);
 }
 
 $token_form->addItem([
 	$token_table,
-	$data['paging'],
 	new CActionButtonList('action', 'tokenids', [
-		'token.enable' => ['name' => _('Enable'), 'confirm' => _('Enable selected API tokens?')],
-		'token.disable' => ['name' => _('Disable'), 'confirm' => _('Disable selected API tokens?')],
+		'token.enable' => [
+			'name' => _('Enable'),
+			'confirm_singular' => _('Enable selected API token?'),
+			'confirm_plural' => _('Enable selected API tokens?'),
+			'csrf_token' => $csrf_token
+		],
+		'token.disable' => [
+			'name' => _('Disable'),
+			'confirm_singular' => _('Disable selected API token?'),
+			'confirm_plural' => _('Disable selected API tokens?'),
+			'csrf_token' => $csrf_token
+		],
 		'token.delete' => [
 			'content' => (new CSimpleButton(_('Delete')))
 				->addClass(ZBX_STYLE_BTN_ALT)
 				->addClass('js-massdelete-token')
-				->addClass('no-chkbxrange')
-				->removeid()
+				->addClass('js-no-chkbxrange')
+				->removeId()
 		]
 	], 'token')
 ]);
 
-$widget
+$html_page
 	->addItem($token_form)
 	->show();
 

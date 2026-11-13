@@ -29,6 +29,23 @@ libzbxdbupgrade_a_SOURCES = \
 	dbupgrade_5050.c \
 	dbupgrade_6000.c \
 	dbupgrade_6010.c \
+	dbupgrade_6020.c \
+	dbupgrade_6030.c \
+	dbupgrade_6040.c \
+	dbupgrade_6050.c \
+	dbupgrade_7000.c \
+	dbupgrade_7010.c \
+	dbupgrade_7020.c \
+	dbupgrade_7030.c \
+	dbupgrade_7040.c \
+	dbupgrade_7050.c \
+	dbupgrade_8000.c \
+	dbupgrade_8010.c \
 	dbupgrade_macros.c \
 	dbupgrade_macros.h \
+	dbupgrade_common.c \
+	dbupgrade_common.h \
 	dbupgrade.h
+
+libzbxdbupgrade_a_CFLAGS = \
+	$(TLS_CFLAGS)

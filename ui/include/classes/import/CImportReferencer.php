@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -30,7 +25,8 @@ class CImportReferencer {
 	 */
 	public $interfaces_cache = [];
 
-	protected $groups = [];
+	protected $template_groups = [];
+	protected $host_groups = [];
 	protected $templates = [];
 	protected $hosts = [];
 	protected $items = [];
@@ -40,16 +36,26 @@ class CImportReferencer {
 	protected $iconmaps = [];
 	protected $images = [];
 	protected $maps = [];
+	protected $services = [];
+	protected $slas = [];
+	protected $users = [];
+	protected $actions = [];
+	protected $media_types = [];
 	protected $template_dashboards = [];
 	protected $template_macros = [];
 	protected $host_macros = [];
+	protected $group_prototypes = [];
 	protected $host_prototype_macros = [];
 	protected $proxies = [];
+	protected $proxy_groups = [];
 	protected $host_prototypes = [];
 	protected $httptests = [];
 	protected $httpsteps = [];
+	protected $dashboards = [];
+	protected $global_regexes = [];
 
-	protected $db_groups;
+	protected $db_template_groups;
+	protected $db_host_groups;
 	protected $db_templates;
 	protected $db_hosts;
 	protected $db_items;
@@ -59,28 +65,39 @@ class CImportReferencer {
 	protected $db_iconmaps;
 	protected $db_images;
 	protected $db_maps;
+	protected $db_services;
+	protected $db_slas;
+	protected $db_users;
+	protected $db_actions;
+	protected $db_media_types;
 	protected $db_template_dashboards;
 	protected $db_template_macros;
 	protected $db_host_macros;
+	protected $db_group_prototypes;
 	protected $db_host_prototype_macros;
 	protected $db_proxies;
+	protected $db_proxy_groups;
 	protected $db_host_prototypes;
 	protected $db_httptests;
 	protected $db_httpsteps;
+	protected $db_dashboards;
+	protected $db_dashboard_pages;
+	protected $db_widgets;
+	protected $db_global_regexes;
 
 	/**
-	 * Get group ID by group UUID.
+	 * Get template group ID by group UUID.
 	 *
 	 * @param string $uuid
 	 *
 	 * @return string|null
 	 */
-	public function findGroupidByUuid(string $uuid): ?string {
-		if ($this->db_groups === null) {
-			$this->selectGroups();
+	public function findTemplateGroupidByUuid(string $uuid): ?string {
+		if ($this->db_template_groups === null) {
+			$this->selectTemplateGroups();
 		}
 
-		foreach ($this->db_groups as $groupid => $group) {
+		foreach ($this->db_template_groups as $groupid => $group) {
 			if ($group['uuid'] === $uuid) {
 				return $groupid;
 			}
@@ -90,18 +107,60 @@ class CImportReferencer {
 	}
 
 	/**
-	 * Get group ID by group name.
+	 * Get host group ID by group UUID.
+	 *
+	 * @param string $uuid
+	 *
+	 * @return string|null
+	 */
+	public function findHostGroupidByUuid(string $uuid): ?string {
+		if ($this->db_host_groups === null) {
+			$this->selectHostGroups();
+		}
+
+		foreach ($this->db_host_groups as $groupid => $group) {
+			if ($group['uuid'] === $uuid) {
+				return $groupid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get template group ID by group name.
 	 *
 	 * @param string $name
 	 *
 	 * @return string|null
 	 */
-	public function findGroupidByName(string $name): ?string {
-		if ($this->db_groups === null) {
-			$this->selectGroups();
+	public function findTemplateGroupidByName(string $name): ?string {
+		if ($this->db_template_groups === null) {
+			$this->selectTemplateGroups();
 		}
 
-		foreach ($this->db_groups as $groupid => $group) {
+		foreach ($this->db_template_groups as $groupid => $group) {
+			if ($group['name'] === $name) {
+				return $groupid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get host group ID by group name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findHostGroupidByName(string $name): ?string {
+		if ($this->db_host_groups === null) {
+			$this->selectHostGroups();
+		}
+
+		foreach ($this->db_host_groups as $groupid => $group) {
 			if ($group['name'] === $name) {
 				return $groupid;
 			}
@@ -242,16 +301,17 @@ class CImportReferencer {
 	 *
 	 * @param string $hostid
 	 * @param string $key
+	 * @param bool   $inherited
 	 *
 	 * @return string|null
 	 */
-	public function findItemidByKey(string $hostid, string $key): ?string {
+	public function findItemidByKey(string $hostid, string $key, bool $inherited = false): ?string {
 		if ($this->db_items === null) {
 			$this->selectItems();
 		}
 
 		foreach ($this->db_items as $itemid => $item) {
-			if ($item['hostid'] === $hostid && $item['key_'] === $key) {
+			if ($item['hostid'] === $hostid && $item['key_'] === $key && ($inherited || $item['templateid'] == 0)) {
 				return $itemid;
 			}
 		}
@@ -348,10 +408,12 @@ class CImportReferencer {
 	 * @param string $name
 	 * @param string $expression
 	 * @param string $recovery_expression
+	 * @param bool   $inherited
 	 *
 	 * @return string|null
 	 */
-	public function findTriggeridByName(string $name, string $expression, string $recovery_expression): ?string {
+	public function findTriggeridByName(string $name, string $expression, string $recovery_expression,
+			bool $inherited = false): ?string {
 		if ($this->db_triggers === null) {
 			$this->selectTriggers();
 		}
@@ -359,7 +421,8 @@ class CImportReferencer {
 		foreach ($this->db_triggers as $triggerid => $trigger) {
 			if ($trigger['description'] === $name
 					&& $trigger['expression'] === $expression
-					&& $trigger['recovery_expression'] === $recovery_expression) {
+					&& $trigger['recovery_expression'] === $recovery_expression
+					&& ($inherited || $trigger['templateid'] == 0)) {
 				return $triggerid;
 			}
 		}
@@ -393,16 +456,19 @@ class CImportReferencer {
 	 *
 	 * @param string $hostid
 	 * @param string $name
+	 * @param bool   $inherited
 	 *
 	 * @return string|null
 	 */
-	public function findGraphidByName(string $hostid, string $name): ?string {
+	public function findGraphidByName(string $hostid, string $name, bool $inherited = false): ?string {
 		if ($this->db_graphs === null) {
 			$this->selectGraphs();
 		}
 
 		foreach ($this->db_graphs as $graphid => $graph) {
-			if ($graph['name'] === $name && in_array($hostid, $graph['hosts'])) {
+			if ($graph['name'] === $name
+					&& in_array($hostid, $graph['hosts'])
+					&& ($inherited || $graph['templateid'] == 0)) {
 				return $graphid;
 			}
 		}
@@ -453,6 +519,111 @@ class CImportReferencer {
 	}
 
 	/**
+	 * Get service ID by name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findServiceidByName(string $name): ?string {
+		if ($this->db_services === null) {
+			$this->selectServices();
+		}
+
+		foreach ($this->db_services as $serviceid => $service) {
+			if ($service['name'] === $name) {
+				return $serviceid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get action ID by name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findSlaidByName(string $name): ?string {
+		if ($this->db_slas === null) {
+			$this->selectSlas();
+		}
+
+		foreach ($this->db_slas as $slaid => $sla) {
+			if ($sla['name'] === $name) {
+				return $slaid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get user ID by username.
+	 *
+	 * @param string $username
+	 *
+	 * @return string|null
+	 */
+	public function findUseridByUsername(string $username): ?string {
+		if ($this->db_users === null) {
+			$this->selectUsers();
+		}
+
+		foreach ($this->db_users as $userid => $user) {
+			if ($user['username'] === $username) {
+				return $userid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get action ID by name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findActionidByName(string $name): ?string {
+		if ($this->db_actions === null) {
+			$this->selectActions();
+		}
+
+		foreach ($this->db_actions as $actionid => $action) {
+			if ($action['name'] === $name) {
+				return $actionid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get media type ID by name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findMediaTypeidByName(string $name): ?string {
+		if ($this->db_media_types === null) {
+			$this->selectMediaTypes();
+		}
+
+		foreach ($this->db_media_types as $mediatypeid => $media_type) {
+			if ($media_type['name'] === $name) {
+				return $mediatypeid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
 	 * Get template dashboard ID by dashboard UUID.
 	 *
 	 * @param string $uuid
@@ -468,6 +639,28 @@ class CImportReferencer {
 
 		foreach ($this->db_template_dashboards as $dashboardid => $dashboard) {
 			if ($dashboard['uuid'] === $uuid) {
+				return $dashboardid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get template dashboard ID by dashboard name and template ID.
+	 *
+	 * @param string $name
+	 * @param int    $templateid
+	 *
+	 * @return string|null
+	 */
+	public function findTemplateDashboardidByNameAndId(string $name, int $templateid): ?string {
+		if ($this->db_template_dashboards === null) {
+			$this->selectTemplateDashboards();
+		}
+
+		foreach ($this->db_template_dashboards as $dashboardid => $dashboard) {
+			if ($dashboard['name'] === $name && $dashboard['templateid'] == $templateid) {
 				return $dashboardid;
 			}
 		}
@@ -514,6 +707,25 @@ class CImportReferencer {
 	}
 
 	/**
+	 * Get group prototype ID by host prototype ID and group prototype name.
+	 *
+	 * @param string $hostid
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findGroupPrototypeId(string $hostid, string $name): ?string {
+		if ($this->db_group_prototypes === null) {
+			$this->selectGroupPrototypes();
+		}
+
+		return (array_key_exists($hostid, $this->db_group_prototypes)
+				&& array_key_exists($name, $this->db_group_prototypes[$hostid]))
+			? $this->db_group_prototypes[$hostid][$name]
+			: null;
+	}
+
+	/**
 	 * Get macro ID by host prototype ID and macro name.
 	 *
 	 * @param string $hostid
@@ -535,18 +747,39 @@ class CImportReferencer {
 	/**
 	 * Get proxy ID by name.
 	 *
-	 * @param string $host
+	 * @param string $name
 	 *
 	 * @return string|null
 	 */
-	public function findProxyidByHost(string $host): ?string {
+	public function findProxyidByName(string $name): ?string {
 		if ($this->db_proxies === null) {
 			$this->selectProxies();
 		}
 
 		foreach ($this->db_proxies as $proxyid => $proxy) {
-			if ($proxy['host'] === $host) {
+			if ($proxy['name'] === $name) {
 				return $proxyid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get proxy group ID by name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findProxyGroupIdByName(string $name): ?string {
+		if ($this->db_proxy_groups === null) {
+			$this->selectProxyGroups();
+		}
+
+		foreach ($this->db_proxy_groups as $proxy_groupid => $proxy_group) {
+			if ($proxy_group['name'] === $name) {
+				return $proxy_groupid;
 			}
 		}
 
@@ -667,22 +900,130 @@ class CImportReferencer {
 	}
 
 	/**
-	 * Add group names that need association with a database group ID.
+	 * Get global dashboard ID by dashboard name.
 	 *
-	 * @param array $groups
+	 * @param string $name
+	 *
+	 * @return string|null
 	 */
-	public function addGroups(array $groups): void {
-		$this->groups = $groups;
+	public function findDashboardidByName(string $name): ?string {
+		if ($this->db_dashboards === null) {
+			$this->selectDashboards();
+		}
+
+		foreach ($this->db_dashboards as $dashboardid => $dashboard) {
+			if ($dashboard['name'] === $name) {
+				return $dashboardid;
+			}
+		}
+
+		return null;
 	}
 
 	/**
-	 * Add group name association with group ID.
+	 * Get global dashboard page ID by dashboard ID and dashboard page index.
+	 *
+	 * @param string $dashboardid
+	 * @param int    $index
+	 *
+	 * @return string|null
+	 */
+	public function findDashboardPageidByIndex(string $dashboardid, int $index): ?string {
+		if ($this->db_dashboard_pages === null) {
+			$this->selectDashboards();
+		}
+
+		if (array_key_exists($dashboardid, $this->db_dashboard_pages)
+				&& array_key_exists($index, $this->db_dashboard_pages[$dashboardid])) {
+			return $this->db_dashboard_pages[$dashboardid][$index]['dashboard_pageid'];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get global dashboard widget ID by dashboard page ID and widget position on the dashboard.
+	 *
+	 * @param string $dashboard_pageid
+	 * @param int    $x
+	 * @param int    $y
+	 *
+	 * @return string|null
+	 */
+	public function findWidgetidByPosition(string $dashboard_pageid, int $x, int $y): ?string {
+		if ($this->db_widgets === null) {
+			$this->selectDashboards();
+		}
+
+		if (array_key_exists($dashboard_pageid, $this->db_widgets)
+				&& array_key_exists($x, $this->db_widgets[$dashboard_pageid])
+				&& array_key_exists($y, $this->db_widgets[$dashboard_pageid][$x])) {
+			return $this->db_widgets[$dashboard_pageid][$x][$y]['widgetid'];
+		}
+
+		return null;
+	}
+
+	/**
+	 * Get global regexp ID by regex name.
+	 *
+	 * @param string $name
+	 *
+	 * @return string|null
+	 */
+	public function findGlobalRegexidByName(string $name): ?string {
+		if ($this->db_global_regexes === null) {
+			$this->selectGlobalRegexes();
+		}
+
+		foreach ($this->db_global_regexes as $regexpid => $global_regex) {
+			if ($global_regex['name'] === $name) {
+				return $regexpid;
+			}
+		}
+
+		return null;
+	}
+
+	/**
+	 * Add template group names that need association with a database group ID.
+	 *
+	 * @param array $groups
+	 */
+	public function addTemplateGroups(array $groups): void {
+		$this->template_groups = $groups;
+	}
+
+	/**
+	 * Add host group names that need association with a database group ID.
+	 *
+	 * @param array $groups
+	 */
+	public function addHostGroups(array $groups): void {
+		$this->host_groups = $groups;
+	}
+
+	/**
+	 * Add template group name association with group ID.
 	 *
 	 * @param string $groupid
 	 * @param array  $group
 	 */
-	public function setDbGroup(string $groupid, array $group): void {
-		$this->db_groups[$groupid] = [
+	public function setDbTemplateGroup(string $groupid, array $group): void {
+		$this->db_template_groups[$groupid] = [
+			'uuid' => $group['uuid'],
+			'name' => $group['name']
+		];
+	}
+
+	/**
+	 * Add host group name association with group ID.
+	 *
+	 * @param string $groupid
+	 * @param array  $group
+	 */
+	public function setDbHostGroup(string $groupid, array $group): void {
+		$this->db_host_groups[$groupid] = [
 			'uuid' => $group['uuid'],
 			'name' => $group['name']
 		];
@@ -750,7 +1091,8 @@ class CImportReferencer {
 		$this->db_items[$itemid] = [
 			'hostid' => $item['hostid'],
 			'uuid' => array_key_exists('uuid', $item) ? $item['uuid'] : '',
-			'key_' => $item['key_']
+			'key_' => $item['key_'],
+			'templateid' => 0
 		];
 	}
 
@@ -792,7 +1134,8 @@ class CImportReferencer {
 			'uuid' => array_key_exists('uuid', $trigger) ? $trigger['uuid'] : '',
 			'description' => $trigger['description'],
 			'expression' => $trigger['expression'],
-			'recovery_expression' => $trigger['recovery_expression']
+			'recovery_expression' => $trigger['recovery_expression'],
+			'templateid' => 0
 		];
 	}
 
@@ -832,7 +1175,6 @@ class CImportReferencer {
 	 * @param array $maps
 	 */
 	public function addMaps(array $maps) {
-//		$this->maps = array_unique(array_merge($this->maps, $maps));
 		$this->maps = $maps;
 	}
 
@@ -846,6 +1188,51 @@ class CImportReferencer {
 		$this->db_maps[$mapid] =[
 			'name' => $map['name']
 		];
+	}
+
+	/**
+	 * Add service names that need association with a database service ID.
+	 *
+	 * @param array $services
+	 */
+	public function addServices(array $services) {
+		$this->services = $services;
+	}
+
+	/**
+	 * Add sla names that need association with a database sla ID.
+	 *
+	 * @param array $slas
+	 */
+	public function addSlas(array $slas) {
+		$this->slas = $slas;
+	}
+
+	/**
+	 * Add user usernames that need association with a database user ID.
+	 *
+	 * @param array $users
+	 */
+	public function addUsers(array $users) {
+		$this->users = $users;
+	}
+
+	/**
+	 * Add action names that need association with a database action ID.
+	 *
+	 * @param array $actions
+	 */
+	public function addActions(array $actions) {
+		$this->actions = $actions;
+	}
+
+	/**
+	 * Add media type names that need association with a database media type ID.
+	 *
+	 * @param array $media_types
+	 */
+	public function addMediaTypes(array $media_types) {
+		$this->media_types = $media_types;
 	}
 
 	/**
@@ -876,6 +1263,15 @@ class CImportReferencer {
 	}
 
 	/**
+	 * Add group prototype names that need association with a database group prototype ID.
+	 *
+	 * @param array $group_prototypes
+	 */
+	public function addGroupPrototypes(array $group_prototypes): void {
+		$this->group_prototypes = $group_prototypes;
+	}
+
+	/**
 	 * Add user macro names that need association with a database macro ID.
 	 *
 	 * @param array $macros[<host name>]  An array of macros by host technical name.
@@ -891,6 +1287,15 @@ class CImportReferencer {
 	 */
 	public function addProxies(array $proxies): void {
 		$this->proxies = $proxies;
+	}
+
+	/**
+	 * Add proxy group names that need association with a database proxy group ID.
+	 *
+	 * @param array $proxy_groups
+	 */
+	public function addProxyGroups(array $proxy_groups): void {
+		$this->proxy_groups = $proxy_groups;
 	}
 
 	/**
@@ -921,26 +1326,69 @@ class CImportReferencer {
 	}
 
 	/**
-	 * Select group ids for previously added group names.
+	 * Add global dashboard names that need association with a database dashboard ID.
+	 *
+	 * Will associate dashboard pages and widgets with the related database object IDs.
+	 *
+	 * @param array $dashboards
 	 */
-	protected function selectGroups(): void {
-		$this->db_groups = [];
+	public function addDashboards(array $dashboards): void {
+		$this->dashboards = $dashboards;
+	}
 
-		if (!$this->groups) {
+	/**
+	 * Add global regexes names that need association with a database regexp ID.
+	 *
+	 * @param array $global_regexes
+	 */
+	public function addGlobalRegexes(array $global_regexes): void {
+		$this->global_regexes = $global_regexes;
+	}
+
+	/**
+	 * Select template group ids for previously added group names.
+	 */
+	protected function selectTemplateGroups(): void {
+		$this->db_template_groups = [];
+
+		if (!$this->template_groups) {
 			return;
 		}
 
-		$this->db_groups = API::HostGroup()->get([
+		$this->db_template_groups = API::TemplateGroup()->get([
 			'output' => ['name', 'uuid'],
 			'filter' => [
-				'uuid' => array_column($this->groups, 'uuid'),
-				'name' => array_keys($this->groups)
+				'uuid' => array_column($this->template_groups, 'uuid'),
+				'name' => array_keys($this->template_groups)
 			],
 			'searchByAny' => true,
 			'preservekeys' => true
 		]);
 
-		$this->groups = [];
+		$this->template_groups = [];
+	}
+
+	/**
+	 * Select host group ids for previously added group names.
+	 */
+	protected function selectHostGroups(): void {
+		$this->db_host_groups = [];
+
+		if (!$this->host_groups) {
+			return;
+		}
+
+		$this->db_host_groups = API::HostGroup()->get([
+			'output' => ['name', 'uuid'],
+			'filter' => [
+				'uuid' => array_column($this->host_groups, 'uuid'),
+				'name' => array_keys($this->host_groups)
+			],
+			'searchByAny' => true,
+			'preservekeys' => true
+		]);
+
+		$this->host_groups = [];
 	}
 
 	/**
@@ -981,7 +1429,6 @@ class CImportReferencer {
 		$this->db_hosts = API::Host()->get([
 			'output' => ['host'],
 			'filter' => ['host' => array_keys($this->hosts)],
-			'templated_hosts' => true,
 			'preservekeys' => true
 		]);
 
@@ -1014,14 +1461,15 @@ class CImportReferencer {
 
 		if ($sql_where) {
 			$db_items = DBselect(
-				'SELECT i.itemid,i.hostid,i.key_,i.uuid FROM items i WHERE '.implode(' OR ', $sql_where)
+				'SELECT i.itemid,i.hostid,i.key_,i.uuid,i.templateid FROM items i WHERE '.implode(' OR ', $sql_where)
 			);
 
 			while ($db_item = DBfetch($db_items)) {
 				$this->db_items[$db_item['itemid']] = [
 					'uuid' => $db_item['uuid'],
 					'key_' => $db_item['key_'],
-					'hostid' => $db_item['hostid']
+					'hostid' => $db_item['hostid'],
+					'templateid' => $db_item['templateid']
 				];
 			}
 		}
@@ -1084,38 +1532,67 @@ class CImportReferencer {
 		}
 
 		$uuids = [];
+		$hosts = [];
 
-		foreach ($this->triggers as $trigger) {
-			foreach ($trigger as $expression) {
-				$uuids += array_flip(array_column($expression, 'uuid'));
+		foreach ($this->triggers as $trigger_references) {
+			foreach ($trigger_references as $expression => $recovery_references) {
+				foreach ($recovery_references as $recovery_expression => $trigger) {
+					if (array_key_exists('uuid', $trigger)) {
+						$uuids[$trigger['uuid']] = true;
+					}
+					else {
+						$trigger += [
+							'expression' => $expression,
+							'recovery_expression' => $recovery_expression
+						];
+
+						$hosts += array_flip(CConfigurationImport::extractHosts($trigger));
+					}
+				}
 			}
 		}
 
-		$db_triggers = API::Trigger()->get([
-			'output' => ['uuid', 'description', 'expression', 'recovery_expression'],
-			'filter' => [
-				'uuid' => array_keys($uuids),
-				'flags' => [
-					ZBX_FLAG_DISCOVERY_NORMAL,
-					ZBX_FLAG_DISCOVERY_PROTOTYPE,
-					ZBX_FLAG_DISCOVERY_CREATED
-				]
-			],
-			'preservekeys' => true
-		]);
+		$db_hosts = $hosts
+			? API::Host()->get([
+				'output' => [],
+				'filter' => [
+					'host' => array_keys($hosts)
+				],
+				'templated_hosts' => true,
+				'preservekeys' => true
+			])
+			: [];
 
-		$db_triggers += API::Trigger()->get([
-			'output' => ['uuid', 'description', 'expression', 'recovery_expression'],
-			'filter' => [
-				'description' => array_keys($this->triggers),
-				'flags' => [
-					ZBX_FLAG_DISCOVERY_NORMAL,
-					ZBX_FLAG_DISCOVERY_PROTOTYPE,
-					ZBX_FLAG_DISCOVERY_CREATED
-				]
-			],
-			'preservekeys' => true
-		]);
+		$db_triggers = $uuids
+			? API::Trigger()->get([
+				'output' => ['uuid', 'description', 'expression', 'recovery_expression', 'templateid'],
+				'filter' => [
+					'uuid' => array_keys($uuids),
+					'flags' => [
+						ZBX_FLAG_DISCOVERY_NORMAL,
+						ZBX_FLAG_DISCOVERY_PROTOTYPE,
+						ZBX_FLAG_DISCOVERY_CREATED
+					]
+				],
+				'preservekeys' => true
+			])
+			: [];
+
+		$db_triggers += $db_hosts
+			? API::Trigger()->get([
+				'output' => ['uuid', 'description', 'expression', 'recovery_expression', 'templateid'],
+				'filter' => [
+					'hostid' => array_keys($db_hosts),
+					'description' => array_keys($this->triggers),
+					'flags' => [
+						ZBX_FLAG_DISCOVERY_NORMAL,
+						ZBX_FLAG_DISCOVERY_PROTOTYPE,
+						ZBX_FLAG_DISCOVERY_CREATED
+					]
+				],
+				'preservekeys' => true
+			])
+			: [];
 
 		if (!$db_triggers) {
 			return;
@@ -1165,8 +1642,8 @@ class CImportReferencer {
 			$graph_names += array_flip(array_keys($graph));
 		}
 
-		$db_graphs =  API::Graph()->get([
-			'output' => ['uuid', 'name'],
+		$db_graphs = API::Graph()->get([
+			'output' => ['uuid', 'name', 'templateid'],
 			'selectHosts' => ['hostid'],
 			'filter' => [
 				'uuid' => array_keys($graph_uuids),
@@ -1176,7 +1653,7 @@ class CImportReferencer {
 		]);
 
 		$db_graphs += API::Graph()->get([
-			'output' => ['uuid', 'name'],
+			'output' => ['uuid', 'name', 'templateid'],
 			'selectHosts' => ['hostid'],
 			'filter' => [
 				'name' => array_keys($graph_names),
@@ -1268,6 +1745,101 @@ class CImportReferencer {
 	}
 
 	/**
+	 * Select service ids for previously added names.
+	 */
+	protected function selectServices(): void {
+		$this->db_services = [];
+
+		if (!$this->services) {
+			return;
+		}
+
+		$this->db_services = API::Service()->get([
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->services)],
+			'preservekeys' => true
+		]);
+
+		$this->services = [];
+	}
+
+	/**
+	 * Select sla ids for previously added names.
+	 */
+	protected function selectSlas(): void {
+		$this->db_slas = [];
+
+		if (!$this->slas) {
+			return;
+		}
+
+		$this->db_slas = API::Sla()->get([
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->slas)],
+			'preservekeys' => true
+		]);
+
+		$this->slas = [];
+	}
+
+	/**
+	 * Select user ids for previously added usernames.
+	 */
+	protected function selectUsers(): void {
+		$this->db_users = [];
+
+		if (!$this->users) {
+			return;
+		}
+
+		$this->db_users = API::User()->get([
+			'output' => ['username'],
+			'filter' => ['username' => array_keys($this->users)],
+			'preservekeys' => true
+		]);
+
+		$this->users = [];
+	}
+
+	/**
+	 * Select action ids for previously added names.
+	 */
+	protected function selectActions(): void {
+		$this->db_actions = [];
+
+		if (!$this->actions) {
+			return;
+		}
+
+		$this->db_actions = API::Action()->get([
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->actions)],
+			'preservekeys' => true
+		]);
+
+		$this->actions = [];
+	}
+
+	/**
+	 * Select media type ids for previously added names.
+	 */
+	protected function selectMediaTypes(): void {
+		$this->db_media_types = [];
+
+		if (!$this->media_types) {
+			return;
+		}
+
+		$this->db_media_types = API::MediaType()->get([
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->media_types)],
+			'preservekeys' => true
+		]);
+
+		$this->media_types = [];
+	}
+
+	/**
 	 * Select template dashboard IDs for previously added dashboard names and template IDs.
 	 *
 	 * @throws APIException
@@ -1279,17 +1851,15 @@ class CImportReferencer {
 			return;
 		}
 
-		$db_template_dashboards = API::TemplateDashboard()->get([
-			'output' => ['uuid'],
-			'filter' => ['uuid' => array_keys($this->template_dashboards)],
+		$this->db_template_dashboards = API::TemplateDashboard()->get([
+			'output' => ['uuid', 'name', 'templateid'],
+			'filter' => [
+				'uuid' => array_keys($this->template_dashboards),
+				'name' => array_unique(array_column($this->template_dashboards, 'name'))
+			],
+			'searchByAny' => true,
 			'preservekeys' => true
 		]);
-
-		foreach ($db_template_dashboards as $dashboardid => $dashboard) {
-			$this->db_template_dashboards[$dashboardid] = [
-				'uuid' => $dashboard['uuid']
-			];
-		}
 
 		$this->template_dashboards = [];
 	}
@@ -1351,6 +1921,48 @@ class CImportReferencer {
 	}
 
 	/**
+	 * Select group prototype IDs for previously added group prototype names.
+	 */
+	protected function selectGroupPrototypes(): void {
+		$this->db_group_prototypes = [];
+
+		$sql_where = [];
+
+		foreach ($this->group_prototypes as $type => $hosts) {
+			foreach ($hosts as $host => $lld_rules) {
+				foreach ($lld_rules as $lld_rule_key => $host_prototypes) {
+					foreach ($host_prototypes as $host_prototype_id => $gp_names) {
+						$sql_where[] = '('.
+							dbConditionString('h.host', [$host]).
+							' AND '.dbConditionString('i.key_', [$lld_rule_key]).
+							' AND '.dbConditionString('hp.'.$type, [$host_prototype_id]).
+							' AND '.dbConditionString('gp.name', $gp_names).
+						')';
+					}
+				}
+			}
+		}
+
+		if ($sql_where) {
+			$db_group_prototypes = DBselect(
+				'SELECT gp.group_prototypeid,gp.hostid,gp.name'.
+				' FROM group_prototype gp,hosts hp,host_discovery hd,items i,hosts h'.
+				' WHERE gp.hostid=hp.hostid'.
+					' AND hp.hostid=hd.hostid'.
+					' AND hd.lldruleid=i.itemid'.
+					' AND i.hostid=h.hostid'.
+					' AND ('.implode(' OR ', $sql_where).')'
+			);
+
+			while ($row = DBfetch($db_group_prototypes)) {
+				$this->db_group_prototypes[$row['hostid']][$row['name']] = $row['group_prototypeid'];
+			}
+		}
+
+		$this->group_prototypes = [];
+	}
+
+	/**
 	 * Select user macro ids for previously added macro names.
 	 */
 	protected function selectHostPrototypeMacros(): void {
@@ -1379,7 +1991,7 @@ class CImportReferencer {
 				' FROM hostmacro hm'.
 					' JOIN hosts hp on hm.hostid=hp.hostid'.
 					' JOIN host_discovery hd on hp.hostid=hd.hostid'.
-					' JOIN items dr on hd.parent_itemid=dr.itemid'.
+					' JOIN items dr on hd.lldruleid=dr.itemid'.
 					' JOIN hosts h on dr.hostid=h.hostid'.
 				' WHERE '.implode(' OR ', $sql_where)
 			);
@@ -1403,12 +2015,31 @@ class CImportReferencer {
 		}
 
 		$this->db_proxies = API::Proxy()->get([
-			'output' => ['host'],
-			'filter' => ['host' => array_keys($this->proxies)],
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->proxies)],
 			'preservekeys' => true
 		]);
 
 		$this->proxies = [];
+	}
+
+	/**
+	 * Select proxy group IDs for previously added proxy group names.
+	 */
+	protected function selectProxyGroups(): void {
+		$this->db_proxy_groups = [];
+
+		if (!$this->proxy_groups) {
+			return;
+		}
+
+		$this->db_proxy_groups = API::ProxyGroup()->get([
+			'output' => ['name'],
+			'filter' => ['name' => array_keys($this->proxy_groups)],
+			'preservekeys' => true
+		]);
+
+		$this->proxy_groups = [];
 	}
 
 	/**
@@ -1433,10 +2064,10 @@ class CImportReferencer {
 
 		if ($sql_where) {
 			$db_host_prototypes = DBselect(
-				'SELECT hp.host,hp.uuid,hp.hostid,hd.parent_itemid,dr.hostid AS parent_hostid'.
+				'SELECT hp.host,hp.uuid,hp.hostid,hd.lldruleid,dr.hostid AS parent_hostid'.
 				' FROM hosts hp'.
 					' JOIN host_discovery hd ON hp.hostid=hd.hostid'.
-					' JOIN items dr ON hd.parent_itemid=dr.itemid'.
+					' JOIN items dr ON hd.lldruleid=dr.itemid'.
 					' JOIN hosts h on dr.hostid=h.hostid'.
 				' WHERE '.implode(' OR ', $sql_where)
 			);
@@ -1445,7 +2076,7 @@ class CImportReferencer {
 					'uuid' => $db_host_prototype['uuid'],
 					'host' => $db_host_prototype['host'],
 					'parent_hostid' => $db_host_prototype['parent_hostid'],
-					'discovery_ruleid' => $db_host_prototype['parent_itemid']
+					'discovery_ruleid' => $db_host_prototype['lldruleid']
 				];
 			}
 		}
@@ -1470,6 +2101,7 @@ class CImportReferencer {
 
 			if ($hostid !== false) {
 				$sql_where[] = '(ht.hostid='.zbx_dbstr($hostid)
+					.' AND ht.templateid IS NULL'
 					.' AND ('
 						.dbConditionString('ht.name', array_keys($httptests))
 						.' OR '.dbConditionString('ht.uuid', array_column($httptests, 'uuid'))
@@ -1537,5 +2169,68 @@ class CImportReferencer {
 				];
 			}
 		}
+	}
+
+	/**
+	 * Select global dashboards, dashboard pages and widgets for previously added dashboard names.
+	 *
+	 * @throws APIException
+	 */
+	protected function selectDashboards(): void {
+		$this->db_dashboards = [];
+		$this->db_dashboard_pages = [];
+		$this->db_widgets = [];
+
+		if (!$this->dashboards) {
+			return;
+		}
+
+		$this->db_dashboards = API::Dashboard()->get([
+			'output' => ['name'],
+			'selectPages' => ['dashboard_pageid', 'widgets'],
+			'filter' => [
+				'name' => array_keys($this->dashboards)
+			],
+			'searchByAny' => true,
+			'preservekeys' => true
+		]);
+
+		foreach ($this->db_dashboards as $dashboardid => &$dashboard) {
+			foreach ($dashboard['pages'] as $index => $dashboard_page) {
+				$this->db_dashboard_pages[$dashboardid][$index] = [
+					'dashboard_pageid' => $dashboard_page['dashboard_pageid']
+				];
+
+				foreach ($dashboard_page['widgets'] as $widget) {
+					$this->db_widgets[$dashboard_page['dashboard_pageid']][$widget['x']][$widget['y']] = [
+						'widgetid' => $widget['widgetid']
+					];
+				}
+			}
+
+			unset($dashboard['pages']);
+		}
+		unset($dashboard);
+
+		$this->dashboards = [];
+	}
+
+	/**
+	 * Select global regex IDs for previously added global regex names.
+	 */
+	protected function selectGlobalRegexes(): void {
+		$this->db_global_regexes = [];
+
+		if (!$this->global_regexes) {
+			return;
+		}
+
+		$this->db_global_regexes = API::Regexp()->get([
+			'output' => ['regexpid', 'name'],
+			'filter' => ['name' => array_keys($this->global_regexes)],
+			'preservekeys' => true
+		]);
+
+		$this->global_regexes = [];
 	}
 }

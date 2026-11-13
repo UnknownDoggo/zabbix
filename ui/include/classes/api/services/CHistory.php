@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -26,12 +21,13 @@ class CHistory extends CApiService {
 
 	public const ACCESS_RULES = [
 		'get' => ['min_user_type' => USER_TYPE_ZABBIX_USER],
-		'clear' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN]
+		'clear' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
+		'push' => ['min_user_type' => USER_TYPE_ZABBIX_USER]
 	];
 
 	protected $tableName;
 	protected $tableAlias = 'h';
-	protected $sortColumns = ['itemid', 'clock'];
+	protected $sortColumns = ['itemid', 'clock', 'ns'];
 
 	public function __construct() {
 		// considering the quirky nature of the history API,
@@ -78,6 +74,7 @@ class CHistory extends CApiService {
 	 *                                                         be matched to the corresponding property given in the
 	 *                                                         sortfield parameter.
 	 * @param int    $options['limit']                         Limit the number of records returned.
+	 * @param int    $options['maxValueSize']                  Limit the length of value to be returned.
 	 * @param bool   $options['editable']                      If set to true return only objects that the user has
 	 *                                                         write permissions to.
 	 *
@@ -86,10 +83,7 @@ class CHistory extends CApiService {
 	 */
 	public function get($options = []) {
 		$value_types = [ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_LOG, ITEM_VALUE_TYPE_UINT64,
-			ITEM_VALUE_TYPE_TEXT
-		];
-		$common_value_types = [ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_UINT64,
-			ITEM_VALUE_TYPE_TEXT
+			ITEM_VALUE_TYPE_TEXT, ITEM_VALUE_TYPE_BINARY, ITEM_VALUE_TYPE_JSON
 		];
 
 		$api_input_rules = ['type' => API_OBJECT, 'fields' => [
@@ -100,57 +94,33 @@ class CHistory extends CApiService {
 			'time_from' =>				['type' => API_INT32, 'flags' => API_ALLOW_NULL, 'default' => null],
 			'time_till' =>				['type' => API_INT32, 'flags' => API_ALLOW_NULL, 'default' => null],
 			'filter' =>					['type' => API_MULTIPLE, 'default' => null, 'rules' => [
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'itemid' =>					['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'clock' =>					['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'timestamp' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'source' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'severity' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'logeventid' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'ns' =>						['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]],
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_TEXT])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'itemid' =>					['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'clock' =>					['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'ns' =>						['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]],
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_UINT64])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'itemid' =>					['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'clock' =>					['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'ns' =>						['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'value' =>					['type' => API_UINTS64, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]],
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_FLOAT])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'itemid' =>					['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'clock' =>					['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'ns' =>						['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'value' =>					['type' => API_FLOATS, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]]
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => ['itemid', 'clock', 'timestamp', 'source', 'severity', 'logeventid', 'ns']],
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_TEXT, ITEM_VALUE_TYPE_BINARY, ITEM_VALUE_TYPE_JSON])], 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => ['itemid', 'clock', 'ns']],
+											['else' => true, 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => ['itemid', 'clock', 'ns', 'value']]
 			]],
 			'search' =>					['type' => API_MULTIPLE, 'default' => null, 'rules' => [
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'source' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-					'value' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]],
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_TEXT])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => [
-					'value' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-				]],
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_UINT64])], 'type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'fields' => []]
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => ['source', 'value']],
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_TEXT])], 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => ['value']],
+											['else' => true, 'type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'fields' => []]
 			]],
 			'searchByAny' =>			['type' => API_BOOLEAN, 'default' => false],
 			'startSearch' =>			['type' => API_FLAG, 'default' => false],
 			'excludeSearch' =>			['type' => API_FLAG, 'default' => false],
 			'searchWildcardsEnabled' =>	['type' => API_BOOLEAN, 'default' => false],
 			// output
-			'output' =>					['type' => API_MULTIPLE, 'default' => API_OUTPUT_EXTEND, 'rules' => [
-											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_OUTPUT, 'in' => implode(',', ['itemid', 'clock', 'timestamp', 'source', 'severity', 'value', 'logeventid', 'ns'])],
-											['if' => ['field' => 'history', 'in' => implode(',', $common_value_types)], 'type' => API_OUTPUT, 'in' => implode(',', ['itemid', 'clock', 'value', 'ns'])]
+			'output' =>					['type' => API_MULTIPLE, 'rules' => [
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_LOG])], 'type' => API_OUTPUT, 'flags' => API_NORMALIZE, 'in' => implode(',', ['itemid', 'clock', 'timestamp', 'source', 'severity', 'value', 'logeventid', 'ns']), 'default' => API_OUTPUT_EXTEND],
+											['else' => true, 'type' => API_OUTPUT, 'flags' => API_NORMALIZE, 'in' => implode(',', ['itemid', 'clock', 'value', 'ns']), 'default' => API_OUTPUT_EXTEND]
 			]],
 			'countOutput' =>			['type' => API_FLAG, 'default' => false],
 			// sort and limit
 			'sortfield' =>				['type' => API_STRINGS_UTF8, 'flags' => API_NORMALIZE, 'in' => implode(',', $this->sortColumns), 'uniq' => true, 'default' => []],
 			'sortorder' =>				['type' => API_SORTORDER, 'default' => []],
 			'limit' =>					['type' => API_INT32, 'flags' => API_ALLOW_NULL, 'in' => '1:'.ZBX_MAX_INT32, 'default' => null],
+			'maxValueSize' =>			['type' => API_MULTIPLE, 'rules' => [
+											['if' => ['field' => 'history', 'in' => implode(',', [ITEM_VALUE_TYPE_BINARY, ITEM_VALUE_TYPE_JSON])], 'flags' => API_ALLOW_NULL, 'type' => API_INT32, 'in' => '1:'.(128 * ZBX_MEBIBYTE), 'default' => (64 * ZBX_KIBIBYTE)],
+											['else' => true, 'type' => API_UNEXPECTED]
+			]],
 			// flags
 			'editable' =>				['type' => API_BOOLEAN, 'default' => false]
 		]];
@@ -165,21 +135,37 @@ class CHistory extends CApiService {
 				'itemids' => $options['itemids'],
 				'hostids' => $options['hostids'],
 				'editable' => $options['editable'],
+				'templated' => false,
 				'webitems' => true,
 				'preservekeys' => true
 			]);
 			$options['itemids'] = array_keys($items);
 		}
 
-		$this->tableName = CHistoryManager::getTableName($options['history']);
+		$_output = $options['output'];
 
-		switch (CHistoryManager::getDataSourceType($options['history'])) {
-			case ZBX_HISTORY_SOURCE_ELASTIC:
-				return $this->getFromElasticsearch($options);
-
-			default:
-				return $this->getFromSql($options);
+		if (!$options['countOutput'] && !$options['output']) {
+			$options['output'] = ['itemid'];
 		}
+
+		$result = match (Manager::History()->getDataSourceType($options['history'])) {
+			ZBX_HISTORY_SOURCE_ELASTIC => $this->getFromElasticsearch($options),
+			ZBX_HISTORY_SOURCE_CLICKHOUSE => $this->getFromClickHouse($options),
+			ZBX_HISTORY_SOURCE_SQL => $this->getFromSql($options)
+		};
+
+		if ($options['countOutput']) {
+			return (string) $result;
+		}
+
+		if ($options['history'] == ITEM_VALUE_TYPE_BINARY && $this->outputIsRequested('value', $options['output'])) {
+			foreach ($result as &$row) {
+				$row['value'] = base64_encode($row['value']);
+			}
+			unset($row);
+		}
+
+		return $this->unsetExtraFields($result, ['itemid'], $_output);
 	}
 
 	/**
@@ -187,13 +173,16 @@ class CHistory extends CApiService {
 	 *
 	 * @see CHistory::get
 	 */
-	private function getFromSql($options) {
-		$result = [];
+	private function getFromSql(array $options) {
+		if (CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY_GLOBAL) == 1) {
+			$hk_history = timeUnitToSeconds(CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY));
+			$options['time_from'] = max($options['time_from'], time() - $hk_history + 1);
+		}
+
+		$this->tableName = Manager::History()->getTableName($options['history']);
 		$sql_parts = [
-			'select'	=> ['history' => 'h.itemid'],
-			'from'		=> [
-				'history' => $this->tableName.' h'
-			],
+			'select'	=> [],
+			'from'		=> $this->tableName.' h',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> []
@@ -201,27 +190,86 @@ class CHistory extends CApiService {
 
 		// itemids
 		if ($options['itemids'] !== null) {
-			$sql_parts['where']['itemid'] = dbConditionInt('h.itemid', $options['itemids']);
-		}
-
-		// time_from
-		if ($options['time_from'] !== null) {
-			$sql_parts['where']['clock_from'] = 'h.clock>='.$options['time_from'];
-		}
-
-		// time_till
-		if ($options['time_till'] !== null) {
-			$sql_parts['where']['clock_till'] = 'h.clock<='.$options['time_till'];
+			$sql_parts['where']['itemid'] = dbConditionId('h.itemid', $options['itemids']);
 		}
 
 		// filter
 		if ($options['filter'] !== null) {
-			$this->dbFilter($sql_parts['from']['history'], $options, $sql_parts);
+			$this->dbFilter($sql_parts['from'], $options, $sql_parts);
 		}
 
 		// search
 		if ($options['search'] !== null) {
-			zbx_db_search($sql_parts['from']['history'], $options, $sql_parts);
+			zbx_db_search($sql_parts['from'], $options, $sql_parts);
+		}
+
+		$use_time_based_chunking = $options['limit'] !== null && reset($options['sortfield']) === 'clock'
+			&& $options['sortorder'] && ((array) $options['sortorder'])[0] === ZBX_SORT_DOWN;
+
+		return $use_time_based_chunking
+			? $this->getFromSqlUsingTimeBasedChunking($options, $sql_parts)
+			: $this->getFromSqlDirectly($options, $sql_parts);
+	}
+
+	private function getFromSqlUsingTimeBasedChunking(array $options, array $sql_parts) {
+		$result = [];
+		$count = 0;
+
+		$segments = self::getTimeRangeSegments($options);
+
+		foreach ($segments as $segment) {
+			if ($options['countOutput']) {
+				$count += $this->getFromSqlDirectly($segment + $options, $sql_parts);
+			}
+			else {
+				$result = array_merge($result, $this->getFromSqlDirectly(
+					$segment + ['limit' => $options['limit'] - count($result)] + $options,
+					$sql_parts
+				));
+
+				if (count($result) >= $options['limit']) {
+					return array_slice($result, 0, $options['limit'], true);
+				}
+			}
+		}
+
+		return $options['countOutput'] ? (string) $count : $result;
+	}
+
+	private static function getTimeRangeSegments(array $options): array {
+		$now = time();
+		$min_time_from = $options['time_from'] !== null ? $options['time_from'] : 0;
+		$max_time_till = $options['time_till'] !== null ? $options['time_till'] : $now;
+
+		if ($min_time_from > $max_time_till) {
+			return [];
+		}
+
+		$window_sizes = [SEC_PER_HOUR, SEC_PER_DAY, SEC_PER_WEEK, SEC_PER_MONTH];
+
+		$segments = [];
+		$time_from = null;
+
+		do {
+			$window_size = array_shift($window_sizes);
+			$time_till = $time_from === null ? $max_time_till : ($time_from - 1);
+			$time_from = $window_size !== null ? max($time_till - $window_size + 1, $min_time_from) : $min_time_from;
+
+			$segments[] = ($time_from > 0 ? ['time_from' => $time_from] : [])
+				+ ($time_till < $now ? ['time_till' => $time_till] : []);
+		}
+		while ($time_from != $min_time_from);
+
+		return $segments;
+	}
+
+	private function getFromSqlDirectly(array $options, array $sql_parts) {
+		if ($options['time_from'] !== null) {
+			$sql_parts['where']['clock_from'] = 'h.clock>='.$options['time_from'];
+		}
+
+		if ($options['time_till'] !== null) {
+			$sql_parts['where']['clock_till'] = 'h.clock<='.$options['time_till'];
 		}
 
 		$sql_parts = $this->applyQueryOutputOptions($this->tableName(), $this->tableAlias(), $options, $sql_parts);
@@ -229,6 +277,7 @@ class CHistory extends CApiService {
 
 		$db_res = DBselect(self::createSelectQueryFromParts($sql_parts), $options['limit']);
 
+		$result = [];
 		while ($data = DBfetch($db_res)) {
 			if ($options['countOutput']) {
 				$result = $data['rowscount'];
@@ -241,14 +290,28 @@ class CHistory extends CApiService {
 		return $result;
 	}
 
+	protected function applyQueryOutputOptions(string $table_name, string $table_alias, array $options, array $sql_parts) {
+		$sql_parts = parent::applyQueryOutputOptions($table_name, $table_alias, $options, $sql_parts);
+
+		if (($options['history'] == ITEM_VALUE_TYPE_JSON || $options['history'] == ITEM_VALUE_TYPE_BINARY)
+				&& $options['maxValueSize'] !== null && !$options['countOutput']
+				&& $this->outputIsRequested('value', $options['output'])) {
+			$value_index = array_search($this->fieldId('value', $table_alias), $sql_parts['select']);
+			$sql_parts['select'][$value_index] = dbSubstring('value', 1, $options['maxValueSize']);
+		}
+
+		return $sql_parts;
+	}
+
 	/**
 	 * Elasticsearch specific implementation of get.
 	 *
 	 * @see CHistory::get
 	 */
-	private function getFromElasticsearch($options) {
+	private function getFromElasticsearch(array $options) {
 		$query = [];
-		$schema = DB::getSchema($this->tableName);
+		$table = Manager::History()->getTableName($options['history']);
+		$schema = DB::getSchema($table);
 
 		// itemids
 		if ($options['itemids'] !== null) {
@@ -264,6 +327,7 @@ class CHistory extends CApiService {
 			$query['query']['bool']['must'][] = [
 				'range' => [
 					'clock' => [
+						'format' => CElasticsearchHelper::DATE_FORMAT,
 						'gte' => $options['time_from']
 					]
 				]
@@ -275,6 +339,7 @@ class CHistory extends CApiService {
 			$query['query']['bool']['must'][] = [
 				'range' => [
 					'clock' => [
+						'format' => CElasticsearchHelper::DATE_FORMAT,
 						'lte' => $options['time_till']
 					]
 				]
@@ -283,18 +348,32 @@ class CHistory extends CApiService {
 
 		// filter
 		if ($options['filter'] !== null) {
-			$query = CElasticsearchHelper::addFilter(DB::getSchema($this->tableName), $query, $options);
+			if (array_key_exists('clock', $options['filter']) && $options['filter']['clock'] !== null) {
+				$options['filter']['clock'] = array_map('strval', $options['filter']['clock']);
+			}
+
+			$query = CElasticsearchHelper::addFilter($schema, $query, $options);
 		}
 
 		// search
 		if ($options['search'] !== null) {
-			$query = CElasticsearchHelper::addSearch($schema, $query, $options);
+			$query = CElasticsearchHelper::addSearch($table, $query, $options);
+		}
+
+		// count
+		if ($options['countOutput']) {
+			$endpoints = Manager::History()->getElasticsearchEndpoints($options['history'], '_count');
+			if (!$endpoints) {
+				return null;
+			}
+
+			$result = CElasticsearchHelper::query('POST', reset($endpoints), $query);
+
+			return $result['count'] ?? 0;
 		}
 
 		// output
-		if ($options['countOutput'] === false && $options['output'] !== API_OUTPUT_EXTEND) {
-			$query['_source'] = $options['output'];
-		}
+		$query['_source'] = $options['output'];
 
 		// sorting
 		if ($options['sortfield']) {
@@ -306,12 +385,56 @@ class CHistory extends CApiService {
 			$query['size'] = $options['limit'];
 		}
 
-		$endpoints = CHistoryManager::getElasticsearchEndpoints($options['history']);
-		if ($endpoints) {
-			return CElasticsearchHelper::query('POST', reset($endpoints), $query);
+		if ($options['history'] === ITEM_VALUE_TYPE_JSON && $options['maxValueSize'] !== null
+				&& in_array('value', $options['output'])) {
+			$query['_source'] = array_values(array_diff($options['output'], ['value']));
+
+			if (!$query['_source']) {
+				// Avoid returning the original full-length value when only 'value' is requested.
+				$query['_source'] = false;
+			}
+
+			$query['script_fields'] = [
+				'value' => CElasticsearchHelper::getSubstring('value', (int) $options['maxValueSize'])
+			];
 		}
 
-		return null;
+		$endpoints = Manager::History()->getElasticsearchEndpoints($options['history']);
+		if (!$endpoints) {
+			return null;
+		}
+
+		$result = CElasticsearchHelper::query('POST', reset($endpoints), $query);
+
+		foreach ($result as &$row) {
+			$row = CElasticsearchHelper::normalizeDocument($row, $options['history']);
+		}
+		unset($row);
+
+		return $result;
+	}
+
+	/**
+	 * ClickHouse specific implementation of get.
+	 *
+	 * @see CHistory::get
+	 */
+	private function getFromClickHouse(array $options) {
+		$value_type_ttl = Manager::History()->getValueTypesStorageTtls()[$options['history']]['value_ttl'];
+
+		if ($value_type_ttl !== null) {
+			$options['time_from'] = max($options['time_from'], time() - $value_type_ttl + 1);
+		}
+
+		/** @var CClickHouseStorage $storage */
+		$storage = Manager::History()->getStorageProviderInstance($options['history']);
+		$result = $storage->select($options);
+
+		if ($storage->getErrorCode() !== null) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $storage->getErrorMessage());
+		}
+
+		return $options['countOutput'] ? $result[0]['rowscount'] : $result;
 	}
 
 	/**
@@ -334,22 +457,23 @@ class CHistory extends CApiService {
 	/**
 	 * Validates the input parameters for the clear() method.
 	 *
-	 * @static
-	 *
 	 * @param array      $itemids
 	 * @param array|null $db_items
 	 *
 	 * @throws APIException if the input is invalid
-	 * @throws APIException if comperesion is enabled
+	 * @throws APIException if compression is enabled
 	 */
-	private static function validateClear(array $itemids, array &$db_items = null): void {
+	private static function validateClear(array $itemids, ?array &$db_items = null): void {
+		global $DB;
+
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 
 		if (!CApiInputValidator::validate($api_input_rules, $itemids, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
 
-		if (CHousekeepingHelper::get(CHousekeepingHelper::COMPRESSION_STATUS)) {
+		if ($DB['TYPE'] == ZBX_DB_POSTGRESQL && CHousekeepingHelper::get(CHousekeepingHelper::COMPRESSION_STATUS)
+				&& self::checkCompressionAvailability() === true) {
 			self::exception(ZBX_API_ERROR_INTERNAL, _('History cleanup is not supported if compression is enabled'));
 		}
 
@@ -364,5 +488,59 @@ class CHistory extends CApiService {
 		if (count($db_items) != count($itemids)) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
+	}
+
+	/**
+	 * Returns true if database supports data compression. False otherwise.
+	 */
+	private static function checkCompressionAvailability(): bool {
+		foreach (CSettingsHelper::getDbVersionStatus() as $dbversion) {
+			if ($dbversion['database'] === ZBX_DB_EXTENSION_TIMESCALEDB) {
+				return array_key_exists('compression_availability', $dbversion)
+					&& (bool) $dbversion['compression_availability'];
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * @param array $history
+	 *
+	 * @throws APIException
+	 *
+	 * @return array
+	 */
+	public function push(array $history): array {
+		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'fields' => [
+			'itemid' =>	['type' => API_ID],
+			'host' =>	['type' => API_STRING_UTF8],
+			'key' =>	['type' => API_STRING_UTF8],
+			'value' =>	['type' => API_VALUE, 'flags' => API_REQUIRED],
+			'clock' =>	['type' => API_TIMESTAMP],
+			'ns' =>		['type' => API_INT32, 'in' => '0:999999999']
+		]];
+
+		if (!CApiInputValidator::validate($api_input_rules, $history, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
+
+		global $ZBX_SERVER, $ZBX_SERVER_PORT;
+
+		$zabbix_server = new CZabbixServer($ZBX_SERVER, $ZBX_SERVER_PORT,
+			timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::CONNECT_TIMEOUT)),
+			timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::SCRIPT_TIMEOUT)), ZBX_SOCKET_BYTES_LIMIT
+		);
+
+		$result = $zabbix_server->pushHistory($history, self::getAuthIdentifier());
+
+		if ($result === false) {
+			self::exception(ZBX_API_ERROR_INTERNAL, $zabbix_server->getError());
+		}
+
+		return [
+			'response' => 'success',
+			'data' => $result
+		];
 	}
 }

@@ -1,37 +1,33 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 /**
  * @var CPartial $this
+ * @var array    $data
  */
 
 $table = (new CTableInfo())
 	->setHeader([
-		($data['source'] === 'scheduledreport-form')
+		($data['source'] === 'scheduledreport-list-form')
 			? (new CColHeader((new CCheckBox('all_scheduledreports'))
 				->setAttribute('data-source', $data['source'])
 				->onClick('checkAll(this.dataset.source, "all_scheduledreports", "reportids");')
 			))->addClass(ZBX_STYLE_CELL_WIDTH)
 			: null,
-		($data['source'] === 'scheduledreport-form')
+		($data['source'] === 'scheduledreport-list-form')
 			? make_sorting_header(_('Name'), 'name', $data['sort'], $data['sortorder'],
 				(new CUrl('zabbix.php'))
 					->setArgument('action', 'scheduledreport.list')
@@ -44,7 +40,8 @@ $table = (new CTableInfo())
 		_('Last sent'),
 		_('Status'),
 		_('Info')
-	]);
+	])
+	->setPageNavigation(array_key_exists('paging', $data) ? $data['paging'] : null);
 
 $cycles = [
 	ZBX_REPORT_CYCLE_DAILY => _('Daily'),
@@ -64,8 +61,9 @@ $now = time();
 
 foreach ($data['reports'] as $report) {
 	$name = new CLink($report['name'], (new CUrl('zabbix.php'))
-		->setArgument('action', 'scheduledreport.edit')
+		->setArgument('action', 'popup')
 		->setArgument('reportid', $report['reportid'])
+		->setArgument('popup', 'scheduledreport.edit')
 	);
 
 	$info_icons = [];
@@ -98,22 +96,19 @@ foreach ($data['reports'] as $report) {
 		}
 	}
 
-	$status = ($data['source'] === 'scheduledreport-form' && $data['allowed_edit'])
-		? (new CLink($status_name, (new CUrl('zabbix.php'))
-			->setArgument('action', ($report['status'] == ZBX_REPORT_STATUS_DISABLED)
-				? 'scheduledreport.enable'
-				: 'scheduledreport.disable'
+	$status = ($data['source'] === 'scheduledreport-list-form' && $data['allowed_edit'])
+		? (new CLink($status_name))
+			->setAttribute('data-reportid', $report['reportid'])
+			->addClass(($report['status'] == ZBX_REPORT_STATUS_DISABLED)
+				? 'js-enable-scheduledreport'
+				: 'js-disable-scheduledreport'
 			)
-			->setArgument('reportids', [$report['reportid']])
-			->getUrl()
-		))
 			->addClass(ZBX_STYLE_LINK_ACTION)
-			->addSID()
 		: new CSpan($status_name);
 	$status->addClass($status_class);
 
 	$table->addRow([
-		($data['source'] === 'scheduledreport-form')
+		($data['source'] === 'scheduledreport-list-form')
 			? new CCheckBox('reportids['.$report['reportid'].']', $report['reportid'])
 			: null,
 		(new CCol($name))->addClass(ZBX_STYLE_WORDBREAK),

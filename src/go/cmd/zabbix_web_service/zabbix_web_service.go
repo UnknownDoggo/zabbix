@@ -1,40 +1,54 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package main
 
 import (
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
-	"git.zabbix.com/ap/plugin-support/conf"
-	"git.zabbix.com/ap/plugin-support/log"
-	"zabbix.com/pkg/version"
-	"zabbix.com/pkg/zbxnet"
+	"golang.zabbix.com/agent2/pkg/version"
+	"golang.zabbix.com/sdk/conf"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/zbxflag"
+	"golang.zabbix.com/sdk/zbxnet"
+)
+
+const usageMessageFormat = //
+`Usage of Zabbix web service:
+  %[1]s [-c config-file]
+  %[1]s [-c config-file] -T
+  %[1]s -h
+  %[1]s -V
+
+Options:
+%[2]s
+`
+
+const (
+	tlsAcceptCert         = "cert"
+	serverShutdownTimeout = 5 * time.Second
 )
 
 var (
@@ -43,30 +57,70 @@ var (
 )
 
 type handler struct {
-	allowedPeers *zbxnet.AllowedPeers
+	allowedPeers    *zbxnet.AllowedPeers
+	breakpadDumpDir string
 }
 
 func main() {
-	var confFlag string
-	var helpFlag bool
-	var versionFlag bool
+	var (
+		confFlag       string
+		helpFlag       bool
+		testConfigFlag bool
+		versionFlag    bool
+	)
 
 	version.Init(applicationName)
 
-	const (
-		confDescription    = "Path to the configuration file"
-		helpDefault        = false
-		helpDescription    = "Display this help message"
-		versionDefault     = false
-		versionDescription = "Print program version and exit"
-	)
+	f := zbxflag.Flags{
+		&zbxflag.StringFlag{
+			Flag: zbxflag.Flag{
+				Name:      "config",
+				Shorthand: "c",
+				Description: fmt.Sprintf(
+					"Path to the configuration file (default: %q)", confDefault,
+				),
+			},
+			Default: confDefault,
+			Dest:    &confFlag,
+		},
+		&zbxflag.BoolFlag{
+			Flag: zbxflag.Flag{
+				Name:        "test-config",
+				Shorthand:   "T",
+				Description: "Validate configuration file and exit",
+			},
+			Default: false,
+			Dest:    &testConfigFlag,
+		},
+		&zbxflag.BoolFlag{
+			Flag: zbxflag.Flag{
+				Name:        "help",
+				Shorthand:   "h",
+				Description: "Display this help message",
+			},
+			Default: false,
+			Dest:    &helpFlag,
+		},
+		&zbxflag.BoolFlag{
+			Flag: zbxflag.Flag{
+				Name:        "version",
+				Shorthand:   "V",
+				Description: "Print program version and exit",
+			},
+			Default: false,
+			Dest:    &versionFlag,
+		},
+	}
 
-	flag.StringVar(&confFlag, "config", confDefault, confDescription)
-	flag.StringVar(&confFlag, "c", confDefault, confDescription+" (shorthand)")
-	flag.BoolVar(&helpFlag, "help", helpDefault, helpDescription)
-	flag.BoolVar(&helpFlag, "h", helpDefault, helpDescription+" (shorthand)")
-	flag.BoolVar(&versionFlag, "version", versionDefault, versionDescription)
-	flag.BoolVar(&versionFlag, "V", versionDefault, versionDescription+" (shorthand)")
+	f.Register(flag.CommandLine)
+
+	flag.Usage = func() {
+		fmt.Printf(
+			usageMessageFormat,
+			os.Args[0],
+			f.Usage(),
+		)
+	}
 
 	flag.Parse()
 
@@ -76,12 +130,26 @@ func main() {
 	}
 
 	if versionFlag {
-		version.Display()
+		version.Display(nil)
 		os.Exit(0)
+	}
+
+	if testConfigFlag {
+		if confFlag == "" {
+			fmt.Fprintf(os.Stderr, "cannot validate configuration file: %s\n", "it was not specified")
+			os.Exit(1)
+		}
+
+		fmt.Printf("Validating configuration file \"%s\"\n", confFlag)
 	}
 
 	if err := conf.Load(confFlag, &options); err != nil {
 		fatalExit("", err)
+	}
+
+	if testConfigFlag {
+		fmt.Println("Validation successful")
+		os.Exit(0)
 	}
 
 	var logType, logLevel int
@@ -110,22 +178,27 @@ func main() {
 		logLevel = log.Trace
 	}
 
-	if err := log.Open(logType, logLevel, options.LogFile, options.LogFileSize); err != nil {
+	logOptions := log.NewOptions().
+		WithLogType(logType).
+		WithLevel(logLevel).
+		WithFilename(options.LogFile).
+		WithSyslogName("zabbix_web_service").
+		WithFileSize(options.LogFileSize)
+
+	err := log.NewWithOptions(logOptions)
+	if err != nil {
 		fatalExit("cannot initialize logger", err)
 	}
 
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	log.Infof("starting Zabbix web service")
 
-	go func() {
-		if err := run(); err != nil {
-			fatalExit("failed to start", err)
-		}
-	}()
-
-	<-stop
+	err = run(ctx)
+	if err != nil {
+		fatalExit("failed to start", err)
+	}
 
 	farewell := "Zabbix web service stopped."
 	log.Infof(farewell)
@@ -135,38 +208,106 @@ func main() {
 	}
 }
 
-func run() error {
-	var h handler
+func run(ctx context.Context) error {
+	allowedPeers, err := zbxnet.GetAllowedPeers(options.AllowedIP)
+	if err != nil {
+		return errs.Wrap(err, "failed to parse allowed peers")
+	}
 
-	var err error
+	breakpadDumpDir, err := os.MkdirTemp("", "zabbix-web-service-breakpad-*")
+	if err != nil {
+		return errs.Wrap(err, "failed to create temp dir for breakpad dump")
+	}
 
-	if h.allowedPeers, err = zbxnet.GetAllowedPeers(options.AllowedIP); err != nil {
+	defer func() {
+		cleanupErr := os.RemoveAll(breakpadDumpDir)
+		if cleanupErr != nil {
+			log.Errf("failed to remove breakpad dump directory %q: %s", breakpadDumpDir, cleanupErr)
+		}
+	}()
+
+	h := handler{
+		allowedPeers:    allowedPeers,
+		breakpadDumpDir: breakpadDumpDir,
+	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/report", h.report)
+
+	err = validateTLSFiles()
+	if err != nil {
 		return err
 	}
 
-	http.HandleFunc("/report", h.report)
-
-	if err := validateTLSFiles(); err != nil {
+	server, err := createHTTPServer(mux)
+	if err != nil {
 		return err
 	}
 
-	switch options.TLSAccept {
-	case "cert":
-		server, err := createTLSServer()
+	serverErr := make(chan error, 1)
+
+	go func() {
+		serverErr <- serve(server)
+	}()
+
+	select {
+	case <-ctx.Done():
+		// The shutdown deadline must not inherit cancellation from ctx.
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), serverShutdownTimeout)
+		defer cancel()
+
+		err = server.Shutdown(shutdownCtx) //nolint:contextcheck
 		if err != nil {
-			return err
+			return errs.Wrap(err, "failed to shutdown HTTP server")
 		}
 
-		return server.ListenAndServeTLS(options.TLSCertFile, options.TLSKeyFile)
-	case "", "unencrypted":
-		return http.ListenAndServe(":"+options.ListenPort, nil)
+		return normalizeServerError(<-serverErr)
+
+	case err := <-serverErr:
+		return normalizeServerError(err)
+	}
+}
+
+func createHTTPServer(handler http.Handler) (*http.Server, error) {
+	if options.TLSAccept == tlsAcceptCert {
+		server, err := createTLSServer()
+		if err != nil {
+			return nil, err
+		}
+
+		server.Handler = handler
+
+		return server, nil
 	}
 
-	return nil
+	// Keep the existing timeout behavior; configuring server timeouts is outside this refactor.
+	return &http.Server{ //nolint:gosec
+		Addr:    ":" + options.ListenPort,
+		Handler: handler,
+	}, nil
+}
+
+func serve(server *http.Server) error {
+	if options.TLSAccept == tlsAcceptCert {
+		err := server.ListenAndServeTLS(options.TLSCertFile, options.TLSKeyFile)
+
+		return errs.Wrap(err, "failed to serve HTTPS")
+	}
+
+	err := server.ListenAndServe()
+
+	return errs.Wrap(err, "failed to serve HTTP")
+}
+
+func normalizeServerError(err error) error {
+	if errors.Is(err, http.ErrServerClosed) {
+		return nil
+	}
+
+	return err
 }
 
 func fatalExit(message string, err error) {
-	if len(message) == 0 {
+	if message == "" {
 		message = err.Error()
 	} else {
 		message = fmt.Sprintf("%s: %s", message, err.Error())
@@ -182,7 +323,7 @@ func fatalExit(message string, err error) {
 
 func validateTLSFiles() error {
 	switch options.TLSAccept {
-	case "cert":
+	case tlsAcceptCert:
 		if options.TLSCAFile == "" {
 			return errors.New("missing TLSCAFile configuration parameter")
 		}
@@ -210,7 +351,7 @@ func validateTLSFiles() error {
 }
 
 func createTLSServer() (*http.Server, error) {
-	caCert, err := ioutil.ReadFile(options.TLSCAFile)
+	caCert, err := os.ReadFile(options.TLSCAFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read CA cert file: %s", err.Error())
 	}
@@ -225,5 +366,9 @@ func createTLSServer() (*http.Server, error) {
 
 	tlsConfig.BuildNameToCertificate()
 
-	return &http.Server{Addr: ":" + options.ListenPort, TLSConfig: tlsConfig, ErrorLog: log.DefaultLogger}, nil
+	return &http.Server{
+		Addr:      ":" + options.ListenPort,
+		TLSConfig: tlsConfig,
+		ErrorLog:  log.DefaultLogger,
+	}, nil
 }

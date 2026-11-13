@@ -1,29 +1,28 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #include "zbxmocktest.h"
 #include "zbxmockdata.h"
 #include "zbxmockassert.h"
 
-#include "common.h"
+#include "zbxnum.h"
 
-void cm_print_error(const char * const format, ...);
+/* in newer versions of cmocka cm_print_error is declared in header */
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wredundant-decls"
+void cm_print_error(const char* const format, ...) CMOCKA_PRINTF_ATTRIBUTE(1, 2);
+#pragma GCC diagnostic pop
 
 #define _FAIL(file, line, prefix, message, ...)						\
 											\
@@ -91,19 +90,27 @@ void	__zbx_mock_assert_int_ne(const char *file, int line, const char *prefix_msg
 	_FAIL(file, line, prefix_msg, "Did not expect value \"%d\"", returned_value);
 }
 
-void	__zbx_mock_assert_double_eq(const char *file, double line, const char *prefix_msg, double expected_value,
+void	__zbx_mock_assert_double_eq(const char *file, int line, const char *prefix_msg, double expected_value,
 		double returned_value)
 {
-	if (ZBX_DOUBLE_EPSILON >= fabs(returned_value - expected_value))
+	if (isinf(expected_value) && isinf(returned_value))
+	{
+		if (expected_value == returned_value)
+			return;
+
+		_FAIL(file, line, prefix_msg, "Expected value \"%f\" while got \"%f\"", expected_value, returned_value);
+	}
+
+	if (zbx_get_double_epsilon() >= fabs(returned_value - expected_value))
 		return;
 
 	_FAIL(file, line, prefix_msg, "Expected value \"%f\" while got \"%f\"", expected_value, returned_value);
 }
 
-void	__zbx_mock_assert_double_ne(const char *file, double line, const char *prefix_msg, double expected_value,
+void	__zbx_mock_assert_double_ne(const char *file, int line, const char *prefix_msg, double expected_value,
 		double returned_value)
 {
-	if (ZBX_DOUBLE_EPSILON < fabs(returned_value - expected_value))
+	if (zbx_get_double_epsilon() < fabs(returned_value - expected_value))
 		return;
 
 	_FAIL(file, line, prefix_msg, "Did not expect value \"%f\"", returned_value);
@@ -230,4 +237,45 @@ void	__zbx_mock_assert_time_ne(const char *file, int line, const char *prefix_ms
 		_FAIL(file, line, NULL, "Cannot convert timestamp to string format: %s", zbx_mock_error_string(err));
 
 	_FAIL(file, line, prefix_msg, "Did not expect timestamp \"%s\"", returned_str);
+}
+
+void	__zbx_mock_assert_vector_uint64_eq(const char *file, int line, const char *prefix_msg,
+		zbx_vector_uint64_t *expected_value, zbx_vector_uint64_t *returned_value)
+{
+	if (expected_value->values_num == returned_value->values_num)
+	{
+		int	i;
+
+		for (i = 0; i < expected_value->values_num; i++)
+		{
+			if (expected_value->values[i] != returned_value->values[i])
+				break;
+		}
+
+		if (i == expected_value->values_num)
+			return;
+
+		_FAIL(file, line, prefix_msg, "Expected value \"" ZBX_FS_UI64 "\" while got \"" ZBX_FS_UI64 "\"",
+				expected_value->values[i], returned_value->values[i]);
+	}
+
+	_FAIL(file, line, prefix_msg, "Expected values number \"%d\" while got \"%d\"",
+			expected_value->values_num, returned_value->values_num);
+}
+
+void	__zbx_mock_assert_vector_uint64_ne(const char *file, int line, const char *prefix_msg,
+		zbx_vector_uint64_t *expected_value, zbx_vector_uint64_t *returned_value)
+{
+	int	i;
+
+	if (expected_value->values_num != returned_value->values_num)
+		return;
+
+	for (i = 0; i < expected_value->values_num; i++)
+	{
+		if (expected_value->values[i] != returned_value->values[i])
+			return;
+	}
+
+	_FAIL(file, line, prefix_msg, "Did not expect value \"" ZBX_FS_UI64 "\"", returned_value->values[i]);
 }

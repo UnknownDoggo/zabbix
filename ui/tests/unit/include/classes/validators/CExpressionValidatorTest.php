@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -30,47 +25,103 @@ class CExpressionValidatorTest extends TestCase {
 		return [
 			['avg(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['histogram_quantile(1, bucket_rate_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(count_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(exists_foreach(/host/key))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(max_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(min_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			['avg(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['count(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['kurtosis(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['mad(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['max(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['min(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['skewness(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevpop(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['stddevsamp(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 			['sum(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['sumofsquares(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varpop(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['varsamp(sum_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
 
 			// User macros.
 			['find(/host/key, {$PERIOD}:{$TIMESHIFT})', ['usermacros' => true], ['rc' => true, 'error' => null]],
@@ -132,6 +183,21 @@ class CExpressionValidatorTest extends TestCase {
 			['foo(avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => false, 'error' => 'unknown function "foo"']],
 
 			// More than one parameter for aggregating math function.
+			['avg(count_foreach(/host/key, 20m), "eq", 1)', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "count_foreach"']],
+			['avg(count_foreach(/host/key, 20m), 1, 1)', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "count_foreach"']],
+			['avg(count_foreach(/host/key, 20m, "eq", 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(count_foreach(/host/key, 20m, , ))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(count_foreach(/host/key, 20m), "eq", 2)', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(count_foreach(/host/key, 20m, "eq"))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(count_foreach(/host/key, 20m, "eq", ))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(count_foreach(/host/key, 20m, 1, 1), "eq", 2)', ['calculated' => true], ['rc' => false, 'error' => 'invalid third parameter in function "count_foreach"']],
+			['count(count_foreach(/host/key, 20m, "eq", 1), "eq", 2)', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(last_foreach(/host/key, 1))', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(last_foreach(/host/key, 1), 1, 1)', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "count"']],
+			['count(last_foreach(/host/key, 1), "eq")', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(last_foreach(/host/key, 1), "eq", 1)', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(last_foreach(/host/key, 1), "eq", "string")', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(last_foreach(/host/key, 1), "eq", 1, 1)', ['calculated' => true], ['rc' => false, 'error' => 'invalid number of parameters in function "count"']],
 			['sum(avg_foreach(/host/key, 1), 1)', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "avg_foreach"']],
 			['sum(1, avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "avg_foreach"']],
 			['sum(avg_foreach(/host/key, 1), avg_foreach(/host/key, 1))', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "avg_foreach"']],
@@ -146,7 +212,35 @@ class CExpressionValidatorTest extends TestCase {
 			['foo(1, 2, 3)', [], ['rc' => false, 'error' => 'unknown function "foo"']],
 			['change(1, 2, 3)', [], ['rc' => false, 'error' => 'incorrect usage of function "change"']],
 			['count(123)', [], ['rc' => false, 'error' => 'incorrect usage of function "count"']],
-			['avg(bucket_rate_foreach(/host/*, 1))', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "bucket_rate_foreach"']]
+			['avg(bucket_rate_foreach(/host/*, 1))', ['calculated' => true], ['rc' => false, 'error' => 'incorrect usage of function "bucket_rate_foreach"']],
+			['jsonpath(/host/item)', [], ['rc' => false, 'error' => 'mandatory parameter is missing in function "jsonpath"']],
+			['jsonpath(/host/item, "$.path")', [], ['rc' => false, 'error' => 'invalid second parameter in function "jsonpath"']],
+			['jsonpath(last(/host/item))', [], ['rc' => false, 'error' => 'invalid number of parameters in function "jsonpath"']],
+			['jsonpath(last(/host/item), "$.path")', [], ['rc' => true, 'error' => null]],
+			['jsonpath(last(/host/item), "$.path", "fallback")', [], ['rc' => true, 'error' => null]],
+			['jsonpath(last(/host/item), "$.path", "fallback", "extra param")', [], ['rc' => false, 'error' => 'invalid number of parameters in function "jsonpath"']],
+			['xmlxpath(/host/item)', [], ['rc' => false, 'error' => 'mandatory parameter is missing in function "xmlxpath"']],
+			['xmlxpath(/host/item, "/path")', [], ['rc' => false, 'error' => 'invalid second parameter in function "xmlxpath"']],
+			['xmlxpath(last(/host/item))', [], ['rc' => false, 'error' => 'invalid number of parameters in function "xmlxpath"']],
+			['xmlxpath(last(/host/item), "/path")', [], ['rc' => true, 'error' => null]],
+			['xmlxpath(last(/host/item), "/path", "fallback")', [], ['rc' => true, 'error' => null]],
+			['xmlxpath(last(/host/item), "/path", "fallback", "extra param")', [], ['rc' => false, 'error' => 'invalid number of parameters in function "xmlxpath"']],
+			['jsonpath(/host/item, 1m, "$.path")', [], ['rc' => false, 'error' => 'incorrect usage of function "jsonpath"']],
+			['xmlxpath(/host/item, 1m, "/path")', [], ['rc' => false, 'error' => 'incorrect usage of function "xmlxpath"']],
+			['avg(jsonpath(/host/item, 1m, "$.path"))>0', [], ['rc' => true, 'error' => null]],
+			['sum(xmlxpath(/host/item, 1m, "/path"))>0', [], ['rc' => true, 'error' => null]],
+			['count(jsonpath(/host/item, 1m, "$.path"))>0', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(xmlxpath(/host/item, 1m, "/path"))>0', ['calculated' => true], ['rc' => true, 'error' => null]],
+			['count(jsonpath(/host/item, 1m, "$.path"))>0', [], ['rc' => true, 'error' => null]],
+			['count(xmlxpath(/host/item, 1m, "/path"))>0', [], ['rc' => true, 'error' => null]],
+			['count(jsonpath(/host/item, 1m, "$.path"), "like", "abc")>0', [], ['rc' => true, 'error' => null]],
+			['count(avg_foreach(/host/key, 1m))>0', [], ['rc' => false, 'error' => 'unknown function "avg_foreach"']],
+			['histogram_quantile(0.5, bucket_rate_foreach(/host/key, 1m))>0', [], ['rc' => false, 'error' => 'unknown function "histogram_quantile"']],
+			['contains(last(/host/item), "abc")=1', [], ['rc' => true, 'error' => null]],
+			['contains(last(/host/item))=1', [], ['rc' => false, 'error' => 'invalid number of parameters in function "contains"']],
+			['contains(last(/host/item), "")=1', [], ['rc' => true, 'error' => null]],
+			['substring(last(/host/item), 1, 3)="ab"', [], ['rc' => true, 'error' => null]],
+			['substring(last(/host/item), 1)="ab"', [], ['rc' => false, 'error' => 'invalid number of parameters in function "substring"']]
 		];
 	}
 

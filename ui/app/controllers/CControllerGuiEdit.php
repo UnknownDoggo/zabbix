@@ -1,96 +1,63 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerGuiEdit extends CController {
 
-	/**
-	 * @var array
-	 */
-	protected $timezones;
-
-	protected function init() {
-		$this->disableSIDValidation();
-
-		$this->timezones = [
-			ZBX_DEFAULT_TIMEZONE => CTimezoneHelper::getTitle(CTimezoneHelper::getSystemTimezone(), _('System'))
-		] + CTimezoneHelper::getList();
+	protected function init(): void {
+		$this->disableCsrfValidation();
 	}
 
-	protected function checkInput() {
-		$fields = [
-			'default_lang' =>				'db config.default_lang',
-			'default_timezone' =>			'db config.default_timezone|in '.implode(',', array_keys($this->timezones)),
-			'default_theme' =>				'db config.default_theme',
-			'search_limit' =>				'db config.search_limit',
-			'max_overview_table_size' =>	'db config.max_overview_table_size',
-			'max_in_table' =>				'db config.max_in_table',
-			'server_check_interval' =>		'db config.server_check_interval',
-			'work_period' =>				'db config.work_period',
-			'show_technical_errors' =>		'db config.show_technical_errors',
-			'history_period' =>				'db config.history_period',
-			'period_default' =>				'db config.period_default',
-			'max_period' =>					'db config.max_period'
-		];
-
-		$ret = $this->validateInput($fields);
-
-		if (!$ret) {
-			$this->setResponse(new CControllerResponseFatal());
-		}
-
-		return $ret;
+	protected function checkInput(): bool {
+		return true;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
 	}
 
-	protected function doAction() {
-		$data = [
-			'default_lang' => $this->getInput('default_lang', CSettingsHelper::get(CSettingsHelper::DEFAULT_LANG)),
-			'default_timezone' => $this->getInput('default_timezone', CSettingsHelper::get(
-				CSettingsHelper::DEFAULT_TIMEZONE
-			)),
-			'timezones' => $this->timezones,
-			'default_theme' => $this->getInput('default_theme', CSettingsHelper::get(CSettingsHelper::DEFAULT_THEME)),
-			'search_limit' => $this->getInput('search_limit', CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT)),
-			'max_overview_table_size' => $this->getInput('max_overview_table_size', CSettingsHelper::get(
-				CSettingsHelper::MAX_OVERVIEW_TABLE_SIZE
-			)),
-			'max_in_table' => $this->getInput('max_in_table', CSettingsHelper::get(CSettingsHelper::MAX_IN_TABLE)),
-			'server_check_interval' => $this->getInput('server_check_interval', CSettingsHelper::get(
-				CSettingsHelper::SERVER_CHECK_INTERVAL
-			)),
-			'work_period' => $this->getInput('work_period', CSettingsHelper::get(CSettingsHelper::WORK_PERIOD)),
-			'show_technical_errors' => $this->getInput('show_technical_errors', CSettingsHelper::get(
-				CSettingsHelper::SHOW_TECHNICAL_ERRORS
-			)),
-			'history_period' => $this->getInput('history_period', CSettingsHelper::get(
-				CSettingsHelper::HISTORY_PERIOD
-			)),
-			'period_default' => $this->getInput('period_default', CSettingsHelper::get(
-				CSettingsHelper::PERIOD_DEFAULT
-			)),
-			'max_period' => $this->getInput('max_period', CSettingsHelper::get(CSettingsHelper::MAX_PERIOD))
+	private function getDefaultValues(): array {
+		return [
+			'default_lang' => CSettingsSchema::getDefault('default_lang'),
+			'default_timezone' => CSettingsSchema::getDefault('default_timezone'),
+			'default_theme' => CSettingsSchema::getDefault('default_theme'),
+			'search_limit' => CSettingsSchema::getDefault('search_limit'),
+			'max_overview_table_size' => CSettingsSchema::getDefault('max_overview_table_size'),
+			'max_in_table' => CSettingsSchema::getDefault('max_in_table'),
+			'server_check_interval' => CSettingsSchema::getDefault('server_check_interval'),
+			'work_period' => CSettingsSchema::getDefault('work_period'),
+			'show_technical_errors' => CSettingsSchema::getDefault('show_technical_errors'),
+			'history_period' => CSettingsSchema::getDefault('history_period'),
+			'period_default' => CSettingsSchema::getDefault('period_default'),
+			'max_period' => CSettingsSchema::getDefault('max_period')
 		];
+	}
+
+	protected function doAction(): void {
+		$default_values = $this->getDefaultValues();
+		$data = [];
+
+		foreach ($default_values as $key => $default_value) {
+			$data[$key] = CSettingsHelper::get($key);
+		}
+
+		$data['timezones'] = [
+				ZBX_DEFAULT_TIMEZONE => CTimezoneHelper::getTitle(CTimezoneHelper::getSystemTimezone(), _('System'))
+			] + CTimezoneHelper::getList();
+		$data['js_validation_rules'] = (new CFormValidator(CControllerGuiUpdate::getValidationRules()))->getRules();
+		$data['default_values'] = $default_values;
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Configuration of GUI'));

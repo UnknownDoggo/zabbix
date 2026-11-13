@@ -2,28 +2,25 @@
 // +build linux
 
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package proc
 
 /*
 #include <unistd.h>
+#include <stdlib.h>
+#include <pwd.h>
 */
 import "C"
 
@@ -37,16 +34,21 @@ import (
 	"strconv"
 	"sync"
 	"time"
+	"unsafe"
 
-	"git.zabbix.com/ap/plugin-support/log"
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"zabbix.com/pkg/procfs"
+	"golang.zabbix.com/agent2/pkg/procfs"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/plugin"
 )
 
 const (
 	maxInactivityPeriod = time.Hour * 25
 	maxHistory          = 60*15 + 1
 )
+
+// disable capitalized error check linter, to be consistent with Zabbix agent.
+var errGetPwnamRFailed = errors.New("No such file or directory") //nolint:staticcheck
 
 // Plugin -
 type Plugin struct {
@@ -61,6 +63,14 @@ type PluginExport struct {
 	plugin.Base
 }
 
+type uid struct {
+	uid uint32
+}
+
+type userNotFoundError struct {
+	name string
+}
+
 var impl Plugin = Plugin{
 	stats:   make(map[int64]*procStat),
 	queries: make(map[procQuery]*cpuUtilStats),
@@ -69,6 +79,23 @@ var impl Plugin = Plugin{
 var implExport PluginExport = PluginExport{}
 
 type historyIndex int
+
+func init() {
+	err := plugin.RegisterMetrics(&impl, "Proc", "proc.cpu.util", "Process CPU utilization percentage.")
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
+
+	err = plugin.RegisterMetrics(
+		&implExport, "ProcExporter",
+		"proc.mem", "Process memory utilization values.",
+		"proc.num", "The number of processes.",
+		"proc.get", "List of OS processes with statistics.",
+	)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
+}
 
 func (h historyIndex) inc() historyIndex {
 	h++
@@ -145,31 +172,36 @@ type procInfo struct {
 
 type procStatus struct {
 	Pid           uint64  `json:"pid"`
-	Ppid          int64  `json:"ppid"`
-	Tgid          int64  `json:"-"`
+	Ppid          int64   `json:"ppid"`
+	Tgid          int64   `json:"-"`
 	Name          string  `json:"name"`
 	ThreadName    string  `json:"-"`
 	Cmdline       string  `json:"cmdline"`
-	Vsize         int64  `json:"vsize"`
+	User          string  `json:"user"`
+	Group         string  `json:"group"`
+	UserID        int64   `json:"uid"`
+	GroupID       int64   `json:"gid"`
+	Vsize         int64   `json:"vsize"`
 	Pmem          float64 `json:"pmem"`
-	Rss           int64  `json:"rss"`
-	Data          int64  `json:"data"`
-	Exe           int64  `json:"exe"`
-	Hwm           int64  `json:"hwm"`
-	Lck           int64  `json:"lck"`
-	Lib           int64  `json:"lib"`
-	Peak          int64  `json:"peak"`
-	Pin           int64  `json:"pin"`
-	Pte           int64  `json:"pte"`
-	Size          int64  `json:"size"`
-	Stk           int64  `json:"stk"`
-	Swap          int64  `json:"swap"`
+	Rss           int64   `json:"rss"`
+	Data          int64   `json:"data"`
+	Exe           int64   `json:"exe"`
+	Hwm           int64   `json:"hwm"`
+	Lck           int64   `json:"lck"`
+	Lib           int64   `json:"lib"`
+	Peak          int64   `json:"peak"`
+	Pin           int64   `json:"pin"`
+	Pte           int64   `json:"pte"`
+	Size          int64   `json:"size"`
+	Stk           int64   `json:"stk"`
+	Swap          int64   `json:"swap"`
 	CpuTimeUser   float64 `json:"cputime_user"`
 	CpuTimeSystem float64 `json:"cputime_system"`
 	State         string  `json:"state"`
-	CtxSwitches   int64  `json:"ctx_switches"`
-	Threads       int64  `json:"threads"`
-	PageFaults    int64  `json:"page_faults"`
+	CtxSwitches   int64   `json:"ctx_switches"`
+	Threads       int64   `json:"threads"`
+	PageFaults    int64   `json:"page_faults"`
+	Pss           int64   `json:"pss"`
 }
 
 type procSummary struct {
@@ -192,12 +224,17 @@ type procSummary struct {
 	CtxSwitches   int64   `json:"ctx_switches"`
 	Threads       int64   `json:"threads"`
 	PageFaults    int64   `json:"page_faults"`
+	Pss           int64   `json:"pss"`
 }
 
 type thread struct {
 	Pid           int64   `json:"pid"`
 	Ppid          int64   `json:"ppid"`
 	Name          string  `json:"name"`
+	User          string  `json:"user"`
+	Group         string  `json:"group"`
+	UserID        int64   `json:"uid"`
+	GroupID       int64   `json:"gid"`
 	Tid           uint64  `json:"tid"`
 	ThreadName    string  `json:"tname"`
 	CpuTimeUser   float64 `json:"cputime_user"`
@@ -228,20 +265,63 @@ func (q *cpuUtilQuery) match(p *procInfo) bool {
 	return true
 }
 
-func newCpuUtilQuery(q *procQuery, pattern *regexp.Regexp) (query *cpuUtilQuery, err error) {
-	query = &cpuUtilQuery{procQuery: *q}
+func (err *userNotFoundError) Error() string {
+	return fmt.Sprintf("user `%s` not found!", err.name)
+}
+
+// Cannot use go user.Lookup() since it (unlike Zabbix agent C.getpwnam_r()) ignores remote services like SSSD.
+func getUIDByName(userName string) (*uid, error) {
+	userNameC := C.CString(userName)
+	defer C.free(unsafe.Pointer(userNameC))
+
+	var pwd C.struct_passwd
+	var passwdC *C.struct_passwd
+
+	//nolint:makezero // false positive
+	buf := make([]byte, 16384)
+
+	//nolint:gocritic,nlreturn //false positive
+	errCode := C.getpwnam_r(
+		userNameC,
+		&pwd,
+		(*C.char)(unsafe.Pointer(unsafe.SliceData(buf))),
+		C.size_t(len(buf)),
+		&passwdC,
+	)
+
+	if errCode != 0 {
+		return nil, errs.Errorf("[%d] %v", errCode, errGetPwnamRFailed)
+	}
+
+	if passwdC == nil {
+		return nil, &userNotFoundError{}
+	}
+
+	return &uid{uint32(passwdC.pw_uid)}, nil
+}
+
+func newCPUUtilQuery(q *procQuery, pattern *regexp.Regexp) (*cpuUtilQuery, error) {
+	query := &cpuUtilQuery{procQuery: *q}
 	if q.user != "" {
-		var u *user.User
-		if u, err = user.Lookup(q.user); err != nil {
-			return
+		var err error
+		var uid *uid
+		uid, err = getUIDByName(q.user)
+
+		if err != nil {
+			u := &userNotFoundError{}
+			if errors.As(err, &u) {
+				return query, err
+			}
+
+			return nil, err
 		}
-		if query.userid, err = strconv.ParseInt(u.Uid, 10, 64); err != nil {
-			return
-		}
+
+		query.userid = int64(uid.uid)
 	}
 
 	query.cmdlinePattern = pattern
-	return
+
+	return query, nil
 }
 
 func (p *Plugin) prepareQueries() (queries []*cpuUtilQuery, flags int) {
@@ -257,9 +337,14 @@ func (p *Plugin) prepareQueries() (queries []*cpuUtilQuery, flags int) {
 			continue
 		}
 		var query *cpuUtilQuery
-		if query, stats.err = newCpuUtilQuery(&q, stats.cmdlinePattern); stats.err != nil {
-			p.Debugf("cannot create CPU utilization query %+v: %s", q, stats.err)
-			continue
+
+		query, stats.err = newCPUUtilQuery(&q, stats.cmdlinePattern)
+
+		if stats.err != nil {
+			u := &userNotFoundError{}
+			if !errors.As(stats.err, &u) {
+				continue
+			}
 		}
 		queries = append(queries, query)
 		stats.scanid = p.scanid
@@ -438,8 +523,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	if stats, ok := p.queries[query]; ok {
 		stats.accessed = now
 		if stats.err != nil {
-			p.Debugf("CPU utilization gathering error %s", err)
-			return nil, stats.err
+			return 0, nil
 		}
 		if stats.tail == stats.head {
 			return
@@ -468,6 +552,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		ticks *= 1e12
 		ticks /= uint64(tail.timestamp.Sub(head.timestamp))
 
+		log.Tracef("Calling C function \"sysconf()\"")
 		return math.Round(float64(ticks)/float64(C.sysconf(C._SC_CLK_TCK))) / 10, nil
 	}
 	stats := &cpuUtilStats{accessed: now, history: make([]cpuUtilData, maxHistory)}
@@ -478,18 +563,20 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		p.queries[query] = stats
 		p.Debugf("registered new CPU utilization query: %s, %s, %s", name, user, cmdline)
 	} else {
-		p.Debugf("cannot register CPU utilization query: %s", err)
+		err = fmt.Errorf("cannot register CPU utilization query: %s", err)
 	}
 	return
 }
+
 func (p *PluginExport) prepareQuery(q *procQuery) (query *cpuUtilQuery, flags int, err error) {
 	regxp, err := regexp.Compile(q.cmdline)
 	if err != nil {
 		return nil, 0, fmt.Errorf("cannot compile regex for %s: %s", q.cmdline, err.Error())
 	}
+	query, err = newCPUUtilQuery(q, regxp)
 
-	if query, err = newCpuUtilQuery(q, regxp); err != nil {
-		return nil, 0, fmt.Errorf("cannot create CPU utilization query %+v: %s", q, err.Error())
+	if err != nil {
+		return nil, 0, err
 	}
 
 	if q.name != "" {
@@ -524,7 +611,7 @@ func (p *PluginExport) Export(key string, params []string, ctx plugin.ContextPro
 
 func (p *PluginExport) exportProcMem(params []string) (result interface{}, err error) {
 	var name, mode, cmdline, memtype string
-	var usr *user.User
+	var uid *uid
 
 	switch len(params) {
 	case 5:
@@ -538,13 +625,15 @@ func (p *PluginExport) exportProcMem(params []string) (result interface{}, err e
 		fallthrough
 	case 2:
 		if username := params[1]; username != "" {
-			usr, err = user.Lookup(username)
-			if err == user.UnknownUserError(username) {
-				p.Debugf("Failed to obtain user '%s': %s", username, err.Error())
-				return 0, nil
-			}
+			uid, err = getUIDByName(username)
+
 			if err != nil {
-				return nil, fmt.Errorf("Failed to obtain user '%s': %s", username, err.Error())
+				u := &userNotFoundError{}
+				if errors.As(err, &u) {
+					return 0, nil
+				}
+
+				return nil, errs.Errorf("Cannot obtain user information: %v", err)
 			}
 		}
 		fallthrough
@@ -588,19 +677,13 @@ func (p *PluginExport) exportProcMem(params []string) (result interface{}, err e
 	if cmdline != "" {
 		cmdRgx, err = regexp.Compile(cmdline)
 		if err != nil {
-			p.Debugf("Failed to compile provided regex expression '%s': %s", cmdline, err.Error())
-			return 0, nil
+			return nil, fmt.Errorf("Failed to compile regular expression '%s': %s", cmdline, err.Error())
 		}
 	}
 
 	userID := int64(-1)
-	if usr != nil {
-		userID, err = strconv.ParseInt(usr.Uid, 10, 64)
-		if err != nil {
-			p.Logger.Tracef(
-				"failed to convert user id '%s' to uint64 for user '%s'", usr.Uid, usr.Username)
-			return 0, nil
-		}
+	if uid != nil {
+		userID = int64(uid.uid)
 	}
 
 	processes, err := getProcesses(procInfoName | procInfoCmdline | procInfoUser)
@@ -735,11 +818,15 @@ func (p *PluginExport) exportProcNum(params []string) (interface{}, error) {
 	}
 
 	var count int
-
 	query, flags, err := p.prepareQuery(&procQuery{name, userName, cmdline, state})
+
 	if err != nil {
-		p.Debugf("Failed to prepare query: %s", err.Error())
-		return count, nil
+		u := &userNotFoundError{}
+		if errors.As(err, &u) {
+			return 0, nil
+		}
+
+		return nil, errs.Errorf("Cannot obtain user information: %v", err)
 	}
 
 	procs, err := getProcesses(flags)
@@ -764,7 +851,6 @@ func (p *PluginExport) exportProcNum(params []string) (interface{}, error) {
 
 func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 	var name, userName, cmdline, mode string
-	var uid uint64
 	switch len(params) {
 	case 4:
 		mode = params[3]
@@ -783,10 +869,15 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 	case 2:
 		userName = params[1]
 		if userName != "" {
-			if u, err := user.Lookup(userName); err != nil {
-				return "[]", nil
-			} else {
-				uid, err = strconv.ParseUint(u.Uid, 10, 64)
+			_, err := getUIDByName(userName)
+
+			if err != nil {
+				u := &userNotFoundError{}
+				if errors.As(err, &u) {
+					return "[]", nil
+				}
+
+				return nil, errs.Errorf("Cannot obtain user information: %v", err)
 			}
 		}
 		fallthrough
@@ -809,8 +900,7 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 
 	query, _, err := p.prepareQuery(&procQuery{name, userName, cmdline, ""})
 	if err != nil {
-		p.Debugf("Failed to prepare query: %s", err.Error())
-		return nil, err
+		return nil, errs.Errorf("Cannot obtain user information: %v", err)
 	}
 
 	if mode != "thread" {
@@ -823,15 +913,11 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 			getProcessCalculatedMetrics(pid, &data)
 			getProcessCpuTimes(pid, &data)
 
-			processUserID, err := getProcessUserID(pid)
-			if err != nil {
-				continue
-			}
+			pi := procInfo{int64(data.Pid), data.Name, 0, "", data.Name, ""}
+			setProcessUserInfo(pid, &data)
+			pi.userid = data.UserID
+			pi.cmdline = data.Cmdline
 
-			pi := procInfo{int64(data.Pid), data.Name, processUserID, "", data.Name, ""}
-			if mode != "summary" {
-				pi.cmdline = data.Cmdline
-			}
 			if query.match(&pi) {
 				array = append(array, data)
 			}
@@ -854,20 +940,25 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 			getProcessCalculatedMetrics(tid, &data)
 			getProcessCpuTimes(procPath, &data)
 
-			pi := procInfo{int64(data.Pid), data.Name, int64(uid), data.Cmdline, data.Name, ""}
+			setProcessUserInfo(tid, &data)
+
+			pi := procInfo{int64(data.Pid), data.Name, data.UserID, data.Cmdline, data.Name, ""}
 			if query.match(&pi) {
-				threadArray = append(threadArray, thread{data.Tgid, data.Ppid, data.Name, data.Pid,
-					data.ThreadName, data.CpuTimeUser, data.CpuTimeSystem, data.State, data.CtxSwitches,
-					data.PageFaults})
-				}
+				threadArray = append(threadArray, thread{
+					data.Tgid, data.Ppid,
+					data.Name, data.User, data.Group, data.UserID, data.GroupID,
+					data.Pid, data.ThreadName, data.CpuTimeUser, data.CpuTimeSystem,
+					data.State, data.CtxSwitches, data.PageFaults,
+				})
 			}
 		}
+	}
 
 	var jsonArray []byte
 	switch mode {
 	case "summary":
 		var processed []string
-		processes:
+	processes:
 		for i, proc := range array {
 			for _, j := range processed {
 				if j == proc.Name {
@@ -875,13 +966,15 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 				}
 			}
 
-			procSum := procSummary{proc.Name, 1, proc.Vsize, proc.Pmem, proc.Rss, proc.Data,
+			procSum := procSummary{
+				proc.Name, 1, proc.Vsize, proc.Pmem, proc.Rss, proc.Data,
 				proc.Exe, proc.Lck, proc.Lib, proc.Pin, proc.Pte, proc.Size, proc.Stk,
 				proc.Swap, proc.CpuTimeUser, proc.CpuTimeSystem, proc.CtxSwitches, proc.Threads,
-				proc.PageFaults}
+				proc.PageFaults, proc.Pss,
+			}
 
-			if len(array) > i + 1 {
-				for _, procCmp := range array[i + 1:] {
+			if len(array) > i+1 {
+				for _, procCmp := range array[i+1:] {
 					if procCmp.Name != proc.Name {
 						continue
 					}
@@ -903,6 +996,7 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 					addNonNegativeFloat(&procSum.CpuTimeSystem, procCmp.CpuTimeSystem)
 					addNonNegative(&procSum.CtxSwitches, procCmp.CtxSwitches)
 					addNonNegative(&procSum.PageFaults, procCmp.PageFaults)
+					addNonNegative(&procSum.Pss, procCmp.Pss)
 				}
 			}
 			processed = append(processed, proc.Name)
@@ -920,6 +1014,38 @@ func (p *PluginExport) exportProcGet(params []string) (interface{}, error) {
 	}
 
 	return string(jsonArray), nil
+}
+
+func setProcessUserInfo(pid string, ps *procStatus) {
+	pu, err := getProcessUserInfo(pid)
+	if err != nil {
+		ps.UserID = -1
+		ps.GroupID = -1
+		ps.User = "-1"
+		ps.Group = "-1"
+
+		return
+	}
+
+	ps.UserID = pu.uid
+	ps.GroupID = pu.gid
+
+	uStr := strconv.FormatInt(pu.uid, 10)
+	gStr := strconv.FormatInt(pu.gid, 10)
+
+	u, err := user.LookupId(uStr)
+	if err == nil {
+		ps.User = u.Username
+	} else {
+		ps.User = uStr
+	}
+
+	g, err := user.LookupGroupId(gStr)
+	if err == nil {
+		ps.Group = g.Name
+	} else {
+		ps.Group = gStr
+	}
 }
 
 func getMax(a, b float64) float64 {
@@ -1001,13 +1127,4 @@ func (p *PluginExport) validFile(proc *procInfo, name string, uid int64, cmdRgx 
 	}
 
 	return true
-}
-
-func init() {
-	plugin.RegisterMetrics(&impl, "Proc", "proc.cpu.util", "Process CPU utilization percentage.")
-	plugin.RegisterMetrics(&implExport, "ProcExporter",
-		"proc.mem", "Process memory utilization values.",
-		"proc.num", "The number of processes.",
-		"proc.get", "List of OS processes with statistics.",
-	)
 }

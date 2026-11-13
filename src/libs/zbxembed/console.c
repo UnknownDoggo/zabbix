@@ -1,29 +1,24 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the envied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #include "console.h"
-
-#include "common.h"
-#include "log.h"
-#include "zbxjson.h"
 #include "embed.h"
+
+#include "zbxjson.h"
 #include "duktape.h"
+#include "zbxstr.h"
+#include "zbxtime.h"
 
 /******************************************************************************
  *                                                                            *
@@ -75,7 +70,7 @@ static duk_ret_t	es_log_message(duk_context *ctx, int level)
 
 	if (0 == duk_is_null_or_undefined(ctx, -1))
 	{
-		if (SUCCEED != zbx_cesu8_to_utf8(msg_raw, &msg_output))
+		if (SUCCEED != es_duktape_string_decode(msg_raw, &msg_output))
 		{
 			msg_output = zbx_strdup(msg_output, msg_raw);
 			zbx_replace_invalid_utf8(msg_output);
@@ -84,10 +79,17 @@ static duk_ret_t	es_log_message(duk_context *ctx, int level)
 	else
 		msg_output = zbx_strdup(msg_output, "undefined");
 
-	zabbix_log(level, "%s", msg_output);
-
 	duk_get_memory_functions(ctx, &out_funcs);
 	env = (zbx_es_env_t *)out_funcs.udata;
+
+	if (ZBX_ES_LOG_MSG_LIMIT <= env->logged_msgs)
+	{
+		err_index = duk_push_error_object(ctx, DUK_RET_EVAL_ERROR,
+				"maximum count of logged messages was reached");
+		goto out;
+	}
+
+	zabbix_log(level, "%s", msg_output);
 
 	if (NULL == env->json)
 		goto out;
@@ -105,6 +107,7 @@ static duk_ret_t	es_log_message(duk_context *ctx, int level)
 	zbx_json_addstring(env->json, "message", msg_output, ZBX_JSON_TYPE_STRING);
 	zbx_json_close(env->json);
 out:
+	env->logged_msgs++;
 	zbx_free(msg_output);
 
 	if (-1 != err_index)
@@ -155,7 +158,7 @@ static int	es_console_create_object(duk_context *ctx)
 	duk_push_c_function(ctx, es_console_ctor, 0);
 	duk_push_object(ctx);
 
-	duk_put_function_list(ctx, -1, console_methods);
+	es_put_function_list(ctx, -1, console_methods);
 
 	if (1 != duk_put_prop_string(ctx, -2, "prototype"))
 		return FAIL;

@@ -1,24 +1,19 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CBehavior.php';
+require_once __DIR__.'/../../include/CBehavior.php';
 
 /**
  * Behavior for global messages.
@@ -36,13 +31,13 @@ class CMessageBehavior extends CBehavior {
 		$message = CMessageElement::find()->waitUntilVisible()->one();
 
 		if ($expected === TEST_GOOD) {
-			$message->isGood();
+			$this->test->assertTrue($message->isGood());
 		}
 		elseif ($expected === TEST_BAD) {
-			$message->isBad();
+			$this->test->assertTrue($message->isBad());
 		}
 		else {
-			$message->isWarning();
+			$this->test->assertTrue($message->isWarning());
 		}
 
 		if ($title !== null) {
@@ -56,6 +51,40 @@ class CMessageBehavior extends CBehavior {
 
 			foreach ($details as $detail) {
 				$this->test->assertTrue($message->hasLine($detail), 'Line "'.$detail.'" was not found in message details');
+			}
+		}
+	}
+
+	/**
+	 * Compare inline message text and check that corresponding field is highlighted.
+	 *
+	 * @param CFormElement	$form		form that contains the field with the error
+	 * @param array			$fields		array of field selector and expected inline error string pairs
+	 */
+	public function assertInlineError($form, array $fields) {
+		foreach ($fields as $selector => $error_text) {
+			$field = (strpos($selector, ':') === false) ? $form->getField($selector) : $form->query($selector)->one();
+
+			$field->waitUntilClassesPresent('has-error');
+
+			if ($field->isAttributePresent('data-error-container')) {
+				$container_field = $form->query('id', $field->getAttribute('data-error-container'))->one();
+				$this->test->assertTrue(in_array($error_text, $container_field->query('class:error')->waitUntilPresent()
+						->all()->asText()), $error_text.' was not found among inline error messages.'
+				);
+			}
+			else {
+				$error = $field->query('xpath:./../span[@class="error"]|./../../span[@class="error"]')->waitUntilPresent();
+
+				try {
+					// The field can briefly show another error, so wait for the expected one before comparing.
+					$error->waitUntilTextPresent($error_text, 3);
+				}
+				catch (Exception $exception) {
+					// Code is not missing here.
+				}
+
+				$this->test->assertEquals($error_text, $error->one()->getText());
 			}
 		}
 	}

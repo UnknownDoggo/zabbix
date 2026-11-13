@@ -1,25 +1,20 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
-class CMacroValue extends CInput {
+class CMacroValue extends CDiv {
 
 	/**
 	 * Container class.
@@ -34,12 +29,32 @@ class CMacroValue extends CInput {
 	 */
 	public const ZBX_STYLE_BTN_UNDO = 'btn-undo';
 
+	protected int $type;
+	protected string $name;
+	protected ?string $value;
+	protected bool $readonly = false;
+	protected ?string $placeholder = null;
+
 	/**
 	 * Add element initialization javascript.
 	 *
 	 * @var bool
 	 */
 	protected $add_post_js = true;
+
+	/**
+	 * ID for HTML element, where the validation error will be displayed.
+	 *
+	 * @var string|null
+	 */
+	protected ?string $error_container_id = null;
+
+	/**
+	 * ID for HTML element, where the validation error will be displayed.
+	 *
+	 * @var string|null
+	 */
+	protected ?string $error_label = null;
 
 	/**
 	 * Revert button visibility.
@@ -65,13 +80,16 @@ class CMacroValue extends CInput {
 	/**
 	 * Class constructor.
 	 *
-	 * @param int    $type         Macro type one of ZBX_MACRO_TYPE_SECRET or ZBX_MACRO_TYPE_TEXT value.
-	 * @param string $name         Macro input name.
-	 * @param string $value        Macro value, null when value will not be set.
-	 * @param bool   $add_post_js  Add element initialization javascript.
+	 * @param int         $type         Macro type one of ZBX_MACRO_TYPE_SECRET or ZBX_MACRO_TYPE_TEXT value.
+	 * @param string      $name         Macro input name.
+	 * @param string|null $value        Macro value, null when value will not be set.
+	 * @param bool        $add_post_js  Add element initialization javascript.
 	 */
-	public function __construct(int $type, string $name, string $value = null, bool $add_post_js = true) {
-		parent::__construct($type, $name, $value);
+	public function __construct(int $type, string $name, ?string $value = null, bool $add_post_js = true) {
+		parent::__construct();
+		$this->type = $type;
+		$this->name = $name;
+		$this->value = $value;
 
 		$this->add_post_js = $add_post_js;
 		$this->setId(uniqid('macro-value-'));
@@ -87,13 +105,63 @@ class CMacroValue extends CInput {
 	}
 
 	/**
+	 * Set ID for HTML element, where the validation error will be displayed.
+	 *
+	 * @param string|null $container_id
+	 *
+	 * @return self
+	 */
+	public function setErrorContainer(?string $container_id): self {
+		$this->error_container_id = $container_id;
+
+		return $this;
+	}
+
+	/**
+	 * Specify the field label used for error message.
+	 *
+	 * @param string|null $label    Field label used in error message.
+	 *
+	 * @return self
+	 */
+	public function setErrorLabel(?string $label): self {
+		$this->error_label = $label;
+
+		return $this;
+	}
+
+	/**
+	 * @param bool $value
+	 *
+	 * @return self
+	 */
+	public function setReadonly(bool $value = true): self {
+		$this->readonly = $value;
+
+		return $this;
+	}
+
+	/**
+	 * @param bool $value
+	 *
+	 * @return self
+	 */
+	public function setPlaceholder(?string $value = null): self {
+		$this->placeholder = $value;
+
+		return $this;
+	}
+
+	/**
 	 * Allow to revert macro value.
 	 */
 	public function addRevertButton() {
-		$this->revert_button = (new CButton(null))
-			->setAttribute('title', _('Revert changes'))
+		$this->revert_button = (new CSimpleButton())
 			->addClass(ZBX_STYLE_BTN_ALT)
-			->addClass(self::ZBX_STYLE_BTN_UNDO);
+			->addClass(ZBX_ICON_ARROW_BACK)
+			->addClass(self::ZBX_STYLE_BTN_UNDO)
+			->setAttribute('hidden', '')
+			->setAttribute('title', _('Revert changes'));
 
 		return $this;
 	}
@@ -117,54 +185,68 @@ class CMacroValue extends CInput {
 	 * @return string
 	 */
 	public function toString($destroy = true) {
-		$name = $this->getAttribute('name');
-		$value_type = $this->getAttribute('type');
-		$value = $this->getAttribute('value');
-		$readonly = $this->getAttribute('readonly');
 		$elements = [];
 
-		if ($value_type == ZBX_MACRO_TYPE_TEXT) {
+		if ($this->type == ZBX_MACRO_TYPE_TEXT) {
 			$wrapper_class = self::ZBX_STYLE_MACRO_INPUT_GROUP.' '.self::ZBX_STYLE_MACRO_VALUE_TEXT;
-			$dropdown_btn_class = ZBX_STYLE_ICON_TEXT;
+			$dropdown_btn_class = ZBX_ICON_TEXT;
 
-			$elements[] = (new CTextAreaFlexible($name.'[value]', $value, ['add_post_js' => $this->add_post_js]))
+			$elements[] = (new CTextAreaFlexible($this->name.'[value]', $this->value))
+				->setErrorContainer($this->error_container_id)
+				->setErrorLabel($this->error_label)
 				->setMaxlength($this->maxlength)
 				->setAttribute('placeholder', _('value'))
-				->setReadonly($readonly);
+				->disableSpellcheck()
+				->setReadonly($this->readonly)
+				->setAttribute('data-skip-from-submit', $this->getAttribute('data-skip-from-submit'));
 		}
-		elseif ($value_type == ZBX_MACRO_TYPE_VAULT) {
+		elseif ($this->type == ZBX_MACRO_TYPE_VAULT) {
 			$wrapper_class = self::ZBX_STYLE_MACRO_INPUT_GROUP.' '.self::ZBX_STYLE_MACRO_VALUE_VAULT;
-			$dropdown_btn_class = ZBX_STYLE_ICON_SECRET_TEXT;
+			$dropdown_btn_class = ZBX_ICON_LOCK;
 
-			$elements[] = (new CTextAreaFlexible($name.'[value]', $value, ['add_post_js' => $this->add_post_js]))
+			$elements[] = (new CTextAreaFlexible($this->name.'[value]', $this->value))
+				->setErrorContainer($this->error_container_id)
+				->setErrorLabel($this->error_label)
 				->setMaxlength($this->maxlength)
 				->setAttribute('placeholder', _('value'))
-				->setReadonly($readonly);
+				->disableSpellcheck()
+				->setReadonly($this->readonly)
+				->setAttribute('data-skip-from-submit', $this->getAttribute('data-skip-from-submit'));
 		}
 		else {
 			$wrapper_class = self::ZBX_STYLE_MACRO_INPUT_GROUP.' '.self::ZBX_STYLE_MACRO_VALUE_SECRET;
-			$dropdown_btn_class = ZBX_STYLE_ICON_INVISIBLE;
+			$dropdown_btn_class = ZBX_ICON_EYE_OFF;
 
-			$elements[] = (new CInputSecret($name.'[value]', $value, $this->add_post_js))
-				->setAttribute('maxlength', $this->maxlength)
-				->setAttribute('disabled', ($readonly !== null) ? 'disabled' : null)
-				->setAttribute('placeholder', _('value'));
+			$elements[] = (new CInputSecret($this->name.'[value]', $this->value, $this->add_post_js))
+				->setErrorContainer($this->error_container_id)
+				->setErrorLabel($this->error_label)
+				->setMaxlength($this->maxlength)
+				->setDisabled($this->readonly)
+				->setPlaceholder(_('value'))
+				->setAttribute('data-skip-from-submit', $this->getAttribute('data-skip-from-submit'));
 		}
 
 		if ($this->revert_button !== null) {
-			$elements[] = $this->revert_button->addStyle($this->revert_visible ? 'display: block' : '');
+			if ($this->revert_visible) {
+				$this->revert_button->removeAttribute('hidden');
+			}
+
+			$elements[] = $this->revert_button;
 		}
 
-		$elements[] = (new CButtonDropdown($name.'[type]',  $value_type, [
-				['label' => _('Text'), 'value' => ZBX_MACRO_TYPE_TEXT, 'class' => ZBX_STYLE_ICON_TEXT],
-				['label' => _('Secret text'), 'value' => ZBX_MACRO_TYPE_SECRET, 'class' => ZBX_STYLE_ICON_INVISIBLE],
-				['label' => _('Vault secret'), 'value' => ZBX_MACRO_TYPE_VAULT, 'class' => ZBX_STYLE_ICON_SECRET_TEXT]
-			]))
-				->addClass($dropdown_btn_class)
-				->setAttribute('disabled', ($readonly !== null) ? 'disabled' : null)
-				->setAttribute('aria-label', _('Change type'));
+		$elements[] = (new CButtonDropdown($this->name.'[type]',  $this->type, [
+			['label' => _('Text'), 'value' => ZBX_MACRO_TYPE_TEXT, 'class' => ZBX_ICON_TEXT],
+			['label' => _('Secret text'), 'value' => ZBX_MACRO_TYPE_SECRET, 'class' => ZBX_ICON_EYE_OFF],
+			['label' => _('Vault secret'), 'value' => ZBX_MACRO_TYPE_VAULT, 'class' => ZBX_ICON_LOCK]
+		]))
+			->addClass($dropdown_btn_class)
+			->setAttribute('disabled', $this->readonly ? 'disabled' : null)
+			->setAttribute('aria-label', _('Change macro value type'))
+			->setAttribute('data-skip-from-submit', $this->getAttribute('data-skip-from-submit'));
 
-		$node = (new CDiv())
+		$this->removeAttribute('data-skip-from-submit');
+
+		$this
 			->addClass($wrapper_class)
 			->addItem($elements);
 
@@ -172,6 +254,6 @@ class CMacroValue extends CInput {
 			zbx_add_post_js($this->getPostJS());
 		}
 
-		return $node->toString(true);
+		return parent::toString($destroy);
 	}
 }

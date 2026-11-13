@@ -1,25 +1,17 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-
-const TAG_OPERATOR_EXISTS = '4';
-const TAG_OPERATOR_NOT_EXISTS = '5';
 
 class CTagFilterItem extends CBaseComponent {
 
@@ -46,11 +38,25 @@ class CTagFilterItem extends CBaseComponent {
 			 * Event called when operation field changes.
 			 */
 			changeOperation: (ev) => {
-				if (ev.target.value == TAG_OPERATOR_EXISTS || ev.target.value == TAG_OPERATOR_NOT_EXISTS) {
-					this._value.addClass('display-none');
+				const show_value = ![TAG_OPERATOR_EXISTS, TAG_OPERATOR_NOT_EXISTS].includes(Number(ev.target.value));
+
+				if (this._value.hasClass('display-none') != show_value) {
+					return;
+				}
+
+				if (show_value) {
+					this._value.removeClass('display-none');
+					this._value._target.closest('td').style.paddingRight = null;
+
+					this._value._target.value = this._value._target.dataset.text;
+					this._value._target.dataset.text = '';
 				}
 				else {
-					this._value.removeClass('display-none');
+					this._value.addClass('display-none');
+					this._value._target.closest('td').style.paddingRight = 0;
+
+					this._value._target.dataset.text = this._value._target.value;
+					this._value._target.value = '';
 				}
 			}
 		}

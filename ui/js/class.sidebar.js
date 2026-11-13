@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -80,6 +75,16 @@ class CSidebar extends CBaseComponent {
 			this.addClass('focus-off');
 		}
 		this.setViewMode(this._view_mode);
+
+		this._target.querySelector('.button-compact').setAttribute('aria-expanded', 'true');
+		this._target.querySelector('.button-expand').setAttribute('aria-expanded', 'false');
+		this._target.querySelector('.button-hide').setAttribute('aria-expanded', 'true');
+		this._target.querySelector('.button-show').setAttribute('aria-expanded', 'false');
+
+		// For cases where the page has no header.
+		if (this._sidebar_toggle !== null) {
+			this._sidebar_toggle.setAttribute('aria-expanded', 'false');
+		}
 	}
 
 	open() {
@@ -163,6 +168,7 @@ class CSidebar extends CBaseComponent {
 	setViewMode(view_mode) {
 		if (view_mode === SIDEBAR_VIEW_MODE_FULL) {
 			this._is_opened = false;
+			this._target.style.zIndex = '';
 			this.removeClass('is-opened');
 		}
 		this.toggleClass('is-compact', view_mode === SIDEBAR_VIEW_MODE_COMPACT);

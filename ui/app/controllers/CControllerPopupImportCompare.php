@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -26,13 +21,17 @@ class CControllerPopupImportCompare extends CController {
 	public const CHANGE_REMOVED = 2;
 
 	private $toc = [];
+	private $id_counter = 0;
+
+	protected function init() {
+		$this->disableCsrfValidation();
+	}
 
 	protected function checkInput(): bool {
 		$fields = [
 			'import' => 'in 1',
-			'rules_preset' => 'in template',
-			'rules' => 'array',
-			'import_overlayid' => 'required|string'
+			'rules_preset' => 'in template,dashboard,regex',
+			'rules' => 'array'
 		];
 
 		$ret = $this->validateInput($fields);
@@ -57,14 +56,28 @@ class CControllerPopupImportCompare extends CController {
 			case 'template':
 				return ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN);
 
+			case 'dashboard':
+				return $this->checkAccess(CRoleHelper::UI_MONITORING_DASHBOARD)
+					&& $this->checkAccess(CRoleHelper::ACTIONS_EDIT_DASHBOARDS);
+
+			case 'regex':
+				return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
+
 			default:
 				return false;
 		}
 	}
 
 	protected function doAction(): void {
+		$title = '';
+
+		$return_missing_objects = false;
+		$missing_objects_warning_title = '';
+		$missing_objects_warning_foot_note = '';
+
 		$rules = [
-			'groups' => ['updateExisting' => false, 'createMissing' => false],
+			'host_groups' => ['updateExisting' => false, 'createMissing' => false],
+			'template_groups' => ['updateExisting' => false, 'createMissing' => false],
 			'hosts' => ['updateExisting' => false, 'createMissing' => false],
 			'templates' => ['updateExisting' => false, 'createMissing' => false],
 			'templateDashboards' => ['updateExisting' => false, 'createMissing' => false, 'deleteMissing' => false],
@@ -77,13 +90,18 @@ class CControllerPopupImportCompare extends CController {
 			'maps' => ['updateExisting' => false, 'createMissing' => false],
 			'images' => ['updateExisting' => false, 'createMissing' => false],
 			'mediaTypes' => ['updateExisting' => false, 'createMissing' => false],
-			'valueMaps' => ['updateExisting' => false, 'createMissing' => false, 'deleteMissing' => false]
+			'valueMaps' => ['updateExisting' => false, 'createMissing' => false, 'deleteMissing' => false],
+			'dashboards' => ['updateExisting' => false, 'createMissing' => false],
+			'global_regexes' => ['updateExisting' => false, 'createMissing' => false]
 		];
 
 		// Adjust defaults for given rule preset, if specified.
 		switch ($this->getInput('rules_preset')) {
 			case 'template':
-				$rules['groups'] = ['updateExisting' => true, 'createMissing' => true];
+				$title = _('Templates');
+
+				$rules['host_groups'] = ['updateExisting' => true, 'createMissing' => true];
+				$rules['template_groups'] = ['updateExisting' => true, 'createMissing' => true];
 				$rules['templates'] = ['updateExisting' => true, 'createMissing' => true];
 				$rules['templateDashboards'] = ['updateExisting' => true, 'createMissing' => true,
 					'deleteMissing' => false
@@ -97,6 +115,23 @@ class CControllerPopupImportCompare extends CController {
 				$rules['httptests'] = ['updateExisting' => true, 'createMissing' => true, 'deleteMissing' => false];
 				$rules['templateLinkage'] = ['createMissing' => true, 'deleteMissing' => false];
 				$rules['valueMaps'] = ['updateExisting' => true, 'createMissing' => true, 'deleteMissing' => false];
+
+				break;
+
+			case 'dashboard':
+				$title = _('Dashboards');
+				$return_missing_objects = true;
+				$missing_objects_warning_title = _('References to missing objects will be ignored:');
+				$missing_objects_warning_foot_note = _('Check and reconfigure widgets after the import is completed.');
+
+				$rules['dashboards'] = ['updateExisting' => true, 'createMissing' => true];
+
+				break;
+
+			case 'regex':
+				$title = _('Regular expressions');
+				$rules['global_regexes'] = ['updateExisting' => false, 'createMissing' => false];
+
 				break;
 		}
 
@@ -113,7 +148,8 @@ class CControllerPopupImportCompare extends CController {
 
 		if (!isset($_FILES['import_file'])) {
 			error(_('No file was uploaded.'));
-		} else {
+		}
+		else {
 			// CUploadFile throws exceptions, so we need to catch them
 			try {
 				$file = new CUploadFile($_FILES['import_file']);
@@ -121,6 +157,7 @@ class CControllerPopupImportCompare extends CController {
 				$result = API::Configuration()->importcompare([
 					'format' => CImportReaderFactory::fileExt2ImportFormat($file->getExtension()),
 					'source' => $file->getContent(),
+					'returnMissingObjects' => $return_missing_objects,
 					'rules' => $request_rules
 				]);
 			}
@@ -130,8 +167,7 @@ class CControllerPopupImportCompare extends CController {
 		}
 
 		$data = [
-			'title' => _('Templates'),
-			'import_overlayid' => $this->getInput('import_overlayid'),
+			'title' => $title,
 			'user' => [
 				'debug_mode' => $this->getDebugMode()
 			]
@@ -144,8 +180,19 @@ class CControllerPopupImportCompare extends CController {
 			];
 		}
 		else {
+			if ($return_missing_objects) {
+				$data['missing_objects'] = $result['missingObjects'];
+				$data['missing_objects_warning_title'] = $missing_objects_warning_title;
+				$data['missing_objects_warning_foot_note'] = $missing_objects_warning_foot_note;
+
+				unset($result['missingObjects']);
+			}
+
 			$data['diff'] = $this->blocksToDiff($result, 1);
 			$data['diff_toc'] = $this->normalizeToc($this->toc);
+
+			// Check if at least one entity is removed.
+			$data['with_removed_entities'] = array_key_exists('removed', $this->toc);
 		}
 
 		$this->setResponse(new CControllerResponseData($data));
@@ -162,7 +209,8 @@ class CControllerPopupImportCompare extends CController {
 			'added' => _('Added')
 		];
 		$names = [
-			'groups' => _('Groups'),
+			'host_groups' => _('Host groups'),
+			'template_groups' => _('Template groups'),
 			'templates' => _('Templates'),
 			'triggers' => _('Triggers'),
 			'graphs' => _('Graphs'),
@@ -174,7 +222,10 @@ class CControllerPopupImportCompare extends CController {
 			'item_prototypes' => _('Item prototypes'),
 			'trigger_prototypes' => _('Trigger prototypes'),
 			'graph_prototypes' => _('Graph prototypes'),
-			'host_prototypes' => _('Host prototypes')
+			'host_prototypes' => _('Host prototypes'),
+			'pages' => _('Dashboard pages'),
+			'widgets' => _('Widgets'),
+			'global_regexes' => _('Regular expressions')
 		];
 
 		foreach ($toc as $toc_key => $changes) {
@@ -321,27 +372,7 @@ class CControllerPopupImportCompare extends CController {
 		return $yaml_key;
 	}
 
-	private function objectToRows(array $before, array $after, int $depth, string $id): array {
-		if ($before && $after) {
-			$outer_change_type = self::CHANGE_NONE;
-		}
-		else if ($before) {
-			$outer_change_type = self::CHANGE_REMOVED;
-		}
-		else if ($after) {
-			$outer_change_type = self::CHANGE_ADDED;
-		}
-		else {
-			$outer_change_type = self::CHANGE_NONE;
-		}
-
-		$rows = [[
-			'value' => '-',
-			'depth' => $depth,
-			'change_type' => $outer_change_type,
-			'id' => $id
-		]];
-
+	private function objectToRows(array $before, array $after, int $depth, int $id): array {
 		$all_keys = [];
 
 		foreach (array_keys($before) as $key) {
@@ -368,6 +399,9 @@ class CControllerPopupImportCompare extends CController {
 		}
 
 		unset($all_keys['uuid']);
+		unset($all_keys['_index']);
+
+		$rows = [];
 
 		foreach ($all_keys as $key => $change_type) {
 			switch ($change_type) {
@@ -419,10 +453,15 @@ class CControllerPopupImportCompare extends CController {
 			}
 		}
 
+		if ($rows) {
+			$rows[0] += ['id' => $id, 'sequence_start' => true];
+		}
+
 		return $rows;
 	}
 
-	private function blocksToDiff(array $blocks, int $depth, string $outer_change_type = 'updated'): array {
+	private function blocksToDiff(array $blocks, int $depth, array $outer_names = [],
+			string $outer_change_type = 'updated', ?int $sequence_id = null): array {
 		$change_types = [
 			'added' => self::CHANGE_ADDED,
 			'removed' => self::CHANGE_REMOVED,
@@ -431,43 +470,114 @@ class CControllerPopupImportCompare extends CController {
 
 		$rows = [];
 		foreach ($blocks as $entity_type => $changes) {
-			$rows[] = [
-				'value' => $entity_type . ':',
-				'depth' => $depth,
-				'change_type' => $change_types[$outer_change_type]
-			];
+			$changes = self::sortChanges($entity_type, $changes);
+
+			if ($sequence_id) {
+				$rows[] = [
+					'value' => $entity_type.':',
+					'depth' => $depth,
+					'change_type' => $change_types[$outer_change_type],
+					'id' => $sequence_id,
+					'sequence_start' => true
+				];
+
+				$sequence_id = null;
+			}
+			else {
+				$rows[] = [
+					'value' => $entity_type.':',
+					'depth' => $depth,
+					'change_type' => $change_types[$outer_change_type]
+				];
+			}
 
 			foreach ($changes as $change_type => $entities) {
 				foreach ($entities as $entity) {
 					$before = array_key_exists('before', $entity) ? $entity['before'] : [];
 					$after = array_key_exists('after', $entity) ? $entity['after'] : [];
-					$object = $before ? $before : $after;
+					$object = $before ?: $after;
 					unset($entity['before'], $entity['after']);
 
-					$id = $object['uuid'];
+					$name = $this->nameForToc($entity_type, $object, $outer_names);
+
 					$this->toc[$change_type][$entity_type][] = [
-						'name' => $this->nameForToc($entity_type, $object),
-						'id' => $id
+						'name' => $name,
+						'id' => $this->id_counter
 					];
 
-					$rows = array_merge($rows, $this->objectToRows($before, $after, $depth + 1, $id));
+					$entity_counter_id = null;
+					$new_rows = $this->objectToRows($before, $after, $depth + 1, $this->id_counter);
+
+					if ($new_rows) {
+						$rows = array_merge($rows, $new_rows);
+					}
+					else {
+						$entity_counter_id = $this->id_counter;
+					}
+
+					$this->id_counter++;
 
 					// Process any sub-entities.
 					if ($entity) {
-						$rows = array_merge($rows, $this->blocksToDiff($entity, $depth + 2, $change_type));
+						$rows = array_merge($rows, $this->blocksToDiff($entity, $depth + 2,
+							[...$outer_names, [$entity_type, $name]], $change_type, $entity_counter_id
+						));
+					}
+					elseif ($entity_counter_id) {
+						$rows[] = [
+							'value' => $this->convertToYaml([]),
+							'depth' => $depth + 2,
+							'change_type' => $change_types[$change_type],
+							'id' => $entity_counter_id,
+							'sequence_start' => true
+						];
 					}
 				}
 			}
 		}
+
 		return $rows;
 	}
 
-	private function nameForToc(string $entity_type, array $object): string {
+	private static function sortChanges(string $entity_type, array $changes): array {
+		$order = match ($entity_type) {
+			'pages' => ['updated', 'added', 'removed'],
+			default => ['added', 'removed', 'updated']
+		};
+
+		$order = array_flip($order);
+
+		uksort($changes, fn (string $key_1, string $key_2): int => $order[$key_1] <=> $order[$key_2]);
+
+		return $changes;
+	}
+
+	private function nameForToc(string $entity_type, array $object, array $outer_names = []): string {
 		switch ($entity_type) {
 			case 'templates':
 				return array_key_exists('name', $object) ? $object['name'] : $object['template'];
 			case 'host_prototypes':
 				return array_key_exists('name', $object) ? $object['name'] : $object['host'];
+			case 'pages':
+				$dashboard_name = $outer_names[count($outer_names) - 1][1];
+				$dashboard_page_name = array_key_exists('name', $object)
+					? $object['name']
+					: _s('Page %1$d', $object['_index'] + 1);
+
+				return $dashboard_page_name.' ('.$dashboard_name.')';
+			case 'widgets':
+				$dashboard_page_name = $outer_names[count($outer_names) - 1][1];
+
+				$x = array_key_exists('x', $object) ? $object['x'] : '0';
+				$y = array_key_exists('y', $object) ? $object['y'] : '0';
+
+				$widget_name = array_key_exists('name', $object)
+					? $object['name']
+					: $object['type'];
+
+				$widget_name .= '['.$x.','.$y.']';
+
+				return $widget_name.' ('.$dashboard_page_name.')';
 			default:
 				return $object['name'];
 		}

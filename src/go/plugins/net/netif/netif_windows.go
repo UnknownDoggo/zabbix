@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package netif
@@ -26,9 +21,11 @@ import (
 	"net"
 	"unsafe"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
 	"golang.org/x/sys/windows"
-	"zabbix.com/pkg/win32"
+	"golang.zabbix.com/agent2/pkg/win32"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
 const (
@@ -36,6 +33,22 @@ const (
 	errorCannotFindIf = "Cannot obtain network interface information."
 	guidStringLen     = 38
 )
+
+func init() {
+	impl := &Plugin{}
+
+	err := plugin.RegisterMetrics(
+		impl, "NetIf",
+		"net.if.list", "Returns a list of network interfaces in text format.",
+		"net.if.in", "Returns incoming traffic statistics on network interface.",
+		"net.if.out", "Returns outgoing traffic statistics on network interface.",
+		"net.if.total", "Returns sum of incoming and outgoing traffic statistics on network interface.",
+		"net.if.discovery", "Returns list of network interfaces. Used for low-level discovery.",
+	)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
+}
 
 func (p *Plugin) nToIP(addr uint32) net.IP {
 	b := (*[4]byte)(unsafe.Pointer(&addr))
@@ -87,10 +100,17 @@ func (p *Plugin) getIfRowByIP(ipaddr string, ifs []win32.MIB_IF_ROW2) (row *win3
 }
 
 func (p *Plugin) getGuidString(winGuid win32.GUID) string {
-	return fmt.Sprintf("{%08X-%04X-%04X-%02X-%02X}", winGuid.Data1, winGuid.Data2, winGuid.Data3, winGuid.Data4[:2], winGuid.Data4[2:])
+	return fmt.Sprintf(
+		"{%08X-%04X-%04X-%02X-%02X}",
+		winGuid.Data1,
+		winGuid.Data2,
+		winGuid.Data3,
+		winGuid.Data4[:2],
+		winGuid.Data4[2:],
+	)
 }
 
-func (p *Plugin) getNetStats(networkIf string, statName string, dir dirFlag) (result uint64, err error) {
+func (p *Plugin) getNetStats(networkIf, statName string, direction networkDirection) (result uint64, err error) {
 	var ifTable *win32.MIB_IF_TABLE2
 	if ifTable, err = win32.GetIfTable2(); err != nil {
 		return
@@ -118,31 +138,31 @@ func (p *Plugin) getNetStats(networkIf string, statName string, dir dirFlag) (re
 	var value uint64
 	switch statName {
 	case "bytes":
-		if dir&dirIn != 0 {
+		if direction == directionIn || direction == directionTotal {
 			value += row.InOctets
 		}
-		if dir&dirOut != 0 {
+		if direction == directionOut || direction == directionTotal {
 			value += row.OutOctets
 		}
 	case "packets":
-		if dir&dirIn != 0 {
+		if direction == directionIn || direction == directionTotal {
 			value += row.InUcastPkts + row.InNUcastPkts
 		}
-		if dir&dirOut != 0 {
+		if direction == directionOut || direction == directionTotal {
 			value += row.OutUcastPkts + row.OutNUcastPkts
 		}
 	case "errors":
-		if dir&dirIn != 0 {
+		if direction == directionIn || direction == directionTotal {
 			value += row.InErrors
 		}
-		if dir&dirOut != 0 {
+		if direction == directionOut || direction == directionTotal {
 			value += row.OutErrors
 		}
 	case "dropped":
-		if dir&dirIn != 0 {
+		if direction == directionIn || direction == directionTotal {
 			value += row.InDiscards + row.InUnknownProtos
 		}
-		if dir&dirOut != 0 {
+		if direction == directionOut || direction == directionTotal {
 			value += row.OutDiscards
 		}
 	default:
@@ -237,7 +257,7 @@ func (p *Plugin) getDevList() (devices string, err error) {
 
 // Export -
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (result interface{}, err error) {
-	var direction dirFlag
+	var direction networkDirection
 	var mode string
 
 	switch key {
@@ -260,11 +280,11 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		}
 		return p.getDevList()
 	case "net.if.in":
-		direction = dirIn
+		direction = directionIn
 	case "net.if.out":
-		direction = dirOut
+		direction = directionOut
 	case "net.if.total":
-		direction = dirIn | dirOut
+		direction = directionTotal
 	default:
 		/* SHOULD_NEVER_HAPPEN */
 		return nil, errors.New(errorUnsupportedMetric)
@@ -275,7 +295,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	}
 
 	if len(params) > 2 {
-		return nil, errors.New(errorTooManyParams)
+		return nil, zbxerr.ErrorTooManyParameters
 	}
 
 	if len(params) == 2 && params[1] != "" {
@@ -285,14 +305,4 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	}
 
 	return p.getNetStats(params[0], mode, direction)
-}
-
-func init() {
-	plugin.RegisterMetrics(&impl, "NetIf",
-		"net.if.list", "Returns a list of network interfaces in text format.",
-		"net.if.in", "Returns incoming traffic statistics on network interface.",
-		"net.if.out", "Returns outgoing traffic statistics on network interface.",
-		"net.if.total", "Returns sum of incoming and outgoing traffic statistics on network interface.",
-		"net.if.discovery", "Returns list of network interfaces. Used for low-level discovery.")
-
 }

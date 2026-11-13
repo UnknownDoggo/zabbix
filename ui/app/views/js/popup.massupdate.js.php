@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -34,7 +29,7 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 // Host groups.
 <?php if (CWebUser::getType() == USER_TYPE_SUPER_ADMIN): ?>
 (() => {
-	const groups_elem = document.querySelector('#groups-div');
+	const groups_elem = document.querySelector('#groups-field');
 
 	if (groups_elem === null) {
 		return false;
@@ -63,7 +58,7 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 
 // Macros.
 (() => {
-	const macros_elem = document.querySelector('#macros-div');
+	const macros_elem = document.querySelector('#macros-field');
 	if (!macros_elem) {
 		return false;
 	}
@@ -73,11 +68,10 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 		obj = macros_elem.originalObject;
 	}
 
-	$(obj.querySelector('#tbl_macros')).dynamicRows({template: '#macro-row-tmpl'});
+	$(obj.querySelector('#tbl_macros')).dynamicRows({template: '#macro-row-tmpl', allow_empty: true});
 	$(obj.querySelector('#tbl_macros'))
 		.on('afteradd.dynamicRows', () => {
 			$('.macro-input-group', $(obj.querySelector('#tbl_macros'))).macroValue();
-			$('.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>', $(obj.querySelector('#tbl_macros'))).textareaFlexible();
 			obj.querySelector('#macro_add').scrollIntoView({block: 'nearest'});
 		});
 
@@ -86,27 +80,21 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 		.macroValue();
 
 	$(obj.querySelector('#tbl_macros'))
-		.on('change keydown', '.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>.macro', function(event) {
+		.on('change keydown', '<?= ZBX_STYLE_Z_TEXTAREA_FLEXIBLE ?>.macro', function(event) {
 			if (event.type === 'change' || event.which === 13) {
-				$(this)
-					.val($(this).val().replace(/([^:]+)/, (value) => value.toUpperCase('$1')))
-					.textareaFlexible();
+				$(this).val($(this).val().replace(/([^:]+)/, (value) => value.toUpperCase('$1')));
 			}
 		});
 
 	$(obj.querySelector('#tbl_macros'))
-		.find('.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>')
-		.textareaFlexible();
-
-	$(obj.querySelector('#tbl_macros'))
-		.on('resize', '.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>', () => {
+		.on('resize', '<?= ZBX_STYLE_Z_TEXTAREA_FLEXIBLE ?> textarea', () => {
 			$(window).resize();
 		});
 })();
 
 // Tags.
 (() => {
-	const tags_elem = document.querySelector('#tags-div');
+	const tags_elem = document.querySelector('#tags-field');
 	if (!tags_elem) {
 		return false;
 	}
@@ -116,19 +104,16 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 		obj = tags_elem.originalObject;
 	}
 
-	$(obj.querySelector('#tags-table')).dynamicRows({template: '#tag-row-tmpl'});
-	$(obj.querySelector('#tags-table'))
-		.on('click', 'button.element-table-add', () => {
-			$('#tags-table .<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>').textareaFlexible();
-		})
-		.on('resize', '.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>', () => {
+	$(obj.querySelector('.tags-table')).dynamicRows({template: '#tag-row-tmpl', allow_empty: true});
+	$(obj.querySelector('.tags-table'))
+		.on('resize', '<?= ZBX_STYLE_Z_TEXTAREA_FLEXIBLE ?> textarea', () => {
 			$(window).resize();
 		});
 })();
 
 // Linked templates.
 (() => {
-	const template_visible = document.querySelector('#linked-templates-div');
+	const template_visible = document.querySelector('#linked-templates-field');
 
 	if (!template_visible) {
 		return false;
@@ -157,6 +142,37 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 	});
 
 	mass_action_tpls.dispatchEvent(new CustomEvent('change', {}));
+})();
+
+// Monitored by.
+(() => {
+	const element = document.querySelector('#monitored-by-field');
+
+	if (element === null) {
+		return false;
+	}
+
+	const obj = element.tagName === 'SPAN' ? element.originalObject : element;
+	const monitored_by = obj.querySelector('#monitored_by');
+
+	if (monitored_by === null) {
+		return false;
+	}
+
+	const updateFieldsVisibility = () => {
+		const value = monitored_by.querySelector('input[name="monitored_by"]:checked').value;
+
+		obj.querySelector('.js-field-proxy').style.display =
+			value == <?= ZBX_MONITORED_BY_PROXY ?> ? '' : 'none';
+
+		obj.querySelector('.js-field-proxy-group').style.display =
+			value == <?= ZBX_MONITORED_BY_PROXY_GROUP ?> ? '' : 'none';
+	};
+
+	updateFieldsVisibility();
+
+	monitored_by.querySelectorAll('input[name="monitored_by"]')
+		.forEach(input => input.addEventListener('change', updateFieldsVisibility));
 })();
 
 // Inventory mode.
@@ -203,7 +219,7 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 
 // Encryption.
 (() => {
-	const encryption = document.querySelector('#encryption_div');
+	const encryption = document.querySelector('#encryption-field');
 	if (!encryption) {
 		return false;
 	}
@@ -292,7 +308,7 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 
 // Value maps.
 (() => {
-	const valuemap = document.querySelector('#valuemap-div');
+	const valuemap = document.querySelector('#valuemap-field');
 
 	if (!valuemap) {
 		return false;
@@ -306,21 +322,23 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 	obj.querySelectorAll('[name=valuemap_massupdate]').forEach((elem) => elem.addEventListener('click',
 		(event) => toggleVisible(obj, event.currentTarget.value)
 	));
-	obj.querySelectorAll('.element-table-addfrom').forEach(elm => elm.addEventListener('click',
+	obj.querySelectorAll('.js-element-table-addfrom').forEach(elm => elm.addEventListener('click',
 		(event) => openAddfromPopup(event.target)
 	));
 
 	$('#valuemap-rename-table').dynamicRows({
 		template: '#valuemap-rename-row-tmpl',
+		allow_empty: true,
 		row: '.form_row',
 		rows: [{from: '', to: ''}]
 	});
 
 	let overlay = overlays_stack.end();
 
-	$(overlay.$dialogue||document).on('remove', () => {
+	overlay.$dialogue[0].addEventListener('dialogue.close', () => {
 		$(document).off('add.popup', processAddfromPopup);
 	});
+
 	$(document).on('add.popup', processAddfromPopup);
 
 	function processAddfromPopup(ev, data) {
@@ -339,9 +357,11 @@ $('#tabs').on('tabsactivate', (event, ui) => {
 		let valuemap_table = element.closest('table');
 
 		valuemap_table.querySelectorAll('[name$="[name]"]').forEach((element) => disable_names.push(element.value));
+
 		PopUp('popup.generic', {
-			srctbl: 'valuemaps',
+			srctbl: element.dataset.context === 'host' ? 'valuemaps' : 'template_valuemaps',
 			srcfld1: 'valuemapid',
+			context: element.dataset.context,
 			disable_names: disable_names,
 			editable: true
 		}, {dialogue_class: 'modal-popup-generic', trigger_element: element});
@@ -388,19 +408,23 @@ function submitPopup(overlay) {
 	}
 
 	if (warning_message !== '') {
-		overlayDialogue({
-			'title': <?= json_encode(_('Warning')) ?>,
-			'type': 'popup',
-			'class': 'position-middle',
-			'content': $('<span>').text(warning_message),
-			'buttons': [
+		const warning_overlay = overlayDialogue({
+			title: <?= json_encode(_('Warning')) ?>,
+			content: $('<span>').text(warning_message),
+			buttons: [
 				{
-					'title': <?= json_encode(_('Ok')) ?>,
-					'focused': true,
-					'action': () => {}
+					title: <?= json_encode(_('Ok')) ?>,
+					focused: true,
+					action: () => {}
 				}
 			]
-		}, overlay);
+		}, {
+			position: Overlay.prototype.POSITION_CENTER,
+			trigger_element: overlay.$btn_submit
+		});
+
+		// Display the close button after the screen reader announces the dialog title.
+		warning_overlay.$dialogue.$head.$close_button.show();
 
 		overlay.unsetLoading();
 		return false;
@@ -434,14 +458,14 @@ function submitPopup(overlay) {
 	// Remove error message.
 	overlay.$dialogue.find('.<?= ZBX_STYLE_MSG_BAD ?>').remove();
 
-	const url = new Curl('zabbix.php', false);
+	const url = new Curl('zabbix.php');
 	url.setArgument('action', action);
 	url.setArgument('output', 'ajax');
 
 	fetch(url.getUrl(), {
 		method: 'post',
 		headers: {'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8'},
-		body: $(form).serialize()
+		body: new URLSearchParams(new FormData($(form)[0])).toString()
 	})
 	.then((response) => response.json())
 	.then((response) => {
@@ -455,6 +479,14 @@ function submitPopup(overlay) {
 			const message_box = makeMessageBox('bad', response.error.messages, response.error.title);
 
 			message_box.insertBefore(form);
+		}
+		else if (['popup.massupdate.host', 'popup.massupdate.service', 'item.prototype.massupdate',
+			'trigger.prototype.massupdate', 'template.massupdate', 'item.massupdate',
+			'trigger.massupdate'].includes(action)) {
+
+			// Item and item prototype lists javascript handles successful update.
+			overlayDialogueDestroy(overlay.dialogueid);
+			overlay.$dialogue[0].dispatchEvent(new CustomEvent('dialogue.submit', {detail: response}));
 		}
 		else {
 			postMessageOk(response.title);

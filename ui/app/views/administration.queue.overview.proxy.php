@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -23,23 +18,9 @@
  * @var CView $this
  */
 
-$widget = (new CWidget())
+$html_page = (new CHtmlPage())
 	->setTitle(_('Queue overview by proxy'))
-	->setTitleSubmenu([
-		'main_section' => [
-			'items' => [
-				(new CUrl('zabbix.php'))
-					->setArgument('action', 'queue.overview')
-					->getUrl() => _('Queue overview'),
-				(new CUrl('zabbix.php'))
-					->setArgument('action', 'queue.overview.proxy')
-					->getUrl() => _('Queue overview by proxy'),
-				(new CUrl('zabbix.php'))
-					->setArgument('action', 'queue.details')
-					->getUrl() => _('Queue details')
-			]
-		]
-	])
+	->setTitleSubmenu(getAdministrationQueueSubmenu())
 	->setDocUrl(CDocHelper::getUrl(CDocHelper::QUEUE_OVERVIEW_PROXY));
 
 $table = (new CTableInfo())->setHeader([
@@ -65,7 +46,7 @@ foreach ($data['proxies'] as $proxyid => $proxy) {
 		];
 
 	$table->addRow([
-		$proxy['host'],
+		$proxy['name'],
 		($proxy_queue['delay5'] == 0) ? 0 : (new CCol($proxy_queue['delay5']))
 			->addClass(CSeverityHelper::getStyle(TRIGGER_SEVERITY_NOT_CLASSIFIED)),
 		($proxy_queue['delay10'] == 0) ? 0 : (new CCol($proxy_queue['delay10']))
@@ -87,12 +68,12 @@ if (CWebUser::getRefresh()) {
 		->show();
 }
 
-$widget
+$html_page
 	->addItem($table)
 	->addItem((new CDiv())
-		->addClass(ZBX_STYLE_TABLE_PAGING)
+		->addClass(ZBX_STYLE_PAGER)
 		->addItem((new CDiv())
-			->addClass(ZBX_STYLE_PAGING_BTN_CONTAINER)
+			->addClass(ZBX_STYLE_PAGER_CONTAINER)
 			->addItem((new CDiv())
 				->addClass(ZBX_STYLE_TABLE_STATS)
 				->addItem(_('Total').': '.$table->getNumRows())

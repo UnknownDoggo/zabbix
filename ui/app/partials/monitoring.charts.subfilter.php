@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2021 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -52,6 +47,8 @@ if (count($data['tagnames']) > 0) {
 			$subfilter_options['tagnames'][] = (new CSpan([
 				(new CLinkAction($element['name']))
 					->addClass('js-subfilter-unset')
+					->setAttribute('data-name', 'subfilter_tagnames[]')
+					->setAttribute('data-value', $tag_name)
 					->setAttribute('data-tag', $tag_name),
 				' ',
 				new CSup($element['count'])
@@ -73,6 +70,8 @@ if (count($data['tagnames']) > 0) {
 				$subfilter_options['tagnames'][] = (new CSpan([
 					(new CLinkAction($element['name']))
 						->addClass('js-subfilter-set')
+						->setAttribute('data-name', 'subfilter_tagnames[]')
+						->setAttribute('data-value', $tag_name)
 						->setAttribute('data-tag', $tag_name),
 					' ',
 					new CSup(($subfilter_used ? '+' : '').$element['count'])
@@ -121,6 +120,7 @@ if (count($data['tags']) > 0) {
 						->addClass('js-subfilter-unset')
 						->addStyle($element_style)
 						->setAttribute('data-tag', $tag_name)
+						->setAttribute('data-name', 'subfilter_tags['.$tag_name.'][]')
 						->setAttribute('data-value', $element['name']),
 					' ',
 					new CSup($element['count'])
@@ -128,7 +128,7 @@ if (count($data['tags']) > 0) {
 					->addClass(ZBX_STYLE_SUBFILTER)
 					->addClass(ZBX_STYLE_SUBFILTER_ENABLED);
 
-				$selected_tags[$tag_name][] = $element['name'];
+				$selected_tags[urlencode($tag_name)][] = $element['name'];
 			}
 			else {
 				if ($element['count'] == 0) {
@@ -146,6 +146,7 @@ if (count($data['tags']) > 0) {
 							->addClass('js-subfilter-set')
 							->addStyle($element_style)
 							->setAttribute('data-tag', $tag_name)
+							->setAttribute('data-name', 'subfilter_tags['.$tag_name.'][]')
 							->setAttribute('data-value', $element['name']),
 						' ',
 						new CSup(($subfilter_used ? '+' : '').$element['count'])

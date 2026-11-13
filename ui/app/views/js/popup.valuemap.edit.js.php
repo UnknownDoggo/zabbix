@@ -1,121 +1,193 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
-
-
-/**
- * @var CView $this
- */
 ?>
-$(() => {
-	let VALUEMAP_MAPPING_TYPE_DEFAULT = <?= VALUEMAP_MAPPING_TYPE_DEFAULT ?>;
-	let type_placeholder = <?= json_encode([
+
+
+window.valuemap_edit_popup = {
+
+	type_placeholder: <?= json_encode([
 		VALUEMAP_MAPPING_TYPE_EQUAL => _('value'),
 		VALUEMAP_MAPPING_TYPE_GREATER_EQUAL => _('value'),
 		VALUEMAP_MAPPING_TYPE_LESS_EQUAL => _('value'),
 		VALUEMAP_MAPPING_TYPE_IN_RANGE => _('value'),
 		VALUEMAP_MAPPING_TYPE_REGEXP => _('regexp')
-	]) ?>;
-	let table = document.querySelector('#mappings_table');
-	let observer = new MutationObserver(mutationHandler);
+	]) ?>,
 
-	// Observe changes for form fields: type, value.
-	observer.observe(table, {
-		childList: true,
-		subtree: true,
-		attributes: true,
-		attributeFilter: ['value']
-	});
-	updateOnTypeChange();
+	init({rules, mappings}) {
+		this.overlay = overlays_stack.getById('valuemap_edit');
+		this.form_element = this.overlay.$dialogue.$body[0].querySelector('form');
+		this.footer = this.overlay.$dialogue.$footer[0];
+		this.form = rules !== null ? new CForm(this.form_element, rules) : null;
+		this.mappings = mappings;
 
-	function updateOnTypeChange() {
-		let default_select = table.querySelector(`z-select[value="${VALUEMAP_MAPPING_TYPE_DEFAULT}"]`);
+		this.initMappingTable();
 
-		table.querySelectorAll('tr').forEach((row) => {
-			let zselect = row.querySelector('z-select[name$="[type]"]');
-			let input = row.querySelector('input[name$="[value]"]');
+		this.footer.querySelector('.js-submit').addEventListener('click', () => this.submit());
+	},
 
-			if (zselect) {
-				zselect.getOptionByValue(VALUEMAP_MAPPING_TYPE_DEFAULT).disabled = (default_select
-					&& zselect !== default_select
+	submit() {
+		this.removePopupMessages();
+		jQuery(this.form_element).trimValues(['input[type="text"]']);
+
+		if (this.form !== null) {
+			const fields = this.form.getAllValues();
+
+			this.form.validateSubmit(fields).then(result => {
+				if (!result) {
+					this.overlay.unsetLoading();
+
+					return;
+				}
+
+				this.submitForm(fields);
+			});
+		}
+		else {
+			this.submitForm(getFormFields(this.form_element));
+		}
+	},
+
+	submitForm(fields) {
+		const curl = new Curl(this.form_element.getAttribute('action'), false);
+		curl.setArgument('action', 'popup.valuemap.check');
+
+		fields.source = this.form_element['source'].value;
+
+		fetch(curl.getUrl(), {
+			method: 'POST',
+			headers: {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'},
+			body: urlEncodeData(fields)
+		})
+			.then(response => response.json())
+			.then(response => {
+				if ('error' in response) {
+					throw {error: response.error};
+				}
+
+				if ('form_errors' in response) {
+					this.form.setErrors(response.form_errors, true, true);
+					this.form.renderErrors();
+
+					return;
+				}
+
+				new AddValueMap(response, 'edit' in fields ? this.overlay.element.closest('tr') : null);
+
+				overlayDialogueDestroy(this.overlay.dialogueid);
+
+				this.overlay.$dialogue[0].dispatchEvent(
+					new CustomEvent('hostid' in fields ? 'dialogue.update' : 'dialogue.create', {
+						detail: {
+							success: response.success
+						}
+					})
 				);
-				input.classList.toggle('visibility-hidden', (zselect === default_select));
-				input.disabled = (zselect === default_select);
-				input.setAttribute('placeholder', type_placeholder[zselect.value]||'');
+			})
+			.catch(this.ajaxExceptionHandler)
+			.finally(() => {
+				this.overlay.unsetLoading();
+			});
+	},
+
+	removePopupMessages() {
+		for (const element of this.form_element.parentNode.children) {
+			if (element.matches('.msg-good, .msg-bad, .msg-warning')) {
+				element.parentNode.removeChild(element);
+			}
+		}
+	},
+
+	initMappingTable() {
+		this.table = document.getElementById('mappings-table');
+		this.observer = new MutationObserver(this.mutationHandler);
+
+		// Observe changes for form fields: type, value.
+		this.observer.observe(this.table, {
+			childList: true,
+			subtree: true,
+			attributes: true,
+			attributeFilter: ['value']
+		});
+
+		jQuery(this.table)
+			.dynamicRows({
+				template: '#mapping-row-tmpl',
+				rows: this.mappings,
+				allow_empty: true,
+				sortable: true,
+				sortable_options: {
+					target: 'tbody',
+					selector_span: ':not(.error-container-row)',
+					selector_handle: '.<?= ZBX_STYLE_DRAG_ICON ?>',
+					freeze_end: 1
+				}
+			})
+			.on('tableupdate.dynamicRows', (e) => {
+				e.target.querySelectorAll('.form_row').forEach((row, index) => {
+					for (const field of row.querySelectorAll('[name^="mappings["]')) {
+						field.name = field.name.replace(/\[\d+]/g, `[${index}]`);
+					}
+				});
+			});
+
+		this.updateOnTypeChange();
+	},
+
+	updateOnTypeChange() {
+		const default_select = this.table.querySelector(`z-select[value="${<?= VALUEMAP_MAPPING_TYPE_DEFAULT ?>}"]`);
+
+		this.table.querySelectorAll('tr').forEach((row) => {
+			const select = row.querySelector('z-select[name$="[type]"]');
+			const textarea = row.querySelector('z-textarea-flexible[name$="[value]"]');
+
+			if (select) {
+				select.getOptionByValue(<?= VALUEMAP_MAPPING_TYPE_DEFAULT ?>).disabled = (default_select
+					&& select !== default_select
+				);
+				textarea.classList.toggle('<?= ZBX_STYLE_VISIBILITY_HIDDEN ?>', select === default_select);
+				textarea.disabled = select === default_select;
+				textarea.placeholder = this.type_placeholder[select.value] || '';
 			}
 		});
-	}
+	},
 
-	function mutationHandler(mutation_records, observer) {
-		let update = mutation_records.filter((mutation) => {
+	mutationHandler(mutation_records) {
+		const update = mutation_records.filter((mutation) => {
 			return (mutation.target.tagName === 'INPUT' && mutation.target.getAttribute('name').substr(-6) === '[type]')
 				|| (mutation.target.tagName === 'TBODY' && mutation.removedNodes.length > 0);
 		});
 
 		if (update.length) {
-			updateOnTypeChange();
+			valuemap_edit_popup.updateOnTypeChange();
 		}
+	},
+
+	ajaxExceptionHandler: (exception) => {
+		const form = valuemap_edit_popup.form_element;
+		let title, messages;
+
+		if (typeof exception === 'object' && 'error' in exception) {
+			title = exception.error.title;
+			messages = exception.error.messages;
+		}
+		else {
+			messages = [<?= json_encode(_('Unexpected server error.')) ?>];
+		}
+
+		const message_box = makeMessageBox('bad', messages, title)[0];
+
+		form.parentNode.insertBefore(message_box, form);
 	}
-});
-
-function submitValueMap(overlay) {
-	const form = overlay.$dialogue.$body[0].querySelector('form');
-
-	jQuery(form).trimValues(['input[type="text"]']);
-	const curl = new Curl(form.getAttribute('action'));
-
-	fetch(curl.getUrl(), {
-		method: 'POST',
-		body: new URLSearchParams(new FormData(form))
-	})
-		.then(response => response.json())
-		.then(response => {
-			if ('error' in response) {
-				throw {error: response.error};
-			}
-
-			new AddValueMap(response, response.edit ? overlay.element.closest('tr') : null);
-
-			overlayDialogueDestroy(overlay.dialogueid);
-		})
-		.catch((exception) => {
-			for (const element of form.parentNode.children) {
-				if (element.matches('.msg-good, .msg-bad, .msg-warning')) {
-					element.parentNode.removeChild(element);
-				}
-			}
-
-			let title, messages;
-
-			if (typeof exception === 'object' && 'error' in exception) {
-				title = exception.error.title;
-				messages = exception.error.messages;
-			}
-			else {
-				messages = [<?= json_encode(_('Unexpected server error.')) ?>];
-			}
-
-			const message_box = makeMessageBox('bad', messages, title)[0];
-
-			form.parentNode.insertBefore(message_box, form);
-		})
-		.finally(() => {
-			overlay.unsetLoading();
-		});
-}
+};

@@ -1,55 +1,72 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
+require_once dirname(__FILE__).'/include/defines.inc.php';
 
 // get language translations
 require_once dirname(__FILE__).'/include/locales.inc.php';
 require_once dirname(__FILE__).'/include/gettextwrapper.inc.php';
 
-setupLocale(array_key_exists('lang', $_GET) ? (string) $_GET['lang'] : 'en_GB');
+setupLocale(array_key_exists('lang', $_GET) ? (string) $_GET['lang'] : ZBX_DEFAULT_LANG);
 
 require_once dirname(__FILE__).'/include/js.inc.php';
-
-require_once dirname(__FILE__).'/include/defines.inc.php';
 require_once dirname(__FILE__).'/include/classes/helpers/CCookieHelper.php';
 
 // available scripts 'scriptFileName' => 'path relative to js/'
 $available_js = [
+	'defines.js' => '',
 	'common.js' => '',
 	'class.dashboard.js' => '',
 	'class.dashboard.page.js' => '',
+	'class.dashboard.print.js' => '',
 	'class.dashboard.widget.placeholder.js' => '',
-	'class.widget.js' => 'widgets/',
-	'class.widget.iterator.js' => 'widgets/',
-	'class.widget.clock.js' => 'widgets/',
-	'class.widget.geomap.js' => 'widgets/',
-	'class.widget.graph.js' => 'widgets/',
-	'class.widget.graph-prototype.js' => 'widgets/',
-	'class.widget.item.js' => 'widgets/',
-	'class.widget.map.js' => 'widgets/',
-	'class.widget.navtree.js' => 'widgets/',
-	'class.widget.paste-placeholder.js' => 'widgets/',
-	'class.widget.problems.js' => 'widgets/',
-	'class.widget.problemsbysv.js' => 'widgets/',
-	'class.widget.svggraph.js' => 'widgets/',
-	'class.widget.trigerover.js' => 'widgets/',
+	'class.widgets-data.js' => '',
+	'class.widget-base.js' => '',
+	'class.widget.js' => '',
+	'class.widget.inaccessible.js' => '',
+	'class.widget.iterator.js' => '',
+	'class.widget.misconfigured.js' => '',
+	'class.widget.create-placeholder.js' => '',
+	'class.widget-field.js' => '',
+	'class.widget-edit.dialogue.js' => '',
+	'class.widget-edit.sandbox.js' => '',
+	'class.widget-edit.validator.js' => '',
+	'class.widget-field.checkbox.js' => '',
+	'class.widget-field.checkbox-list.js' => '',
+	'class.widget-field.color.js' => '',
+	'class.widget-field.date-picker.js' => '',
+	'class.widget-field.integer-box.js' => '',
+	'class.widget-field.lat-lng.js' => '',
+	'class.widget-field.multiselect.js' => '',
+	'class.widget-field.numeric-box.js' => '',
+	'class.widget-field.pattern-select.js' => '',
+	'class.widget-field.radio-button-list.js' => '',
+	'class.widget-field.range-control.js' => '',
+	'class.widget-field.select.js' => '',
+	'class.widget-field.severities.js' => '',
+	'class.widget-field.tags.js' => '',
+	'class.widget-field.text-area.js' => '',
+	'class.widget-field.text-box.js' => '',
+	'class.widget-field.thresholds.js' => '',
+	'class.widget-field.time-period.js' => '',
+	'class.widget-field.url.js' => '',
+	'class.widget-field.time-zone.js' => '',
+	'class.widget-field-event.js' => '',
+	'class.widget-form.js' => '',
+	'class.widget-form-event.js' => '',
+	'class.widget-select.popup.js' => '',
 	'hostinterfacemanager.js' => '',
 	'hostmacrosmanager.js' => '',
 	'menupopup.js' => '',
@@ -61,27 +78,56 @@ $available_js = [
 	'flickerfreescreen.js' => '',
 	'multilineinput.js' => '',
 	'multiselect.js' => '',
-	'colorpicker.js' => '',
 	'chkbxrange.js' => '',
 	'layout.mode.js' => '',
-	'textareaflexible.js' => '',
 	'inputsecret.js' => '',
 	'macrovalue.js' => '',
 	// vendors
-	'jquery.js' => 'vendors/',
-	'jquery-ui.js' => 'vendors/',
-	'leaflet.js' => 'vendors/Leaflet/Leaflet/',
-	'leaflet.markercluster.js' => 'vendors/Leaflet/Leaflet.markercluster/',
+	'jquery.js' => 'vendors/jQuery/',
+	'jquery-ui.js' => 'vendors/jQueryUI/',
+	'leaflet.js' => 'vendors/Leaflet/',
+	'leaflet.markercluster.js' => 'vendors/Leaflet.markercluster/',
+	'd3.js' => 'vendors/D3/',
+	'qrcode.js' => 'vendors/qrcode/',
 	// classes
 	'component.z-bar-gauge.js' => '',
+	'component.z-color-picker.js' => '',
 	'component.z-select.js' => '',
+	'component.z-navigation-tree.js' => '',
+	'component.z-sparkline.js' => '',
+	'component.z-split-view.js' => '',
+	'component.z-textarea-flexible.js' => '',
+	'component.z-timeline-range-slider.js' => '',
+	'component.z-vertical.js' => '',
+	'class.event-hub.js' => '',
+	'class.event-hub.event.js' => '',
+	'class.banner.js' => '',
 	'class.base-component.js' => '',
-	'class.bbcode.js' => '',
 	'class.calendar.js' => '',
 	'class.cdate.js' => '',
-	'class.cdebug.js' => '',
-	'class.cmap.js' => '',
+	'class.dataprovider.js' => 'datatable/',
+	'class.dataprovider.default.js' => 'datatable/',
+	'class.options-popup.js' => 'datatable/options-popup/',
+	'class.options-popup.table-options.js' => 'datatable/options-popup/',
+	'class.options-popup.tags.js' => 'datatable/options-popup/',
+	'class.options-popup.tagvalue.js' => 'datatable/options-popup/',
+	'class.options-popup.monitoring.problems.time.js' => 'datatable/options-popup/',
+	'class.options-popup.monitoring.problems.problem.js' => 'datatable/options-popup/',
+	'class.options-popup.monitoring.host.problems.js' => 'datatable/options-popup/',
+	'class.options-popup.monitoring.latest.name.js' => 'datatable/options-popup/',
+	'class.options-popup.custom-text.js' => 'datatable/options-popup/',
+	'class.column.js' => 'datatable/column/',
+	'class.column.tags.js' => 'datatable/column/',
+	'class.column.tagvalue.js' => 'datatable/column/',
+	'class.column.custom-text.js' => 'datatable/column/',
+	'class.datatable.js' => 'datatable/',
+	'class.details-panel.js' => '',
+	'class.message.js' => '',
+	'class.pager.js' => '',
+	'class.state.js' => '',
 	'class.expandable.subfilter.js' => '',
+	'class.form.js' => '',
+	'class.form.validator.js' => '',
 	'class.geomaps.js' => '',
 	'class.localstorage.js' => '',
 	'class.menu.js' => '',
@@ -96,53 +142,100 @@ $available_js = [
 	'class.coverride.js' => '',
 	'class.crangecontrol.js' => '',
 	'class.csuggest.js' => '',
-	'class.csvggraph.js' => '',
 	'class.curl.js' => '',
+	'class.form.fieldset.collapsible.js' => '',
 	'class.overlaycollection.js' => '',
 	'class.overlay.js' => '',
 	'class.cverticalaccordion.js' => '',
+	'class.script.js' => '',
 	'class.scrollable.js' => '',
 	'class.sidebar.js' => '',
+	'class.side-drawer.js' => '',
+	'class.software-version-check.js' => '',
 	'class.sortable.js' => '',
-	'class.svg.canvas.js' => 'vector/',
-	'class.svg.map.js' => 'vector/',
+	'class.imagecache.js' => '',
+	'class.svgcanvas.js' => 'vector/canvas/',
+	'class.svgtextarea.js' => 'vector/canvas/',
+	'class.svgelement.js' => 'vector/canvas/',
+	'class.svgmap.js' => 'vector/svgmap/',
+	'class.svgmapelement.js' => 'vector/svgmap/',
+	'class.svgmaplink.js' => 'vector/svgmap/',
+	'class.svgmapshape.js' => 'vector/svgmap/',
 	'class.cviewswitcher.js' => '',
 	'class.rpc.js' => '',
 	'class.tabfilter.js' => '',
 	'class.tabfilteritem.js' => '',
 	'class.tagfilteritem.js' => '',
+	'class.trace-view-page.js' => '',
+	'class.apm.attrfilteritem.js' => '',
 	'class.template.js' => '',
+	'class.navigationtree.js' => '',
 	'init.js' => '',
 	'class.tab-indicators.js' => '',
+	'class.popup-manager.js' => '',
+	'class.popup-manager.event.js' => '',
 	// templates
 	'sysmap.tpl.js' => 'templates/',
 	// page-specific scripts
+	'class.linkform.js' => 'pages/sysmap/forms/',
+	'class.massshapeform.js' => 'pages/sysmap/forms/',
+	'class.shapeform.js' => 'pages/sysmap/forms/',
+	'class.massform.js' => 'pages/sysmap/forms/',
+	'class.selementform.js' => 'pages/sysmap/forms/',
+	'class.selement.js' => 'pages/sysmap/',
+	'class.shape.js' => 'pages/sysmap/',
+	'class.link.js' => 'pages/sysmap/',
+	'class.cmap.js' => 'pages/sysmap/',
+	'sysmap.js' => 'pages/sysmap/',
 	'items.js' => 'pages/',
-	'report2.js' => 'pages/',
 	'report4.js' => 'pages/',
 	'setup.js' => 'pages/',
-	'popup.condition.common.js' => 'pages/',
-	'popup.operation.common.js' => 'pages/'
+	// fields
+	'class.field.js' => 'fields/',
+	'class.field.collection.js' => 'fields/',
+	'class.field.array.js' => 'fields/',
+	'class.field.checkbox.js' => 'fields/',
+	'class.field.file.js' => 'fields/',
+	'class.field.hidden.js' => 'fields/',
+	'class.field.menupath.js' => 'fields/',
+	'class.field.multiline.js' => 'fields/',
+	'class.field.multiselect.js' => 'fields/',
+	'class.field.radiolist.js' => 'fields/',
+	'class.field.set.js' => 'fields/',
+	'class.field.textarea.js' => 'fields/',
+	'class.field.textbox.js' => 'fields/',
+	'class.field.zcolorpicker.js' => 'fields/',
+	'class.field.zselect.js' => 'fields/',
+	'class.field.ztextarea-flexible.js' => 'fields/'
 ];
 
 $translate_strings = [
 	'gtlc.js' => [
-		'S_MINUTE_SHORT' => _x('m', 'minute short')
-	],
-	'class.overlay.js' => [
-		'Operation details' => _('Operation details')
+		'S_MINUTE_SHORT' => _x('m', 'minute short'),
+		'Failed to update time selector.' => _('Failed to update time selector.'),
+		'Unexpected server error.' => _('Unexpected server error.')
 	],
 	'class.dashboard.js' => [
 		'Actions' => _('Actions'),
-		'Cannot add dashboard page: maximum number of %1$d dashboard pages has been added.' => _('Cannot add dashboard page: maximum number of %1$d dashboard pages has been added.'),
-		'Cannot add widget: not enough free space on the dashboard.' => _('Cannot add widget: not enough free space on the dashboard.'),
+		'Add widget' => _('Add widget'),
+		'Cannot add dashboard page: maximum number of %1$d dashboard pages has been added.' =>
+			_('Cannot add dashboard page: maximum number of %1$d dashboard pages has been added.'),
+		'Cannot add widget: not enough free space on the dashboard.' =>
+			_('Cannot add widget: not enough free space on the dashboard.'),
+		'Cannot add widget: no widgets available.' => _('Cannot add widget: no widgets available.'),
+		'Cannot paste inaccessible widget.' => _('Cannot paste inaccessible widget.'),
 		'Copy' => _('Copy'),
 		'Delete' => _('Delete'),
+		'Editing other objects is not allowed in dashboard editing mode.' =>
+			_('Editing other objects is not allowed in dashboard editing mode.'),
 		'Failed to paste dashboard page.' => _('Failed to paste dashboard page.'),
 		'Failed to paste widget.' => _('Failed to paste widget.'),
 		'Failed to update dashboard page properties.' => _('Failed to update dashboard page properties.'),
 		'Failed to update dashboard properties.' => _('Failed to update dashboard properties.'),
 		'Failed to update widget properties.' => _('Failed to update widget properties.'),
+		'Inaccessible widget' => _('Inaccessible widget'),
+		'Inaccessible widgets were not copied.' => _('Inaccessible widgets were not copied.'),
+		'Inaccessible widgets were not pasted.' => _('Inaccessible widgets were not pasted.'),
 		'Page %1$d' => _('Page %1$d'),
 		'Paste widget' => _('Paste widget'),
 		'Properties' => _('Properties'),
@@ -154,83 +247,164 @@ $translate_strings = [
 		'Click and drag to desired size.' => _('Click and drag to desired size.'),
 		'Release to create a widget.' => _('Release to create a widget.')
 	],
+	'class.pager.js' => [
+		'First' => _x('First', 'page navigation'),
+		'Last' => _x('Last', 'page navigation'),
+		'Go to first page' => _('Go to first page'),
+		'Go to previous page, %1$s' => _('Go to previous page, %1$s'),
+		'Go to page %1$s, current page' => _('Go to page %1$s, current page'),
+		'Go to page %1$s' => _('Go to page %1$s'),
+		'Go to next page, %1$s' => _('Go to next page, %1$s'),
+		'Go to last page, %1$s' => _('Go to last page, %1$s'),
+		'Displaying %1$s of %2$s found' => _('Displaying %1$s of %2$s found'),
+		'Displaying %1$s to %2$s of %3$s found' => _('Displaying %1$s to %2$s of %3$s found')
+	],
+	'class.datatable.js' => [
+		'No data found' => _('No data found'),
+		'Unexpected server error.' => _('Unexpected server error.'),
+		'Enabled' => _('Enabled'),
+		'Disabled' => _('Disabled'),
+		'Inherited tag' => _('Inherited tag'),
+		'Inherited and template tag' => _('Inherited and template tag'),
+		'Inherited and host tag' => _('Inherited and host tag'),
+		'Inherited and host prototype tag' => _('Inherited and host prototype tag'),
+		'Inherited and item tag' => _('Inherited and item tag'),
+		'Inherited and item prototype tag' => _('Inherited and item prototype tag'),
+		'Inherited and trigger tag' => _('Inherited and trigger tag'),
+		'Inherited and trigger prototype tag' => _('Inherited and trigger prototype tag'),
+		'Inherited and web scenario tag' => _('Inherited and web scenario tag'),
+		'Are you sure you want to delete %1$s? This action cannot be undone.' =>
+			_('Are you sure you want to delete %1$s? This action cannot be undone.'),
+		'duplicate' => _('duplicate'),
+		'selected' => _('selected'),
+		'Customize table' => _('Customize table'),
+		'Show all tags' => _('Show all tags'),
+		'No columns selected' => _('No columns selected'),
+		'Add columns in the Customize table panel' => _('Add columns in the Customize table panel')
+	],
+	'class.options-popup.js' => [
+		'Column name' => _('Column name'),
+		'Duplicate column' => _('Duplicate column'),
+		'Delete column' => _('Delete column')
+	],
+	'class.options-popup.monitoring.host.problems.js' => [
+		'Show suppressed problems' => _('Show suppressed problems')
+	],
+	'class.options-popup.monitoring.latest.name.js' => [
+		'Show item key' => _('Show item key')
+	],
+	'class.options-popup.monitoring.problems.problem.js' => [
+		'Show operational data' => _('Show operational data'),
+		'Show trigger expression' => _('Show trigger expression')
+	],
+	'class.options-popup.monitoring.problems.time.js' => [
+		'Show timeline' => _('Show timeline')
+	],
+	'class.options-popup.tags.js' => [
+		'Number of tags' => _('Number of tags'),
+		'Tag name display' => _('Tag name display'),
+		'Full' => _('Full'),
+		'Shortened' => _('Shortened'),
+		'None' => _('None'),
+		'Tag display priority' => _('Tag display priority'),
+		'comma-separated list' => _('comma-separated list')
+	],
+	'class.options-popup.tagvalue.js' => [
+		'Tag name' => _('Tag name')
+	],
+	'class.options-popup.custom-text.js' => [
+		'Custom text' => _('Custom text'),
+		'Text, macros, or combined' => _('Text, macros, or combined')
+	],
+	'class.options-popup.table-options.js' => [
+		'Table options' => _('Table options'),
+		'Column list' => _('Column list'),
+		'Reset layout' => _('Reset layout'),
+		'Your table settings will be reset to default and duplicated columns will be removed.' =>
+			_('Your table settings will be reset to default and duplicated columns will be removed.')
+	],
 	'class.geomaps.js' => [
 		'Severity filter' => _('Severity filter')
 	],
-	'class.widget.js' => [
+	'class.form.fieldset.collapsible.js' => [
+		'S_COLLAPSE' => _('Collapse'),
+		'S_EXPAND' => _('Expand')
+	],
+	'class.widget-base.js' => [
 		'10 seconds' => _n('%1$s second', '%1$s seconds', 10),
 		'30 seconds' => _n('%1$s second', '%1$s seconds', 30),
 		'1 minute' => _n('%1$s minute', '%1$s minutes', 1),
 		'2 minutes' => _n('%1$s minute', '%1$s minutes', 2),
 		'10 minutes' => _n('%1$s minute', '%1$s minutes', 10),
 		'15 minutes' => _n('%1$s minute', '%1$s minutes', 15),
-		'Actions' => _s('Actions'),
-		'Copy' => _s('Copy'),
-		'Delete' => _s('Delete'),
-		'Edit' => _s('Edit'),
-		'No refresh' => _('No refresh'),
-		'Paste' => _s('Paste'),
-		'Refresh interval' => _s('Refresh interval')
-	],
-	'class.widget.geomap.js' => [
 		'Actions' => _('Actions'),
-		'Set this view as default' => _('Set this view as default'),
-		'Reset to initial view' => _('Reset to initial view'),
-		'No problems' => _('No problems'),
-		'Not classified' => _('Not classified'),
-		'Information' => _('Information'),
-		'Warning' => _('Warning'),
-		'Average' => _('Average'),
-		'High' => _('High'),
-		'Disaster' => _('Disaster'),
-		'Host' => _('Host'),
-		'D' => _x('D', 'abbreviation of severity level'),
-		'H' => _x('H', 'abbreviation of severity level'),
-		'A' => _x('A', 'abbreviation of severity level'),
-		'W' => _x('W', 'abbreviation of severity level'),
-		'I' => _x('I', 'abbreviation of severity level'),
-		'N' => _x('N', 'abbreviation of severity level'),
-		'Navigate to default view' => _('Navigate to default view'),
-		'Navigate to initial view' => _('Navigate to initial view')
+		'Awaiting data' => _('Awaiting data'),
+		'Copy' => _('Copy'),
+		'Delete' => _('Delete'),
+		'Edit' => _('Edit'),
+		'No refresh' => _('No refresh'),
+		'Paste' => _('Paste'),
+		'Refresh interval' => _('Refresh interval'),
+		'Edit widget settings' => _('Edit widget settings'),
+		'Open widget actions' => _('Open widget actions')
+	],
+	'class.widget.inaccessible.js' => [
+		'No permissions to referred object or it does not exist!' =>
+			_('No permissions to referred object or it does not exist!'),
+		'Refresh interval' => _('Refresh interval')
 	],
 	'class.widget.iterator.js' => [
-		'Next page' => _s('Next page'),
-		'Previous page' => _s('Previous page'),
+		'Next page' => _('Next page'),
+		'Previous page' => _('Previous page'),
 		'Widget is too small for the specified number of columns and rows.' =>
-			_s('Widget is too small for the specified number of columns and rows.')
+			_('Widget is too small for the specified number of columns and rows.')
 	],
-	'class.widget.graph.js' => [
-		'Actions' => _s('Actions'),
-		'Download image' => _s('Download image')
+	'class.widget.misconfigured.js' => [
+		'Please update configuration' => _('Please update configuration'),
+		'Referred widget is unavailable' => _('Referred widget is unavailable'),
+		'Refresh interval' => _('Refresh interval'),
+		'Widget is not fully configured' => _('Widget is not fully configured')
 	],
-	'class.widget.navtree.js' => [
-		'Add' => _s('Add'),
-		'Add child element' => _s('Add child element'),
-		'Add multiple maps' => _s('Add multiple maps'),
-		'Apply' => _s('Apply'),
-		'Cancel' => _s('Cancel'),
-		'Edit' => _s('Edit'),
-		'Edit tree element' => _s('Edit tree element'),
-		'Remove' => _s('Remove')
+	'class.widget-select.popup.js' => [
+		'Cancel' => _('Cancel'),
+		'Name' => _('Name'),
+		'No compatible widgets.' => _('No compatible widgets.'),
+		'Widget' => _('Widget')
 	],
-	'class.widget.svggraph.js' => [
-		'Actions' => _s('Actions'),
-		'Download image' => _s('Download image')
+	'class.widget-edit.sandbox.js' => [
+		'Cannot add widget: not enough free space on the dashboard.' =>
+			_('Cannot add widget: not enough free space on the dashboard.')
+	],
+	'class.widget-edit.validator.js' => [
+		'Failed to update widget properties.' => _('Failed to update widget properties.')
+	],
+	'class.widget-field.multiselect.js' => [
+		'Dashboard' => _('Dashboard'),
+		'Widget' => _('Widget'),
+		'Widgets' => _('Widgets'),
+		'Unavailable widget' => _('Unavailable widget'),
+		'Dashboard is used as data source.' => _('Dashboard is used as data source.'),
+		'Another widget is used as data source.' => _('Another widget is used as data source.')
+	],
+	'class.widget-field.time-period.js' => [
+		'Unavailable widget' => _('Unavailable widget')
 	],
 	'functions.js' => [
-		'Cancel' => _('Cancel'),
-		'S_CLOSE' => _('Close'),
-		'Execute' => _('Execute'),
-		'Execution confirmation' => _('Execution confirmation'),
+		'Close' => _('Close'),
+		'Close notification' => _('Close notification'),
+		'Details' => _('Details'),
+		'Error message' => _('Error message'),
+		'Info message' => _('Info message'),
 		'S_YEAR_SHORT' => _x('y', 'year short'),
-		'S_MONTH_SHORT' => _x('m', 'month short'),
+		'S_MONTH_SHORT' => _x('M', 'month short'),
 		'S_DAY_SHORT' => _x('d', 'day short'),
 		'S_HOUR_SHORT' => _x('h', 'hour short'),
 		'S_MINUTE_SHORT' => _x('m', 'minute short'),
-		'Do you wish to replace the conditional expression?' => _('Do you wish to replace the conditional expression?'),
 		'Success message' => _('Success message'),
-		'Error message' => _('Error message'),
 		'Warning message' => _('Warning message')
+	],
+	'inputsecret.js' => [
+		'value' => _('value')
 	],
 	'class.calendar.js' => [
 		'S_CALENDAR' => _('Calendar'),
@@ -259,64 +433,141 @@ $translate_strings = [
 		'S_THURSDAY_SHORT_BIG' => _x('T', 'Thursday short'),
 		'S_FRIDAY_SHORT_BIG' => _x('F', 'Friday short'),
 		'S_SATURDAY_SHORT_BIG' => _x('S', 'Saturday short'),
-		'S_SUNDAY_SHORT_BIG' => _x('S', 'Sunday short')
+		'S_SUNDAY_SHORT_BIG' => _x('S', 'Sunday short'),
+		'Previous year' => _('Previous year'),
+		'Next year' => _('Next year'),
+		'Previous month' => _('Previous month'),
+		'Next month' => _('Next month')
 	],
-	'class.cmap.js' => [
-		'S_ON' => _('On'),
-		'S_OFF' => _('Off'),
-		'S_HIDDEN' => _('Hidden'),
-		'S_SHOWN' => _('Shown'),
+	'class.linkform.js' => [
+		'S_CANNOT_BE_EMPTY' => _('cannot be empty'),
+		'S_COLOR_OK' => _('Color (OK)'),
+		'S_EXPECTING_COLOR_CODE' => _('expecting hexadecimal color code (6 symbols)'),
 		'S_HOST' => _('Host'),
-		'S_MAP' => _('Map'),
-		'S_TRIGGER' => _('Trigger'),
 		'S_HOST_GROUP' => _('Host group'),
 		'S_IMAGE' => _('Image'),
+		'S_INCORRECT_ITEM_VALUE_TYPE' => _('incorrect item value type'),
+		'S_INCORRECT_VALUE' => _('Incorrect value for field "%1$s": %2$s.'),
+		'S_INDICATORS' => _('Indicators'),
+		'S_INVALID_PARAMETER' => _('Invalid parameter "%1$s": %2$s.'),
+		'S_ITEM' => _('Item'),
+		'S_LINK_HIGHLIGHT_IS_REQUIRED' => _('at least 1 link highlight is required'),
+		'S_LINK_THRESHOLD_IS_REQUIRED' => _('at least 1 link threshold is required'),
+		'S_LINK_TRIGGER_IS_REQUIRED' => _('at least 1 link trigger is required'),
+		'S_MAP' => _('Map'),
+		'S_TRIGGER' => _('Trigger')
+	],
+	'class.massform.js' => [
 		'S_DEFAULT' => _('Default'),
-		'S_PLEASE_SELECT_TWO_ELEMENTS' => _('Please select two elements'),
-		'S_TWO_MAP_ELEMENTS_SHOULD_BE_SELECTED' => _('Two map elements should be selected'),
+		'S_HOST' => _('Host'),
+		'S_HOST_GROUP' => _('Host group'),
+		'S_IMAGE' => _('Image'),
+		'S_MAP' => _('Map'),
+		'S_TRIGGER' => _('Trigger')
+	],
+	'class.selementform.js' => [
+		'Host is not selected.' => _('Host is not selected.'),
+		'Host group is not selected.' => _('Host group is not selected.'),
+		'Map is not selected.' => _('Map is not selected.'),
+		'S_EACH_URL_SHOULD_HAVE_UNIQUE' =>
+			_('Each URL should have a unique name. Please make sure there is only one URL named'),
+		'S_DEFAULT' => _('Default'),
+		'S_INCORRECT_ELEMENT_MAP_LINK' => _('All links should have "Name" and "URL" specified'),
+		'Trigger is not selected.' => _('Trigger is not selected.')
+	],
+	'class.selement.js' => [
+		'S_IMAGE' => _('Image'),
+		'S_NEW_ELEMENT' => _('New element')
+	],
+	'class.cmap.js' => [
+		'S_BRING_FORWARD' => _('Bring forward'),
+		'S_BRING_TO_FRONT' => _('Bring to front'),
+		'S_COPY' => _('Copy'),
+		'S_DELETE_LINKS_BETWEEN_SELECTED_ELEMENTS_Q' => _('Delete links between selected elements?'),
 		'S_DELETE_SELECTED_ELEMENTS_Q' => _('Delete selected elements?'),
 		'S_DELETE_SELECTED_SHAPES_Q' => _('Delete selected shapes?'),
-		'S_BRING_TO_FRONT' => _('Bring to front'),
-		'S_BRING_FORWARD' => _('Bring forward'),
-		'S_SEND_BACKWARD' => _('Send backward'),
-		'S_SEND_TO_BACK' => _('Send to back'),
-		'S_REMOVE' => _('Remove'),
-		'S_NEW_ELEMENT' => _('New element'),
-		'S_COPY' => _('Copy'),
+		'S_HIDDEN' => _('Hidden'),
+		'S_MACRO_EXPAND_ERROR' => _('Cannot expand macros.'),
+		'S_NO_IMAGES' =>
+			_('You need to have at least one image uploaded to create map element. Images can be uploaded in Administration->General->Images section.'),
+		'S_OFF' => _('Off'),
+		'S_ON' => _('On'),
 		'S_PASTE' => _('Paste'),
 		'S_PASTE_SIMPLE' => _('Paste without external links'),
-		'S_INCORRECT_ELEMENT_MAP_LINK' => _('All links should have "Name" and "URL" specified'),
-		'S_EACH_URL_SHOULD_HAVE_UNIQUE' => _('Each URL should have a unique name. Please make sure there is only one URL named'),
-		'S_DELETE_LINKS_BETWEEN_SELECTED_ELEMENTS_Q' => _('Delete links between selected elements?'),
-		'S_MACRO_EXPAND_ERROR' => _('Cannot expand macros.'),
-		'S_NO_IMAGES' => 'You need to have at least one image uploaded to create map element. Images can be uploaded in Administration->General->Images section.',
-		'S_COLOR_IS_NOT_CORRECT' => _('Color "%1$s" is not correct: expecting hexadecimal color code (6 symbols).')
+		'S_PLEASE_SELECT_TWO_ELEMENTS' => _('Please select two elements'),
+		'S_REMOVE' => _('Remove'),
+		'S_SEND_BACKWARD' => _('Send backward'),
+		'S_SEND_TO_BACK' => _('Send to back'),
+		'S_SHOWN' => _('Shown'),
+		'S_TWO_MAP_ELEMENTS_SHOULD_BE_SELECTED' => _('Two map elements should be selected')
+	],
+	'class.notification.js' => [
+		'S_PROBLEM_ON' => _('Problem on'),
+		'S_RESOLVED' => _('Resolved')
 	],
 	'class.notifications.js' => [
-		'S_PROBLEM_ON' => _('Problem on'),
-		'S_RESOLVED' => _('Resolved'),
-		'S_MUTE' => _('Mute'),
-		'S_CANNOT_SUPPORT_NOTIFICATION_AUDIO' => _('Cannot support notification audio for this device.'),
-		'S_UNMUTE' => _('Unmute'),
-		'S_CLOSE' => _('Close'),
-		'S_SNOOZE' => _('Snooze'),
 		'Unexpected server error.' => _('Unexpected server error.')
 	],
+	'class.notification.collection.js' => [
+		'Mute for %1$s' => _('Mute for %1$s'),
+		'S_CLOSE' => _('Close'),
+		'S_CANNOT_SUPPORT_NOTIFICATION_AUDIO' => _('Cannot support notification audio for this device.'),
+		'Snooze for %1$s' => _('Snooze for %1$s'),
+		'Unmute for %1$s' => _('Unmute for %1$s')
+	],
+	'class.overlay.js' => [
+		'Help' => _('Help'),
+		'Close modal window' => _('Close modal window'),
+		'Open Zabbix documentation in a new tab' => _('Open Zabbix documentation in a new tab')
+	],
 	'class.cookie.js' => [
-		'S_MAX_COOKIE_SIZE_REACHED' => _('We are sorry, the maximum possible number of elements to remember has been reached.')
+		'S_MAX_COOKIE_SIZE_REACHED' =>
+			_('We are sorry, the maximum possible number of elements to remember has been reached.')
 	],
 	'class.coverride.js' => [
-		'S_COLOR' => _('color'),
 		'S_TIME_SHIFT' => _('time shift')
 	],
 	'class.cverticalaccordion.js' => [
-		'S_COLLAPSE' => _('Collapse'),
-		'S_EXPAND' => _('Expand')
+		'Expand section' => _('Expand section'),
+		'Collapse section' => _('Collapse section')
+	],
+	'class.form.js' => [
+		'Page received incorrect data' => _('Page received incorrect data')
+	],
+	'class.form.validator.js' => [
+		'An array is expected.' => _('An array is expected.'),
+		'At least %1$d items based on field "%2$s" rules' => _('At least %1$d items based on field "%2$s" rules'),
+		'No more than %1$d items based on field "%2$s" rules' => _('No more than %1$d items based on field "%2$s" rules'),
+		'This value does not match pattern.' => _('This value does not match pattern.'),
+		'This value is not a valid identifier.' => _('This value is not a valid identifier.'),
+		'This value is not a valid integer.' => _('This value is not a valid integer.'),
+		'This value is not a valid floating-point value.' => _('This value is not a valid floating-point value.'),
+		'This value is not a valid string.' => _('This value is not a valid string.'),
+		'This field cannot be empty.' => _('This field cannot be empty.'),
+		'This value cannot have more than %1$s decimal places.' =>
+			_('This value cannot have more than %1$s decimal places.'),
+		'This value is too long.' => _('This value is too long.'),
+		'This value cannot be one of %1$s.' => _('This value cannot be one of %1$s.'),
+		'This value cannot be %1$s.' => _('This value cannot be %1$s.'),
+		'This value must be %1$s.' => _('This value must be %1$s.'),
+		'Value must be less than or equal to %1$s.' => _('Value must be less than or equal to %1$s.'),
+		'Value must be greater than or equal to %1$s.' => _('Value must be greater than or equal to %1$s.'),
+		'This value must be one of %1$s.' => _('This value must be one of %1$s.'),
+		'Entry "%1$s" is not unique.' => _('Entry "%1$s" is not unique.'),
+		'within range %1$s' => _('within range %1$s'),
+		'within ranges %1$s' => _('within ranges %1$s'),
+		'one of %1$s' => _('one of %1$s'),
+		' or ' => _(' or '),
+		'%1$s: %2$s' => _('%1$s: %2$s'),
+		'This value is not a valid file.' => _('This value is not a valid file.'),
+		'Image size must be less than %1$s.' => _('Image size must be less than %1$s.'),
+		'File size must be less than %1$s.' => _('File size must be less than %1$s.'),
+		'File format is unsupported.' => _('File format is unsupported.')
 	],
 	'main.js' => [
-		'S_EXPAND' => _('Expand'),
-		'S_COLLAPSE' => _('Collapse'),
-		'S_CLOSE' => _('Close')
+		'S_CLOSE' => _('Close'),
+		'Expand section' => _('Expand section'),
+		'Collapse section' => _('Collapse section')
 	],
 	'hostinterfacemanager.js' => [
 		'Agent' => _('Agent'),
@@ -327,12 +578,14 @@ $translate_strings = [
 	],
 	'hostmacrosmanager.js' => [
 		'Change' => _x('Change', 'verb'),
-		'Remove' => _('Remove')
+		'Remove' => _('Remove'),
+		'Revert' => _('Revert'),
+		'value' => _('value')
 	],
 	'multilineinput.js' => [
 		'S_N_CHAR_COUNT' => _('%1$s characters'),
 		'S_N_CHAR_COUNT_REMAINING' => _('%1$s characters remaining'),
-		'S_CLICK_TO_VIEW_OR_EDIT' => _('Click to view or edit'),
+		'Click to view or edit' => _('Click to view or edit'),
 		'S_APPLY' => _('Apply'),
 		'S_CANCEL' => _('Cancel')
 	],
@@ -347,123 +600,292 @@ $translate_strings = [
 		'%1$s, read only' => _x('%1$s, read only', 'screen reader'),
 		'Cannot be removed' => _x('Cannot be removed', 'screen reader'),
 		'Selected, %1$s in position %2$d of %3$d' => _x('Selected, %1$s in position %2$d of %3$d', 'screen reader'),
-		'Selected, %1$s, read only, in position %2$d of %3$d' => _x('Selected, %1$s, read only, in position %2$d of %3$d', 'screen reader'),
+		'Selected, %1$s, read only, in position %2$d of %3$d' =>
+			_x('Selected, %1$s, read only, in position %2$d of %3$d', 'screen reader'),
 		'More than %1$d matches for %2$s found' => _x('More than %1$d matches for %2$s found', 'screen reader'),
 		'%1$d matches for %2$s found' => _x('%1$d matches for %2$s found', 'screen reader'),
-		'%1$s preselected, use down,up arrow keys and enter to select' => _x('%1$s preselected, use down,up arrow keys and enter to select', 'screen reader')
+		'%1$s preselected, use down,up arrow keys and enter to select' =>
+			_x('%1$s preselected, use down,up arrow keys and enter to select', 'screen reader')
 	],
 	'menupopup.js' => [
 		'500 latest values' => _('500 latest values'),
 		'Actions' => _('Actions'),
-		'Acknowledge' => _('Acknowledge'),
-		'Configuration' => _('Configuration'),
 		'Clone' => _('Clone'),
+		'Configuration' => _('Configuration'),
+		'Maintenance' => _('Maintenance'),
 		'Create new' => _('Create new'),
+		'Create new report' => _('Create new report'),
 		'Create trigger' => _('Create trigger'),
+		'Create trigger prototype' => _('Create trigger prototype'),
 		'Create dependent item' => _('Create dependent item'),
 		'Create dependent discovery rule' => _('Create dependent discovery rule'),
 		'Dashboards' => _('Dashboards'),
 		'Delete' => _('Delete'),
 		'Delete dashboard?' => _('Delete dashboard?'),
-		'Do you wish to replace the conditional expression?' => _('Do you wish to replace the conditional expression?'),
+		'Discovery' => _('Discovery'),
+		'Discovery rule' => _('Discovery rule'),
+		'Do you wish to replace the conditional expression?' =>
+			_('Do you wish to replace the conditional expression?'),
 		'Execute now' => _('Execute now'),
+		'Export' => _('Export'),
 		'Item' => _('Item'),
+		'Items' => _('Items'),
+		'Item prototype' => _('Item prototype'),
 		'Insert expression' => _('Insert expression'),
-		'Sharing' => _('Sharing'),
-		'Trigger status "OK"' => _('Trigger status "OK"'),
-		'Trigger status "Problem"' => _('Trigger status "Problem"'),
 		'Go to' => _('Go to'),
 		'Graph' => _('Graph'),
 		'Graphs' => _('Graphs'),
+		'Suppress host' => _('Suppress host'),
+		'Suppress trigger' => _('Suppress trigger'),
+		'Suppress by event name' => _('Suppress by event name'),
+		'Suppress by tags' => _('Suppress by tags'),
 		'History' => _('History'),
 		'Host' => _('Host'),
+		'Host Wizard' => _('Host Wizard'),
 		'Inventory' => _('Inventory'),
+		'JSON' => _('JSON'),
 		'Latest data' => _('Latest data'),
-		'Latest values' => _('Latest values'),
-		'Last hour graph' => _('Last hour graph'),
-		'Last month graph' => _('Last month graph'),
-		'Last week graph' => _('Last week graph'),
+		'Links' => _('Links'),
+		'Mark as cause' => _('Mark as cause'),
+		'Mark selected as symptoms' => _('Mark selected as symptoms'),
+		'Problem' => _('Problem'),
 		'Problems' => _('Problems'),
+		'S_SELECTED_SR' => _x('%1$s, selected', 'screen reader'),
 		'Scripts' => _('Scripts'),
+		'Sharing' => _('Sharing'),
 		'Submap' => _('Submap'),
-		'S_TRIGGER' => _('Trigger'),
-		'URL' => _('URL'),
-		'URLs' => _('URLs'),
+		'Template' => _('Template'),
+		'Trigger' => _('Trigger'),
+		'Triggers' => _('Triggers'),
+		'Trigger status "OK"' => _('Trigger status "OK"'),
+		'Trigger status "Problem"' => _('Trigger status "Problem"'),
+		'Trigger prototypes' => _('Trigger prototypes'),
+		'Unexpected server error.' => _('Unexpected server error.'),
+		'Update problem' => _('Update problem'),
 		'Values' => _('Values'),
+		'View' => _('View'),
+		'View related reports' => _('View related reports'),
 		'Web' => _('Web'),
-		'S_SELECTED_SR' => _x('%1$s, selected', 'screen reader')
+		'XML' => _('XML'),
+		'YAML' => _('YAML')
 	],
 	'init.js' => [
 		'Debug' => _('Debug'),
 		'Hide debug' => _('Hide debug')
 	],
 	'items.js' => [
-		'To set a host interface select a single item type for all items' => _('To set a host interface select a single item type for all items'),
+		'To set a host interface select a single item type for all items' =>
+			_('To set a host interface select a single item type for all items'),
 		'No interface found' => _('No interface found'),
 		'Item type does not use interface' => _('Item type does not use interface')
 	],
-	'colorpicker.js' => [
-		'D' => _x('D', 'Default color option'),
-		'S_CLOSE' => _('Close'),
-		'Use default' => _('Use default')
+	'class.svggauge.js' => [
+		'No data' => _('No data')
 	],
-	'class.csvggraph.js' => [
-		'S_DISPLAYING_FOUND' => _('Displaying %1$s of %2$s found'),
-		'S_MINUTE_SHORT' => _x('m', 'minute short')
+	'class.svghoneycomb.js' => [
+		'No data' => _('No data')
 	],
 	'common.js' => [
 		'Cancel' => _('Cancel'),
-		'Ok' => _('Ok')
-	],
-	'component.z-select.js' => [
-		'All' => _('All')
+		'Ok' => _('Ok'),
+		'Unexpected server error.' => _('Unexpected server error.')
 	],
 	'macrovalue.js' => [
 		'Set new value' => _('Set new value'),
 		'value' => _('value')
 	],
-	'popup.condition.common.js' => [
-		'Services' => _('Services')
+	'class.script.js' => [
+		'Cancel' => _('Cancel'),
+		'Cannot open URL' => _('Cannot open URL'),
+		'Execute' => _('Execute'),
+		'Execution confirmation' => _('Execution confirmation'),
+		'Invalid URL: %1$s' => _('Invalid URL: %1$s'),
+		'Open URL' => _('Open URL'),
+		'Unexpected server error.' => _('Unexpected server error.'),
+		'URL opening confirmation' => _('URL opening confirmation')
+	],
+	'class.tabfilteritem.js' => [
+		'Edit filter properties' => _('Edit filter properties')
+	],
+	'class.navigationtree.js' => [
+		'Maintenance with data collection' => _('Maintenance with data collection'),
+		'Maintenance without data collection' => _('Maintenance without data collection')
+	],
+	'component.z-color-picker.js' => [
+		'Apply' => _('Apply'),
+		'Clear' => _('Clear'),
+		'D' => _x('D', 'Default color option'),
+		'No color' => _('No color'),
+		'Palette' => _('Palette'),
+		'Palette %1$d' => _('Palette %1$d'),
+		'Solid color' => _('Solid color'),
+		'Use default' => _('Use default')
 	]
 ];
 
 $js = '';
 if (empty($_GET['files'])) {
 	$files = [
+		'defines.js',
 		'jquery.js',
 		'jquery-ui.js',
+		'main.js',
 		'common.js',
 		'component.z-bar-gauge.js',
+		'component.z-color-picker.js',
+		'component.z-navigation-tree.js',
 		'component.z-select.js',
+		'component.z-sparkline.js',
+		'component.z-split-view.js',
+		'component.z-textarea-flexible.js',
+		'component.z-timeline-range-slider.js',
+		'component.z-vertical.js',
+		'class.event-hub.js',
+		'class.event-hub.event.js',
 		'class.base-component.js',
-		'class.cdebug.js',
+		'class.calendar.js',
+		'class.details-panel.js',
+		'class.form.fieldset.collapsible.js',
 		'class.overlaycollection.js',
 		'class.overlay.js',
 		'class.cdate.js',
 		'class.cookie.js',
 		'class.curl.js',
+		'class.dataprovider.js',
+		'class.dataprovider.default.js',
+		'class.options-popup.js',
+		'class.options-popup.table-options.js',
+		'class.options-popup.tags.js',
+		'class.options-popup.tagvalue.js',
+		'class.options-popup.monitoring.problems.time.js',
+		'class.options-popup.monitoring.problems.problem.js',
+		'class.options-popup.monitoring.host.problems.js',
+		'class.options-popup.monitoring.latest.name.js',
+		'class.options-popup.custom-text.js',
+		'class.column.js',
+		'class.column.tags.js',
+		'class.column.tagvalue.js',
+		'class.column.custom-text.js',
+		'class.datatable.js',
+		'class.pager.js',
+		'class.state.js',
+		'class.message.js',
+		'class.field.js',
+		'class.field.collection.js',
+		'class.field.array.js',
+		'class.field.checkbox.js',
+		'class.field.file.js',
+		'class.field.hidden.js',
+		'class.field.multiline.js',
+		'class.field.multiselect.js',
+		'class.field.radiolist.js',
+		'class.field.set.js',
+		'class.field.textarea.js',
+		'class.field.textbox.js',
+		'class.field.menupath.js',
+		'class.field.zcolorpicker.js',
+		'class.field.zselect.js',
+		'class.field.ztextarea-flexible.js',
+		'class.form.js',
+		'class.form.validator.js',
 		'class.menu.js',
 		'class.menu-item.js',
 		'class.rpc.js',
-		'class.bbcode.js',
 		'class.csuggest.js',
+		'class.script.js',
 		'class.scrollable.js',
 		'class.sidebar.js',
+		'class.side-drawer.js',
+		'class.sortable.js',
 		'class.template.js',
-		'main.js',
+		'class.trace-view-page.js',
+		'class.navigationtree.js',
 		'chkbxrange.js',
 		'functions.js',
 		'menupopup.js',
 		'inputsecret.js',
 		'macrovalue.js',
+		'multilineinput.js',
 		'multiselect.js',
 		'class.cverticalaccordion.js',
 		'class.cviewswitcher.js',
 		'class.tab-indicators.js',
+		'class.tabfilter.js',
+		'class.tabfilteritem.js',
+		'class.tagfilteritem.js',
+		'class.apm.attrfilteritem.js',
+		'class.expandable.subfilter.js',
 		'hostinterfacemanager.js',
 		'hostmacrosmanager.js',
-		'textareaflexible.js',
-		'init.js'
+		'class.popup-manager.js',
+		'class.popup-manager.event.js',
+		'items.js',
+		'init.js',
+		'class.coverride.js',
+		'class.crangecontrol.js',
+		'class.dashboard.js',
+		'class.dashboard.page.js',
+		'class.dashboard.print.js',
+		'class.dashboard.widget.placeholder.js',
+		'class.linkform.js',
+		'class.massshapeform.js',
+		'class.shapeform.js',
+		'class.massform.js',
+		'class.selementform.js',
+		'class.selement.js',
+		'class.shape.js',
+		'class.link.js',
+		'class.imagecache.js',
+		'class.svgcanvas.js',
+		'class.svgtextarea.js',
+		'class.svgelement.js',
+		'class.svgmap.js',
+		'class.svgmapelement.js',
+		'class.svgmaplink.js',
+		'class.svgmapshape.js',
+		'class.cmap.js',
+		'sysmap.js',
+		'class.widgets-data.js',
+		'class.widget-base.js',
+		'class.widget.js',
+		'class.widget.inaccessible.js',
+		'class.widget.iterator.js',
+		'class.widget.misconfigured.js',
+		'class.widget.create-placeholder.js',
+		'class.widget-field.js',
+		'class.widget-edit.dialogue.js',
+		'class.widget-edit.sandbox.js',
+		'class.widget-edit.validator.js',
+		'class.widget-field.checkbox.js',
+		'class.widget-field.checkbox-list.js',
+		'class.widget-field.color.js',
+		'class.widget-field.date-picker.js',
+		'class.widget-field.multiselect.js',
+		'class.widget-field.pattern-select.js',
+		'class.widget-field.radio-button-list.js',
+		'class.widget-field.range-control.js',
+
+		// Keep loading order for the following file group:
+		'class.widget-field.select.js',
+		'class.widget-field.time-zone.js',
+
+		'class.widget-field.severities.js',
+		'class.widget-field.tags.js',
+		'class.widget-field.text-area.js',
+
+		// Keep loading order for the following file group:
+		'class.widget-field.text-box.js',
+		'class.widget-field.lat-lng.js',
+		'class.widget-field.numeric-box.js',
+		'class.widget-field.integer-box.js',
+
+		'class.widget-field.thresholds.js',
+		'class.widget-field.time-period.js',
+		'class.widget-field.url.js',
+		'class.widget-field-event.js',
+		'class.widget-form.js',
+		'class.widget-form-event.js',
+		'class.widget-select.popup.js'
 	];
 
 	if (CCookieHelper::has(ZBX_SESSION_NAME)) {

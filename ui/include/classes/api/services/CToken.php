@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -34,7 +29,11 @@ class CToken extends CApiService {
 
 	protected $tableName = 'token';
 	protected $tableAlias = 't';
-	protected $sortColumns = ['tokenid', 'name', 'lastaccess', 'status', 'expires_at', 'created_at'];
+	protected $sortColumns = ['tokenid', 'name', 'status', 'expires_at', 'created_at', 'lastaccess'];
+
+	public const OUTPUT_FIELDS = ['tokenid', 'name', 'userid', 'description', 'status', 'expires_at', 'created_at',
+		'creator_userid', 'lastaccess'
+	];
 
 	/**
 	 * @param array $options
@@ -44,10 +43,6 @@ class CToken extends CApiService {
 	 * @return array|int
 	 */
 	public function get(array $options = []) {
-		$token_fields = ['tokenid', 'name', 'description', 'userid', 'lastaccess', 'status', 'expires_at',
-			'created_at', 'creator_userid'
-		];
-
 		$api_input_rules = ['type' => API_OBJECT, 'fields' => [
 			// filter
 			'tokenids' =>				['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'default' => null],
@@ -55,26 +50,14 @@ class CToken extends CApiService {
 			'token' =>					['type' => API_STRING_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'length' => 64, 'default' => null],
 			'valid_at' =>				['type' => API_INT32, 'flags' => API_ALLOW_NULL, 'default' => null],
 			'expired_at' =>				['type' => API_INT32, 'flags' => API_ALLOW_NULL, 'default' => null],
-			'filter' =>					['type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'default' => null, 'fields' => [
-				'tokenid' =>				['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'name' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'userid' =>					['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'lastaccess' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'status' =>					['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', [ZBX_AUTH_TOKEN_ENABLED, ZBX_AUTH_TOKEN_DISABLED])],
-				'expires_at' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'created_at' =>				['type' => API_INTS32, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'creator_userid' =>			['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-			]],
-			'search' =>					['type' => API_OBJECT, 'flags' => API_ALLOW_NULL, 'default' => null, 'fields' => [
-				'name' =>					['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE],
-				'description' =>			['type' => API_STRINGS_UTF8, 'flags' => API_ALLOW_NULL | API_NORMALIZE]
-			]],
+			'filter' =>					['type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'default' => null, 'fields' => DB::getFilterFields('token', self::OUTPUT_FIELDS)],
+			'search' =>					['type' => API_FILTER, 'flags' => API_ALLOW_NULL, 'default' => null, 'fields' => DB::getSearchFields('token', self::OUTPUT_FIELDS)],
 			'searchByAny' =>			['type' => API_BOOLEAN, 'default' => false],
 			'startSearch' =>			['type' => API_FLAG, 'default' => false],
 			'excludeSearch' =>			['type' => API_FLAG, 'default' => false],
 			'searchWildcardsEnabled' =>	['type' => API_BOOLEAN, 'default' => false],
 			// output
-			'output' =>					['type' => API_OUTPUT, 'in' => implode(',', $token_fields), 'default' => API_OUTPUT_EXTEND],
+			'output' =>					['type' => API_OUTPUT, 'flags' => API_NORMALIZE, 'in' => implode(',', self::OUTPUT_FIELDS), 'default' => API_OUTPUT_EXTEND],
 			'countOutput' =>			['type' => API_FLAG, 'default' => false],
 			// sort and limit
 			'sortfield' =>				['type' => API_STRINGS_UTF8, 'flags' => API_NORMALIZE, 'in' => implode(',', $this->sortColumns), 'uniq' => true, 'default' => []],
@@ -90,22 +73,15 @@ class CToken extends CApiService {
 
 		$sql_parts = [
 			'select' => [],
-			'from'   => [$this->tableName() => $this->tableName().' '.$this->tableAlias()],
-			'where'  => [],
-			'order'  => [],
-			'group'  => []
+			'from'   => $this->tableName().' '.$this->tableAlias(),
+			'where'  => ['t.auth_scheme='.ZBX_AUTH_SCHEME_BEARER],
+			'group'  => [],
+			'order'  => []
 		];
 
 		// Fix incorrect postgres query when sort is used together with count.
 		if ($options['countOutput'] && $options['sortfield']) {
 			$options['sortfield'] = [];
-		}
-
-		// Hides token field value from being shown.
-		if (!$options['countOutput'] && $options['output'] === API_OUTPUT_EXTEND) {
-			$options['output'] = $this->getTableSchema()['fields'];
-			unset($options['output']['token']);
-			$options['output'] = array_keys($options['output']);
 		}
 
 		// permissions
@@ -125,7 +101,7 @@ class CToken extends CApiService {
 
 		// token
 		if ($options['token'] !== null) {
-			$token = hash('sha512', $options['token']);
+			$token = CApiTokenHelper::hashToken($options['token']);
 			$sql_parts['where'][] = dbConditionString($this->tableAlias().'.token', (array) $token);
 		}
 
@@ -188,20 +164,9 @@ class CToken extends CApiService {
 
 		$this->validateCreate($tokens);
 
-		array_walk($tokens, function (&$token) {
-			$token['created_at'] = time();
-			$token['creator_userid'] = static::$userData['userid'];
-		});
+		self::createForce($tokens);
 
-		$tokenids = DB::insert('token', $tokens);
-
-		array_walk($tokens, function (&$token, $index) use ($tokenids) {
-			$token['tokenid'] = $tokenids[$index];
-		});
-
-		self::addAuditLog(CAudit::ACTION_ADD, CAudit::RESOURCE_AUTH_TOKEN, $tokens);
-
-		return ['tokenids' => $tokenids];
+		return ['tokenids' => array_column($tokens, 'tokenid')];
 	}
 
 	/**
@@ -273,7 +238,7 @@ class CToken extends CApiService {
 	 *
 	 * @throws APIException  if token already exists.
 	 */
-	protected function checkDuplicateNames(array $tokens, array $db_tokens = null): void {
+	protected function checkDuplicateNames(array $tokens, ?array $db_tokens = null): void {
 		$names_by_userid = [];
 
 		foreach ($tokens as $token) {
@@ -291,6 +256,7 @@ class CToken extends CApiService {
 				'SELECT t.userid,t.name'.
 				' FROM token t'.
 				' WHERE '.dbConditionId('t.userid', [$userid]).
+					' AND '.dbConditionInt('t.auth_scheme', [ZBX_AUTH_SCHEME_BEARER]).
 					' AND '.dbConditionString('t.name', $names),
 				1
 			));
@@ -300,6 +266,31 @@ class CToken extends CApiService {
 					$duplicate['name'], $userid
 				));
 			}
+		}
+	}
+
+	/**
+	 * @param array   $tokens
+	 * @param boolean $audit_log
+	 */
+	public static function createForce(array &$tokens, bool $audit_log = true): void {
+		$created_at = time();
+
+		foreach ($tokens as &$token) {
+			$token['created_at'] = $created_at;
+			$token['creator_userid'] = self::$userData['userid'];
+		}
+		unset($token);
+
+		$tokenids = DB::insert('token', $tokens);
+
+		foreach ($tokens as &$token) {
+			$token['tokenid'] = array_shift($tokenids);
+		}
+		unset($token);
+
+		if ($audit_log) {
+			self::addAuditLog(CAudit::ACTION_ADD, CAudit::RESOURCE_AUTH_TOKEN, $tokens);
 		}
 	}
 
@@ -343,7 +334,7 @@ class CToken extends CApiService {
 	 *
 	 * @throws APIException  if the input is invalid
 	 */
-	protected function validateUpdate(array &$tokens, array &$db_tokens = null): void {
+	protected function validateUpdate(array &$tokens, ?array &$db_tokens = null): void {
 		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['tokenid']], 'fields' => [
 			'tokenid' =>		['type' => API_ID, 'flags' => API_REQUIRED],
 			'name' =>			['type' => API_STRING_UTF8, 'flags' => API_NOT_EMPTY, 'length' => DB::getFieldLength('token', 'name')],
@@ -383,28 +374,6 @@ class CToken extends CApiService {
 	/**
 	 * @param array $tokenids
 	 *
-	 * @static
-	 *
-	 * @param array $tokenids
-	 */
-	public static function deleteForce(array $tokenids): void {
-		if (!$tokenids) {
-			return;
-		}
-
-		$db_tokens = DB::select('token', [
-			'output' => ['tokenid', 'userid', 'name'],
-			'tokenids' => $tokenids
-		]);
-
-		DB::delete('token', ['tokenid' => $tokenids]);
-
-		self::addAuditLog(CAudit::ACTION_DELETE, CAudit::RESOURCE_AUTH_TOKEN, $db_tokens);
-	}
-
-	/**
-	 * @param array $tokenids
-	 *
 	 * @throws APIException if the input is invalid
 	 *
 	 * @return array
@@ -414,24 +383,35 @@ class CToken extends CApiService {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('You do not have permission to perform this operation.'));
 		}
 
+		$this->validateDelete($tokenids, $db_tokens);
+
+		self::deleteForce($db_tokens);
+
+		return ['tokenids' => $tokenids];
+	}
+
+	private function validateDelete(array $tokenids, ?array &$db_tokens = null): void {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 
 		if (!CApiInputValidator::validate($api_input_rules, $tokenids, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
 
-		$db_count = $this->get([
-			'countOutput' => true,
-			'tokenids' => $tokenids
+		$db_tokens = $this->get([
+			'output' => ['tokenid', 'name'],
+			'tokenids' => $tokenids,
+			'preservekeys' => true
 		]);
 
-		if ($db_count != count($tokenids)) {
+		if (count($db_tokens) != count($tokenids)) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
+	}
 
-		self::deleteForce($tokenids);
+	public static function deleteForce(array $db_tokens): void {
+		DB::delete('token', ['tokenid' => array_keys($db_tokens)]);
 
-		return ['tokenids' => $tokenids];
+		self::addAuditLog(CAudit::ACTION_DELETE, CAudit::RESOURCE_AUTH_TOKEN, $db_tokens);
 	}
 
 	/**
@@ -472,14 +452,16 @@ class CToken extends CApiService {
 		$tokens = [];
 		$response = [];
 		$upd_tokens = [];
+
 		foreach ($tokenids as $tokenid) {
-			$new_token = bin2hex(random_bytes(32));
+			$new_token = CApiTokenHelper::generateToken();
 
 			$token = [
 				'tokenid' => $tokenid,
-				'token' => hash('sha512', $new_token),
+				'token' => CApiTokenHelper::hashToken($new_token),
 				'creator_userid' => self::$userData['userid']
 			];
+
 			$tokens[] = $token;
 
 			$response[] = [

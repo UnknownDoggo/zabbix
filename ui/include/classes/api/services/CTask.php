@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -26,7 +21,7 @@ class CTask extends CApiService {
 
 	public const ACCESS_RULES = [
 		'get' => ['min_user_type' => USER_TYPE_SUPER_ADMIN],
-		'create' => ['min_user_type' => USER_TYPE_SUPER_ADMIN]
+		'create' => ['min_user_type' => USER_TYPE_ZABBIX_USER]
 	];
 
 	protected $tableName = 'task';
@@ -52,7 +47,7 @@ class CTask extends CApiService {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('You do not have permission to perform this operation.'));
 		}
 
-		$output_fields = ['taskid', 'type', 'status', 'clock', 'ttl', 'proxy_hostid', 'request', 'result'];
+		$output_fields = ['taskid', 'type', 'status', 'clock', 'ttl', 'proxyid', 'request', 'result'];
 
 		$api_input_rules = ['type' => API_OBJECT, 'fields' => [
 			// filter
@@ -73,26 +68,9 @@ class CTask extends CApiService {
 			'limit'		=> CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT)
 		];
 
-		$sql_parts = [
-			'select'	=> ['task' => 't.taskid'],
-			'from'		=> ['task' => 'task t'],
-			'where'		=> [
-				'type'		=> 't.type='.ZBX_TM_TASK_DATA
-			],
-			'order'     => [],
-			'group'     => []
-		];
-
-		if ($options['taskids'] !== null) {
-			$sql_parts['where']['taskid'] = dbConditionInt('t.taskid', $options['taskids']);
-		}
+		$result = DBselect($this->createSelectQuery($this->tableName, $options), $options['limit']);
 
 		$db_tasks = [];
-
-		$sql_parts = $this->applyQueryOutputOptions($this->tableName(), $this->tableAlias(), $options, $sql_parts);
-		$sql_parts = $this->applyQuerySortOptions($this->tableName(), $this->tableAlias(), $options, $sql_parts);
-
-		$result = DBselect($this->createSelectQueryFromParts($sql_parts), $options['limit']);
 
 		while ($row = DBfetch($result, false)) {
 			if ($this->outputIsRequested('request', $options['output'])) {
@@ -135,6 +113,14 @@ class CTask extends CApiService {
 		return $db_tasks;
 	}
 
+	protected function applyQueryFilterOptions($table_name, $table_alias, array $options, array $sql_parts): array {
+		$sql_parts = parent::applyQueryFilterOptions($table_name, $table_alias, $options, $sql_parts);
+
+		$sql_parts['where'][] = dbConditionInt('t.type', [ZBX_TM_TASK_DATA]);
+
+		return $sql_parts;
+	}
+
 	/**
 	 * Create tasks.
 	 *
@@ -146,7 +132,7 @@ class CTask extends CApiService {
 	 * @param array        $tasks[]['request']['preprocessing'] (optional) object of preprocessing data request.
 	 * @param array        $tasks[]['request']['alerting']      (optional) object of alerting data request.
 	 * @param array        $tasks[]['request']['lld']           (optional) object of lld cache data request.
-	 * @param array        $tasks[]['proxy_hostid']             (optional) Proxy to get diagnostic data about.
+	 * @param array        $tasks[]['proxyid']                  (optional) Proxy to get diagnostic data about.
 	 *
 	 * @return array
 	 */
@@ -155,12 +141,12 @@ class CTask extends CApiService {
 
 		$tasks_by_types = [
 			ZBX_TM_DATA_TYPE_DIAGINFO => [],
-			ZBX_TM_DATA_TYPE_PROXY_HOSTIDS => [],
-			ZBX_TM_DATA_TYPE_CHECK_NOW => []
+			ZBX_TM_DATA_TYPE_PROXYIDS => [],
+			ZBX_TM_TASK_CHECK_NOW => []
 		];
 
 		foreach ($tasks as $index => $task) {
-			if ($task['type'] == ZBX_TM_DATA_TYPE_CHECK_NOW) {
+			if ($task['type'] == ZBX_TM_TASK_CHECK_NOW) {
 				$tasks_by_types[$task['type']][$index] = [
 					'type' => $task['type'],
 					'request' => [
@@ -174,8 +160,8 @@ class CTask extends CApiService {
 		}
 
 		$return = $this->createTasksDiagInfo($tasks_by_types[ZBX_TM_DATA_TYPE_DIAGINFO])
-			+ $this->createTasksProxyHostids($tasks_by_types[ZBX_TM_DATA_TYPE_PROXY_HOSTIDS])
-			+ $this->createTasksCheckNow($tasks_by_types[ZBX_TM_DATA_TYPE_CHECK_NOW]);
+			+ $this->createTasksProxyIds($tasks_by_types[ZBX_TM_DATA_TYPE_PROXYIDS])
+			+ $this->createTasksCheckNow($tasks_by_types[ZBX_TM_TASK_CHECK_NOW]);
 
 		ksort($return);
 
@@ -194,7 +180,7 @@ class CTask extends CApiService {
 	 */
 	protected function validateCreate(array &$tasks): array {
 		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'fields' => [
-			'type' =>			['type' => API_INT32, 'flags' => API_REQUIRED, 'in' => implode(',', [ZBX_TM_DATA_TYPE_DIAGINFO, ZBX_TM_DATA_TYPE_PROXY_HOSTIDS, ZBX_TM_DATA_TYPE_CHECK_NOW])],
+			'type' =>			['type' => API_INT32, 'flags' => API_REQUIRED, 'in' => implode(',', [ZBX_TM_DATA_TYPE_DIAGINFO, ZBX_TM_DATA_TYPE_PROXYIDS, ZBX_TM_TASK_CHECK_NOW])],
 			'request' =>		['type' => API_MULTIPLE, 'flags' => API_REQUIRED, 'rules' => [
 									['if' => ['field' => 'type', 'in' => ZBX_TM_DATA_TYPE_DIAGINFO], 'type' => API_OBJECT, 'fields' => [
 										'historycache' =>	['type' => API_OBJECT, 'fields' => [
@@ -230,14 +216,14 @@ class CTask extends CApiService {
 											]]
 										]]
 									]],
-									['if' => ['field' => 'type', 'in' => ZBX_TM_DATA_TYPE_PROXY_HOSTIDS], 'type' => API_OBJECT, 'fields' => [
-										'proxy_hostids' =>	['type' => API_IDS, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'uniq' => true]
+									['if' => ['field' => 'type', 'in' => ZBX_TM_DATA_TYPE_PROXYIDS], 'type' => API_OBJECT, 'fields' => [
+										'proxyids' =>	['type' => API_IDS, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'uniq' => true]
 									]],
-									['if' => ['field' => 'type', 'in' => ZBX_TM_DATA_TYPE_CHECK_NOW], 'type' => API_OBJECT, 'fields' => [
-										'itemid' => ['type' => API_ID, 'flags' => API_REQUIRED | API_NOT_EMPTY]
+									['if' => ['field' => 'type', 'in' => ZBX_TM_TASK_CHECK_NOW], 'type' => API_OBJECT, 'fields' => [
+										'itemid' => ['type' => API_ID, 'flags' => API_REQUIRED]
 									]]
 								]],
-			'proxy_hostid' =>	['type' => API_ID, 'default' => 0]
+			'proxyid' =>	['type' => API_ID, 'default' => 0]
 		]];
 
 		if (!CApiInputValidator::validate($api_input_rules, $tasks, '/', $error)) {
@@ -246,35 +232,34 @@ class CTask extends CApiService {
 
 		$min_permissions = USER_TYPE_ZABBIX_USER;
 		$itemids_editable = [];
-		$proxy_hostids = [];
+		$proxyids = [];
 
 		foreach ($tasks as $task) {
 			switch ($task['type']) {
 				case ZBX_TM_DATA_TYPE_DIAGINFO:
 					$min_permissions = USER_TYPE_SUPER_ADMIN;
 
-					$proxy_hostids[$task['proxy_hostid']] = true;
+					$proxyids[$task['proxyid']] = true;
 					break;
 
-				case ZBX_TM_DATA_TYPE_PROXY_HOSTIDS:
+				case ZBX_TM_DATA_TYPE_PROXYIDS:
 					$min_permissions = USER_TYPE_SUPER_ADMIN;
 
-					$proxy_hostids = array_fill_keys($task['request']['proxy_hostids'], true);
+					$proxyids = array_fill_keys($task['request']['proxyids'], true);
 					break;
 
-				case ZBX_TM_DATA_TYPE_CHECK_NOW:
+				case ZBX_TM_TASK_CHECK_NOW:
 					$itemids_editable[$task['request']['itemid']] = true;
 					break;
 			}
 		}
-
-		unset($proxy_hostids[0]);
+		unset($proxyids[0]);
 
 		if (self::$userData['type'] < $min_permissions) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('You do not have permission to perform this operation.'));
 		}
 
-		$this->checkProxyHostids(array_keys($proxy_hostids));
+		$this->checkProxyIds(array_keys($proxyids));
 		$itemids_editable = $this->checkEditableItems(array_keys($itemids_editable));
 
 		return $itemids_editable;
@@ -369,7 +354,7 @@ class CTask extends CApiService {
 	 * @param array    $tasks[]['request']['preprocessing'] (optional) object of preprocessing data request.
 	 * @param array    $tasks[]['request']['alerting']      (optional) object of alerting data request.
 	 * @param array    $tasks[]['request']['lld']           (optional) object of lld cache data request.
-	 * @param array    $tasks[]['proxy_hostid']             Proxy to get diagnostic data about.
+	 * @param array    $tasks[]['proxyid']                  Proxy to get diagnostic data about.
 	 *
 	 * @throws APIException
 	 *
@@ -388,7 +373,7 @@ class CTask extends CApiService {
 				'status' => ZBX_TM_STATUS_NEW,
 				'clock' => time(),
 				'ttl' => SEC_PER_HOUR,
-				'proxy_hostid' => $task['proxy_hostid']
+				'proxyid' => $task['proxyid']
 			];
 
 			$task_data_rows[] = [
@@ -413,10 +398,10 @@ class CTask extends CApiService {
 	 *
 	 * @return array
 	 */
-	protected function createTasksProxyHostids(array $tasks): array {
+	protected function createTasksProxyIds(array $tasks): array {
 		$task_rows = [];
 		$task_data_rows = [];
-		$proxy_hostids = [];
+		$proxyids = [];
 		$return = [];
 		$taskid = DB::reserveIds('task', count($tasks));
 
@@ -427,19 +412,19 @@ class CTask extends CApiService {
 				'status' => ZBX_TM_STATUS_NEW,
 				'clock' => time(),
 				'ttl' => SEC_PER_HOUR,
-				'proxy_hostid' => null
+				'proxyid' => null
 			];
 
 			$task_data_rows[] = [
 				'taskid' => $taskid,
-				'type' => ZBX_TM_DATA_TYPE_PROXY_HOSTIDS,
+				'type' => ZBX_TM_DATA_TYPE_PROXYIDS,
 				'data' => json_encode([
-					'proxy_hostids' => $task['request']['proxy_hostids']
+					'proxyids' => $task['request']['proxyids']
 				]),
 				'parent_taskid' => $taskid
 			];
 
-			$proxy_hostids += array_flip($task['request']['proxy_hostids']);
+			$proxyids += array_flip($task['request']['proxyids']);
 
 			$return[$index] = $taskid;
 			$taskid = bcadd($taskid, 1, 0);
@@ -448,10 +433,10 @@ class CTask extends CApiService {
 		DB::insertBatch('task', $task_rows, false);
 		DB::insertBatch('task_data', $task_data_rows, false);
 
-		if ($proxy_hostids) {
+		if ($proxyids) {
 			$proxies = API::Proxy()->get([
-				'output' => ['host'],
-				'proxyids' => array_keys($proxy_hostids),
+				'output' => ['name'],
+				'proxyids' => array_keys($proxyids),
 				'preservekeys' => true
 			]);
 
@@ -459,7 +444,7 @@ class CTask extends CApiService {
 				self::addAuditLog(CAudit::ACTION_CONFIG_REFRESH, CAudit::RESOURCE_PROXY, [
 					$proxyid => [
 						'proxyid' => $proxyid,
-						'host' => $proxy['host']
+						'name' => $proxy['name']
 					]
 				]);
 			}
@@ -472,15 +457,17 @@ class CTask extends CApiService {
 		$sql_parts = parent::applyQueryOutputOptions($tableName, $tableAlias, $options, $sql_parts);
 
 		if ($this->outputIsRequested('request', $options['output'])) {
-			$sql_parts['left_join'][] = ['alias' => 'req', 'table' => 'task_data', 'using' => 'parent_taskid'];
-			$sql_parts['left_table'] = ['alias' => $this->tableAlias, 'table' => $this->tableName()];
+			$sql_parts['join']['req'] = ['type' => 'left', 'table' => 'task_data',
+				'on' => ['taskid' => 'parent_taskid']
+			];
 
 			$sql_parts = $this->addQuerySelect('req.data AS request_data', $sql_parts);
 		}
 
 		if ($this->outputIsRequested('result', $options['output'])) {
-			$sql_parts['left_join'][] = ['alias' => 'resp', 'table' => 'task_result', 'using' => 'parent_taskid'];
-			$sql_parts['left_table'] = ['alias' => $this->tableAlias, 'table' => $this->tableName()];
+			$sql_parts['join']['resp'] = ['type' => 'left', 'table' => 'task_result',
+				'on' => ['taskid' => 'parent_taskid']
+			];
 
 			$sql_parts = $this->addQuerySelect('resp.info AS result_info', $sql_parts);
 			$sql_parts = $this->addQuerySelect('resp.status AS result_status', $sql_parts);
@@ -515,21 +502,29 @@ class CTask extends CApiService {
 		$itemid_mapping = array_combine($itemids, $itemids);
 
 		// Check permissions.
-		$items = API::Item()->get([
-			'output' => ['type', 'name', 'status', 'flags', 'master_itemid'],
+		$items = CArrayHelper::renameObjectsKeys(API::Item()->get([
+			'output' => ['type', 'name_resolved', 'status', 'flags', 'master_itemid'],
 			'selectHosts' => ['name', 'status'],
 			'itemids' => $itemids,
+			'templated' => false,
 			'editable' => !self::checkAccess(CRoleHelper::ACTIONS_INVOKE_EXECUTE_NOW),
 			'preservekeys' => true
-		]);
+		]), ['name_resolved' => 'name']);
 
 		$itemids_cnt = count($itemids);
 
 		if (count($items) != $itemids_cnt) {
+			if (self::$userData['type'] < USER_TYPE_ZABBIX_ADMIN) {
+				self::exception(ZBX_API_ERROR_PERMISSIONS,
+					_('No permissions to referred object or it does not exist!')
+				);
+			}
+
 			$items += API::DiscoveryRule()->get([
 				'output' => ['type', 'name', 'status', 'flags', 'master_itemid'],
 				'selectHosts' => ['name', 'status'],
 				'itemids' => $itemids,
+				'templated' => false,
 				'editable' => !self::checkAccess(CRoleHelper::ACTIONS_INVOKE_EXECUTE_NOW),
 				'preservekeys' => true
 			]);
@@ -550,7 +545,7 @@ class CTask extends CApiService {
 			if (!in_array($item['type'], $allowed_types)) {
 				self::exception(ZBX_API_ERROR_PARAMETERS,
 					_s('Cannot send request: %1$s.',
-						($item['flags'] == ZBX_FLAG_DISCOVERY_RULE)
+						in_array($item['flags'], [ZBX_FLAG_DISCOVERY_RULE, ZBX_FLAG_DISCOVERY_RULE_CREATED])
 							? _('wrong discovery rule type')
 							: _('wrong item type')
 					)
@@ -559,7 +554,7 @@ class CTask extends CApiService {
 
 			if ($item['status'] != ITEM_STATUS_ACTIVE || $item['hosts'][0]['status'] != HOST_STATUS_MONITORED) {
 				$host_name = $item['hosts'][0]['name'];
-				$problem = ($item['flags'] == ZBX_FLAG_DISCOVERY_RULE)
+				$problem = in_array($item['flags'], [ZBX_FLAG_DISCOVERY_RULE, ZBX_FLAG_DISCOVERY_RULE_CREATED])
 					? _s('discovery rule "%1$s" on host "%2$s" is not monitored', $item['name'], $host_name)
 					: _s('item "%1$s" on host "%2$s" is not monitored', $item['name'], $host_name);
 				self::exception(ZBX_API_ERROR_PARAMETERS, _s('Cannot send request: %1$s.', $problem));
@@ -644,25 +639,25 @@ class CTask extends CApiService {
 
 		// If some items were not found in cache, select them from DB.
 		if ($itemids) {
-			$items_db = API::Item()->get([
-				'output' => ['type', 'name', 'status', 'flags', 'master_itemid'],
+			$db_items = CArrayHelper::renameObjectsKeys(API::Item()->get([
+				'output' => ['type', 'name_resolved', 'status', 'flags', 'master_itemid'],
 				'selectHosts' => ['name', 'status'],
 				'itemids' => $itemids,
 				'editable' => !self::checkAccess(CRoleHelper::ACTIONS_INVOKE_EXECUTE_NOW),
 				'preservekeys' => true
-			]);
+			]), ['name_resolved' => 'name']);
 
-			if (!$items_db) {
+			if (!$db_items) {
 				self::exception(ZBX_API_ERROR_PERMISSIONS,
 					_('No permissions to referred object or it does not exist!')
 				);
 			}
 
 			// Add newly found items to cache.
-			$this->item_cache += $items_db;
+			$this->item_cache += $db_items;
 
 			// Append newly found items to items requested from cache.
-			$items += $items_db;
+			$items += $db_items;
 		}
 
 		// Return only requested items either from cache or DB.
@@ -670,23 +665,23 @@ class CTask extends CApiService {
 	}
 
 	/**
-	 * Function to check if specified proxies exists.
+	 * Function to check if specified proxies exist.
 	 *
-	 * @param array $proxy_hostids  Proxy IDs to check.
+	 * @param array $proxyids  Proxy IDs to check.
 	 *
-	 * @throws Exception if proxy doesn't exist.
+	 * @throws Exception
 	 */
-	protected function checkProxyHostids(array $proxy_hostids): void {
-		if (!$proxy_hostids) {
+	protected function checkProxyIds(array $proxyids): void {
+		if (!$proxyids) {
 			return;
 		}
 
 		$proxies = API::Proxy()->get([
 			'countOutput' => true,
-			'proxyids' => $proxy_hostids
+			'proxyids' => $proxyids
 		]);
 
-		if ($proxies != count($proxy_hostids)) {
+		if ($proxies != count($proxyids)) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
 	}

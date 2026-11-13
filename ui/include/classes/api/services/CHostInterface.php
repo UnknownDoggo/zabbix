@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -25,13 +20,7 @@
 class CHostInterface extends CApiService {
 
 	public const ACCESS_RULES = [
-		'get' => ['min_user_type' => USER_TYPE_ZABBIX_USER],
-		'create' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'update' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'delete' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'replacehostinterfaces' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'massadd' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'massremove' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN]
+		'get' => ['min_user_type' => USER_TYPE_ZABBIX_USER]
 	];
 
 	protected $tableName = 'interface';
@@ -59,7 +48,7 @@ class CHostInterface extends CApiService {
 
 		$sqlParts = [
 			'select'	=> ['interface' => 'hi.interfaceid'],
-			'from'		=> ['interface' => 'interface hi'],
+			'from'		=> 'interface hi',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -97,20 +86,17 @@ class CHostInterface extends CApiService {
 
 		// editable + PERMISSION CHECK
 		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
-			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
-			$userGroups = getUserGroupsByUserId(self::$userData['userid']);
+			if (self::$userData['ugsetid'] == 0) {
+				return $options['countOutput'] ? '0' : [];
+			}
 
-			$sqlParts['where'][] = 'EXISTS ('.
-				'SELECT NULL'.
-				' FROM hosts_groups hgg'.
-					' JOIN rights r'.
-						' ON r.id=hgg.groupid'.
-							' AND '.dbConditionInt('r.groupid', $userGroups).
-				' WHERE hi.hostid=hgg.hostid'.
-				' GROUP BY hgg.hostid'.
-				' HAVING MIN(r.permission)>'.PERM_DENY.
-					' AND MAX(r.permission)>='.zbx_dbstr($permission).
-				')';
+			$sqlParts['join']['hh'] = ['table' => 'host_hgset', 'using' => 'hostid'];
+			$sqlParts['join']['p'] = ['left_table' => 'hh', 'table' => 'permission', 'using' => 'hgsetid'];
+			$sqlParts['where'][] = 'p.ugsetid='.self::$userData['ugsetid'];
+
+			if ($options['editable']) {
+				$sqlParts['where'][] = 'p.permission='.PERM_READ_WRITE;
+			}
 		}
 
 		// interfaceids
@@ -133,20 +119,17 @@ class CHostInterface extends CApiService {
 		if (!is_null($options['itemids'])) {
 			zbx_value2array($options['itemids']);
 
-			$sqlParts['from']['items'] = 'items i';
+			$sqlParts['join']['i'] = ['table' => 'items', 'using' => 'interfaceid'];
 			$sqlParts['where'][] = dbConditionInt('i.itemid', $options['itemids']);
-			$sqlParts['where']['hi'] = 'hi.interfaceid=i.interfaceid';
 		}
 
 		// triggerids
 		if (!is_null($options['triggerids'])) {
 			zbx_value2array($options['triggerids']);
 
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
+			$sqlParts['join']['i'] = ['table' => 'items', 'using' => 'interfaceid'];
+			$sqlParts['join']['f'] = ['left_table' => 'i', 'table' => 'functions', 'using' => 'itemid'];
 			$sqlParts['where'][] = dbConditionInt('f.triggerid', $options['triggerids']);
-			$sqlParts['where']['hi'] = 'hi.hostid=i.hostid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
 		}
 
 		// search
@@ -165,8 +148,7 @@ class CHostInterface extends CApiService {
 		}
 
 		if (!$options['countOutput'] && $this->outputIsRequested('details', $options['output'])) {
-			$sqlParts['left_join'][] = ['alias' => 'his', 'table' => 'interface_snmp', 'using' => 'interfaceid'];
-			$sqlParts['left_table'] = ['alias' => $this->tableAlias, 'table' => $this->tableName];
+			$sqlParts['join']['his'] = ['type' => 'left', 'table' => 'interface_snmp', 'using' => 'interfaceid'];
 		}
 
 		$sqlParts = $this->applyQueryOutputOptions($this->tableName(), $this->tableAlias(), $options, $sqlParts);
@@ -193,18 +175,17 @@ class CHostInterface extends CApiService {
 		if ($result) {
 			$result = $this->addRelatedObjects($options, $result);
 			$result = $this->unsetExtraFields($result, ['hostid'], $options['output']);
-		}
 
-		// removing keys (hash -> array)
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
 		// Moving additional fields to separate object.
 		if ($this->outputIsRequested('details', $options['output'])) {
 			foreach ($result as &$value) {
 				$snmp_fields = ['version', 'bulk', 'community', 'securityname', 'securitylevel', 'authpassphrase',
-					'privpassphrase', 'authprotocol', 'privprotocol', 'contextname'
+					'privpassphrase', 'authprotocol', 'privprotocol', 'contextname', 'max_repetitions', 'retries'
 				];
 
 				$interface_type = $value['type'];
@@ -220,6 +201,10 @@ class CHostInterface extends CApiService {
 					foreach ($snmp_fields as $field_name) {
 						$details[$field_name] = $value[$field_name];
 						unset($value[$field_name]);
+					}
+
+					if ($details['version'] == SNMP_V1) {
+						unset($details['max_repetitions']);
 					}
 
 					if ($details['version'] == SNMP_V1 || $details['version'] == SNMP_V2C) {
@@ -254,13 +239,16 @@ class CHostInterface extends CApiService {
 	 */
 	public function checkInput(array &$interfaces, $method) {
 		$update = ($method == 'update');
+		$allowed_fields = array_flip([
+			'hostid', 'type', 'ip', 'dns', 'port', 'useip', 'main', 'details', 'interface_ref', 'items', 'interfaceid'
+		]);
 
 		// permissions
 		if ($update) {
 			$interfaceDBfields = ['interfaceid' => null];
 			$dbInterfaces = $this->get([
 				'output' => API_OUTPUT_EXTEND,
-				'interfaceids' => zbx_objectValues($interfaces, 'interfaceid'),
+				'interfaceids' => array_column($interfaces, 'interfaceid'),
 				'editable' => true,
 				'preservekeys' => true
 			]);
@@ -278,21 +266,15 @@ class CHostInterface extends CApiService {
 
 		$dbHosts = API::Host()->get([
 			'output' => ['host'],
-			'hostids' => zbx_objectValues($interfaces, 'hostid'),
-			'editable' => true,
-			'preservekeys' => true
-		]);
-
-		$dbProxies = API::Proxy()->get([
-			'output' => ['host'],
-			'proxyids' => zbx_objectValues($interfaces, 'hostid'),
+			'hostids' => array_column($interfaces, 'hostid'),
 			'editable' => true,
 			'preservekeys' => true
 		]);
 
 		$check_have_items = [];
+
 		foreach ($interfaces as &$interface) {
-			if (!check_db_fields($interfaceDBfields, $interface)) {
+			if (!check_db_fields($interfaceDBfields, $interface) || array_diff_key($interface, $allowed_fields)) {
 				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
 			}
 
@@ -302,6 +284,7 @@ class CHostInterface extends CApiService {
 				}
 
 				$dbInterface = $dbInterfaces[$interface['interfaceid']];
+
 				if (isset($interface['hostid']) && bccomp($dbInterface['hostid'], $interface['hostid']) != 0) {
 					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Cannot switch host for interface.'));
 				}
@@ -317,12 +300,8 @@ class CHostInterface extends CApiService {
 				$interface = zbx_array_merge($dbInterface, $interface);
 			}
 			else {
-				if (!isset($dbHosts[$interface['hostid']]) && !isset($dbProxies[$interface['hostid']])) {
+				if (!isset($dbHosts[$interface['hostid']])) {
 					self::exception(ZBX_API_ERROR_PARAMETERS, _('No permissions to referred object or it does not exist!'));
-				}
-
-				if (isset($dbProxies[$interface['hostid']])) {
-					$interface['type'] = INTERFACE_TYPE_UNKNOWN;
 				}
 				elseif (!isset($interface['type'])) {
 					self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
@@ -343,13 +322,6 @@ class CHostInterface extends CApiService {
 						_s('Interface with IP "%1$s" cannot have empty DNS name while having "Use DNS" property on "%2$s".',
 							$interface['ip'],
 							$dbHosts[$interface['hostid']]['host']
-					));
-				}
-				elseif ($dbProxies && !empty($dbProxies[$interface['hostid']]['host'])) {
-					self::exception(ZBX_API_ERROR_PARAMETERS,
-						_s('Interface with IP "%1$s" cannot have empty DNS name while having "Use DNS" property on "%2$s".',
-							$interface['ip'],
-							$dbProxies[$interface['hostid']]['host']
 					));
 				}
 				else {
@@ -405,6 +377,10 @@ class CHostInterface extends CApiService {
 
 			$this->checkSnmpCommunity($interface);
 
+			$this->checkSnmpMaxRepetitions($interface);
+
+			$this->checkSnmpRetries($interface);
+
 			$this->checkSnmpBulk($interface);
 
 			$this->checkSnmpSecurityLevel($interface);
@@ -425,6 +401,8 @@ class CHostInterface extends CApiService {
 	protected function sanitizeSnmpFields(array $interfaces): array {
 		$default_fields = [
 			'community' => '',
+			'max_repetitions' => DB::getDefault('interface_snmp', 'max_repetitions'),
+			'retries' => DB::getDefault('interface_snmp', 'retries'),
 			'securityname' => '',
 			'securitylevel' => DB::getDefault('interface_snmp', 'securitylevel'),
 			'authpassphrase' => '',
@@ -435,6 +413,10 @@ class CHostInterface extends CApiService {
 		];
 
 		foreach ($interfaces as &$interface) {
+			if ($interface['version'] == SNMP_V1) {
+				unset($interface['max_repetitions']);
+			}
+
 			if ($interface['version'] == SNMP_V1 || $interface['version'] == SNMP_V2C) {
 				unset($interface['securityname'], $interface['securitylevel'], $interface['authpassphrase'],
 					$interface['privpassphrase'], $interface['authprotocol'], $interface['privprotocol'],
@@ -551,26 +533,6 @@ class CHostInterface extends CApiService {
 	}
 
 	/**
-	 * Update interfaces.
-	 *
-	 * @param array $interfaces   multidimensional array with Interfaces data
-	 *
-	 * @return array
-	 */
-	public function update(array $interfaces) {
-		$interfaces = zbx_toArray($interfaces);
-
-		$this->checkInput($interfaces, __FUNCTION__);
-		$this->checkMainInterfacesOnUpdate($interfaces);
-
-		$this->updateInterfaces($interfaces);
-
-		$this->updateInterfaceDetails($interfaces);
-
-		return ['interfaceids' => array_column($interfaces, 'interfaceid')];
-	}
-
-	/**
 	 * Delete interfaces.
 	 * Interface cannot be deleted if it's main interface and exists other interface of same type on same host.
 	 * Interface cannot be deleted if it is used in items.
@@ -599,7 +561,6 @@ class CHostInterface extends CApiService {
 		$this->checkMainInterfacesOnDelete($interfaceids);
 
 		DB::delete('interface', ['interfaceid' => $interfaceids]);
-		DB::delete('interface_snmp', ['interfaceid' => $interfaceids]);
 
 		return ['interfaceids' => $interfaceids];
 	}
@@ -793,10 +754,9 @@ class CHostInterface extends CApiService {
 			return;
 		}
 
-		$user_macro_parser = new CUserMacroParser();
+		$dns_parser = new CDnsParser(['usermacros' => true, 'lldmacros' => true, 'macros' => true]);
 
-		if (!preg_match('/^'.ZBX_PREG_DNS_FORMAT.'$/', $interface['dns'])
-				&& $user_macro_parser->parse($interface['dns']) != CParser::PARSE_SUCCESS) {
+		if ($dns_parser->parse($interface['dns']) != CParser::PARSE_SUCCESS) {
 			self::exception(ZBX_API_ERROR_PARAMETERS,
 				_s('Incorrect interface DNS parameter "%1$s" provided.', $interface['dns'])
 			);
@@ -816,14 +776,9 @@ class CHostInterface extends CApiService {
 			return;
 		}
 
-		$user_macro_parser = new CUserMacroParser();
-
-		if (preg_match('/^'.ZBX_PREG_MACRO_NAME_FORMAT.'$/', $interface['ip'])
-				|| $user_macro_parser->parse($interface['ip']) == CParser::PARSE_SUCCESS) {
-			return;
-		}
-
-		$ip_parser = new CIPParser(['v6' => ZBX_HAVE_IPV6]);
+		$ip_parser = new CIPParser(
+			['usermacros' => true, 'lldmacros' => true, 'macros' => true, 'v6' => ZBX_HAVE_IPV6]
+		);
 
 		if ($ip_parser->parse($interface['ip']) != CParser::PARSE_SUCCESS) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, _s('Invalid IP address "%1$s".', $interface['ip']));
@@ -838,10 +793,12 @@ class CHostInterface extends CApiService {
 	 * @param array $interface
 	 */
 	protected function checkPort(array $interface) {
+		$port_parser = new CPortParser(['usermacros' => true]);
+
 		if (!isset($interface['port']) || zbx_empty($interface['port'])) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, _('Port cannot be empty for host interface.'));
 		}
-		elseif (!validatePortNumberOrMacro($interface['port'])) {
+		elseif ($port_parser->parse($interface['port']) != CParser::PARSE_SUCCESS) {
 			self::exception(ZBX_API_ERROR_PARAMETERS,
 				_s('Incorrect interface port "%1$s" provided.', $interface['port'])
 			);
@@ -928,38 +885,6 @@ class CHostInterface extends CApiService {
 		$this->checkMainInterfaces($interfaces);
 	}
 
-	/**
-	 * Prepares data to validate main interface for every interface type. Executes main interface validation.
-	 *
-	 * @param array $interfaces                     Array of interfaces to validate.
-	 * @param int   $interfaces[]['hostid']         Updated interface's hostid.
-	 * @param int   $interfaces[]['interfaceid']    Updated interface's interfaceid.
-	 *
-	 * @throws APIException
-	 */
-	private function checkMainInterfacesOnUpdate(array $interfaces) {
-		$hostids = array_keys(array_flip(zbx_objectValues($interfaces, 'hostid')));
-
-		$dbInterfaces = API::HostInterface()->get([
-			'hostids' => $hostids,
-			'output' => ['hostid', 'main', 'type'],
-			'preservekeys' => true,
-			'nopermissions' => true
-		]);
-
-		// update interfaces from DB with data that will be updated.
-		foreach ($interfaces as $interface) {
-			if (isset($dbInterfaces[$interface['interfaceid']])) {
-				$dbInterfaces[$interface['interfaceid']] = array_merge(
-					$dbInterfaces[$interface['interfaceid']],
-					$interface
-				);
-			}
-		}
-
-		$this->checkMainInterfaces($dbInterfaces);
-	}
-
 	private function checkMainInterfacesOnDelete(array $interfaceIds) {
 		$this->checkIfInterfaceHasItems($interfaceIds);
 
@@ -1032,7 +957,7 @@ class CHostInterface extends CApiService {
 
 	private function checkIfInterfaceHasItems(array $interfaceIds) {
 		$items = API::Item()->get([
-			'output' => ['name'],
+			'output' => ['name_resolved'],
 			'selectHosts' => ['name'],
 			'interfaceids' => $interfaceIds,
 			'preservekeys' => true,
@@ -1044,7 +969,7 @@ class CHostInterface extends CApiService {
 			$host = reset($item['hosts']);
 
 			self::exception(ZBX_API_ERROR_PARAMETERS,
-				_s('Interface is linked to item "%1$s" on "%2$s".', $item['name'], $host['name']));
+				_s('Interface is linked to item "%1$s" on "%2$s".', $item['name_resolved'], $host['name']));
 		}
 	}
 
@@ -1074,6 +999,45 @@ class CHostInterface extends CApiService {
 				&& (!array_key_exists('community', $interface['details'])
 					|| $interface['details']['community'] === '')) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
+		}
+	}
+
+	/**
+	 * Check SNMP max repetition count.
+	 *
+	 * @param array $interface
+	 *
+	 * @throws APIException if "max_repetitions" value is incorrect.
+	 */
+	protected function checkSnmpMaxRepetitions(array $interface) {
+		if (($interface['details']['version'] == SNMP_V2C || $interface['details']['version'] == SNMP_V3)
+				&& array_key_exists('max_repetitions', $interface['details'])) {
+			$rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+				'max_repetitions' =>	['type' => API_INT32, 'flags' => API_ALLOW_USER_MACRO, 'in' => implode(':', [1, ZBX_MAX_INT32]), 'length' => DB::getFieldLength('interface_snmp', 'max_repetitions')]
+			]];
+
+			if (!CApiInputValidator::validate($rules, $interface['details'], '', $error)) {
+				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
+			}
+		}
+	}
+
+	/**
+	 * Check SNMP retries.
+	 *
+	 * @param array $interface
+	 *
+	 * @throws APIException if "retries" value is incorrect.
+	 */
+	protected function checkSnmpRetries(array $interface) {
+		if (array_key_exists('retries', $interface['details'])) {
+			$rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+				'retries' =>	['type' => API_INT32, 'flags' => API_ALLOW_USER_MACRO, 'in' => implode(':', [SNMP_RETRIES_MIN, SNMP_RETRIES_MAX]), 'length' => DB::getFieldLength('interface_snmp', 'retries')]
+			]];
+
+			if (!CApiInputValidator::validate($rules, $interface['details'], '', $error)) {
+				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect arguments passed to function.'));
+			}
 		}
 	}
 
@@ -1157,6 +1121,10 @@ class CHostInterface extends CApiService {
 			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.version', SNMP_V2C, 'version'), $sqlParts);
 			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.bulk', SNMP_BULK_ENABLED, 'bulk'), $sqlParts);
 			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.community', '', 'community'), $sqlParts);
+			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.max_repetitions', '10', 'max_repetitions'),
+				$sqlParts
+			);
+			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.retries', '5', 'retries'), $sqlParts);
 			$sqlParts = $this->addQuerySelect(dbConditionCoalesce('his.securityname', '', 'securityname'), $sqlParts);
 			$sqlParts = $this->addQuerySelect(
 				dbConditionCoalesce('his.securitylevel', ITEM_SNMPV3_SECURITYLEVEL_NOAUTHNOPRIV, 'securitylevel'),

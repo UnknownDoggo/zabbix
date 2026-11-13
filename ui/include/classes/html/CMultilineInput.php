@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -58,6 +53,8 @@ class CMultilineInput extends CDiv {
 	 * @param bool     $options['monospace_font']        Monospace font type (default: true).
 	 * @param bool     $options['readonly']              Readonly component (default: false).
 	 * @param bool     $options['disabled']              Is disabled (default: false).
+	 * @param bool     $options['use_tab]                If true, on tab key pressed, adds indent instead of moving
+	 *                                                   the pointer to the next element
 	 */
 	public function __construct($name = 'multilineinput', $value = '', array $options = []) {
 		parent::__construct();
@@ -65,7 +62,8 @@ class CMultilineInput extends CDiv {
 		$this
 			->addClass(self::ZBX_STYLE_CLASS)
 			->setId(zbx_formatDomId($name))
-			->setAttribute('data-name', $name);
+			->setAttribute('data-name', $name)
+			->setAttribute('data-field-type', 'multiline');
 
 		$this->name = $name;
 		$this->value = $value;
@@ -130,5 +128,31 @@ class CMultilineInput extends CDiv {
 		}
 
 		return parent::toString($destroy);
+	}
+
+	/**
+	 * Specify ID of error container.
+	 *
+	 * @param string|null $container_id    ID of form element where to display field errors.
+	 *
+	 * @return self
+	 */
+	public function setErrorContainer(?string $container_id): self {
+		$this->setAttribute('data-error-container', $container_id);
+
+		return $this;
+	}
+
+	/**
+	 * Specify the field label used for error message.
+	 *
+	 * @param string|null $label    Field label used in error message.
+	 *
+	 * @return self
+	 */
+	public function setErrorLabel(?string $label): self {
+		$this->setAttribute('data-error-label', $label);
+
+		return $this;
 	}
 }

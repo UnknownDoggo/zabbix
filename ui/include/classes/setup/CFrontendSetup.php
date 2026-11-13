@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -25,7 +20,7 @@
  */
 class CFrontendSetup {
 
-	const MIN_PHP_VERSION = '7.4.0';
+	const MIN_PHP_VERSION = '8.2.0';
 	const MIN_PHP_MEMORY_LIMIT = '134217728'; // 128 * ZBX_MEBIBYTE;
 	const MIN_PHP_POST_MAX_SIZE = '16777216'; // 16 * ZBX_MEBIBYTE;
 	const MIN_PHP_UPLOAD_MAX_FILESIZE = '2097152'; // 2 * ZBX_MEBIBYTE;
@@ -33,6 +28,7 @@ class CFrontendSetup {
 	const MIN_PHP_MAX_INPUT_TIME = 300;
 	const MIN_PHP_GD_VERSION = '2.0';
 	const MIN_PHP_LIBXML_VERSION = '2.6.15';
+	const MIN_PHP_CURL_VERSION = '7.19.4';
 	const REQUIRED_PHP_ARG_SEPARATOR_OUTPUT = '&';
 
 	/**
@@ -51,6 +47,20 @@ class CFrontendSetup {
 	const CHECK_FATAL = 3;
 
 	/**
+	 * Default language, used by checkLocaleSet() check.
+	 */
+	private $default_lang = '';
+
+	/**
+	 * Set default language, used by checkLocaleSet() check.
+	 *
+	 * @param string $default_lang
+	 */
+	public function setDefaultLang(string $default_lang): void {
+		$this->default_lang = $default_lang;
+	}
+
+	/**
 	 * Perform all requirements checks.
 	 *
 	 * @return array
@@ -67,9 +77,6 @@ class CFrontendSetup {
 		$result[] = $this->checkPhpDatabases();
 		$result[] = $this->checkPhpBcmath();
 		$result[] = $this->checkPhpMbstring();
-		if (extension_loaded('mbstring')) {
-			$result[] = $this->checkPhpMbstringFuncOverload();
-		}
 		$result[] = $this->checkPhpSockets();
 		$result[] = $this->checkPhpGd();
 		$result[] = $this->checkPhpGdPng();
@@ -86,6 +93,8 @@ class CFrontendSetup {
 		$result[] = $this->checkPhpSessionAutoStart();
 		$result[] = $this->checkPhpGettext();
 		$result[] = $this->checkPhpArgSeparatorOutput();
+		$result[] = $this->checkPhpCurlModule();
+		$result[] = $this->checkSystemLocale();
 
 		return $result;
 	}
@@ -238,7 +247,7 @@ class CFrontendSetup {
 			'current' => empty($current) ? _('off') : new CSpan($current),
 			'required' => null,
 			'result' => $current ? self::CHECK_OK : self::CHECK_FATAL,
-			'error' => _('At least one of MySQL, PostgreSQL or Oracle should be supported.')
+			'error' => _('At least one of MySQL or PostgreSQL should be supported.')
 		];
 	}
 
@@ -251,7 +260,7 @@ class CFrontendSetup {
 		$allowed_db = [];
 
 		if (zbx_is_callable(['mysqli_close', 'mysqli_fetch_assoc', 'mysqli_free_result', 'mysqli_init', 'mysqli_query',
-				'mysqli_real_escape_string', 'mysqli_report'])) {
+				'mysqli_real_escape_string', 'mysqli_report', 'mysqli_set_charset'])) {
 			$allowed_db[ZBX_DB_MYSQL] = 'MySQL';
 		}
 
@@ -259,12 +268,6 @@ class CFrontendSetup {
 				'pg_free_result', 'pg_last_error', 'pg_parameter_status', 'pg_query', 'pg_unescape_bytea',
 				'pg_field_type'])) {
 			$allowed_db[ZBX_DB_POSTGRESQL] = 'PostgreSQL';
-		}
-
-		if (zbx_is_callable(['oci_bind_by_name', 'oci_close', 'oci_commit', 'oci_connect', 'oci_error', 'oci_execute',
-				'oci_fetch_assoc', 'oci_field_type', 'oci_free_statement', 'oci_new_descriptor', 'oci_parse',
-				'oci_rollback'])) {
-			$allowed_db[ZBX_DB_ORACLE] = 'Oracle';
 		}
 
 		return $allowed_db;
@@ -310,27 +313,6 @@ class CFrontendSetup {
 			'required' => null,
 			'result' => $current ? self::CHECK_OK : self::CHECK_FATAL,
 			'error' => _('PHP mbstring extension missing (PHP configuration parameter --enable-mbstring).')
-		];
-	}
-
-	/**
-	 * Checks for PHP mbstring.func_overload value.
-	 *
-	 * Note: disabling mbstring functions completely, mbstring.func_overload returns false.
-	 * checkPhpMbstringFuncOverload() will be called after successful checkPhpMbstring(), to avoid duplicate
-	 * error messages. mbstring.func_overload value in php.ini file represents a combination of bitmasks.
-	 *
-	 * @return array
-	 */
-	public function checkPhpMbstringFuncOverload() {
-		$current = ini_get('mbstring.func_overload');
-
-		return [
-			'name' => _s('PHP option "%1$s"', 'mbstring.func_overload'),
-			'current' => ($current & 2) ? _('on') : _('off'),
-			'required' => _('off'),
-			'result' => ($current & 2) ? self::CHECK_FATAL : self::CHECK_OK,
-			'error' => _('PHP string function overloading must be disabled.')
 		];
 	}
 
@@ -641,12 +623,45 @@ class CFrontendSetup {
 
 		return [
 			'name' => _s('PHP option "%1$s"', 'arg_separator.output'),
-			'current' => htmlspecialchars($current),
-			'required' => htmlspecialchars(self::REQUIRED_PHP_ARG_SEPARATOR_OUTPUT),
+			'current' => $current,
+			'required' => self::REQUIRED_PHP_ARG_SEPARATOR_OUTPUT,
 			'result' => ($current === self::REQUIRED_PHP_ARG_SEPARATOR_OUTPUT) ? self::CHECK_OK : self::CHECK_FATAL,
 			'error' => _s('PHP option "%1$s" must be set to "%2$s"', 'arg_separator.output',
 				self::REQUIRED_PHP_ARG_SEPARATOR_OUTPUT
 			)
+		];
+	}
+
+	/**
+	 * Checks if selected locale is working.
+	 *
+	 * @return array
+	 */
+	public function checkSystemLocale() {
+		$result = true;
+		$current_locale = setlocale(LC_MONETARY, 0);
+
+		if ($current_locale === false) {
+			$result = false;
+		}
+
+		$locale_variants = zbx_locale_variants($this->default_lang);
+
+		if ($result && !setlocale(LC_MONETARY, $locale_variants)) {
+			$result = false;
+		}
+
+		if ($current_locale !== false) {
+			setlocale(LC_MONETARY, zbx_locale_variants($current_locale));
+		}
+
+		return [
+			'name' => _('System locale'),
+			'current' => $current_locale ?: '',
+			'required' => $this->default_lang,
+			'result' => $result ? self::CHECK_OK : self::CHECK_FATAL,
+			'error' => 'Locale for language "'.$this->default_lang.'" is not found on the web server. Tried to set: '.
+				implode(', ', $locale_variants).'. Unable to translate Zabbix interface.'
 		];
 	}
 
@@ -671,6 +686,27 @@ class CFrontendSetup {
 			'required' => null,
 			'result' => $writeable ? self::CHECK_FATAL : self::CHECK_OK,
 			'error' => _s('Database TLS certificate files must be read-only')
+		];
+	}
+
+	/**
+	 * Checks for PHP Curl extension.
+	 *
+	 * @return array
+	 */
+	public function checkPhpCurlModule() {
+		$enabled = function_exists('curl_init') && function_exists('curl_errno') && function_exists('curl_error')
+			&& function_exists('curl_exec') && function_exists('curl_setopt') && function_exists('curl_setopt_array')
+			&& function_exists('curl_version');
+		$current_version = $enabled ? curl_version()['version'] : '';
+		$enabled = $enabled && version_compare($current_version, self::MIN_PHP_CURL_VERSION, '>=');
+
+		return [
+			'name' => _('PHP curl'),
+			'current' => $current_version,
+			'required' => self::MIN_PHP_CURL_VERSION,
+			'result' => $enabled ? self::CHECK_OK : self::CHECK_WARNING,
+			'error' => _('PHP curl extension is missing or outdated.')
 		];
 	}
 }

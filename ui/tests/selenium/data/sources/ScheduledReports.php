@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 class ScheduledReports {
@@ -26,7 +21,7 @@ class ScheduledReports {
 	 * @return array
 	 */
 	public static function load() {
-		CDataHelper::reset();
+		$time = time();
 
 		CDataHelper::call('user.create', [
 			[
@@ -61,8 +56,8 @@ class ScheduledReports {
 				'cycle' => '1',
 				'start_time' => '43200', // 12:00
 				'weekdays' => '12', // Wednesday and Thursday
-				'active_since' => '2025-04-24',
-				'active_till' => '2026-04-25',
+				'active_since' => date('Y-m-d', strtotime('-1 year', $time)),
+				'active_till' => date('Y-m-d', strtotime('+1 year', $time)),
 				'subject' => 'Weekly report',
 				'message' => 'Report accompanying text',
 				'status' => '0',
@@ -93,7 +88,7 @@ class ScheduledReports {
 				'period' => '3',
 				'cycle' => '1',
 				'weekdays' => '12', // Wednesday and Thursday
-				'active_till' => '2026-04-25',
+				'active_till' => date('Y-m-d', strtotime('+1 year', $time)),
 				'message' => 'Report text',
 				'description' => 'Report description',
 				'status' => '1',
@@ -222,7 +217,7 @@ class ScheduledReports {
 			],
 			[
 				'userid' => '1',
-				'name' => 'Report for filter - disabled',
+				'name' => 'Report for filter -   disabled',
 				'dashboardid' => '57',
 				'period' => '2',
 				'cycle' => '2',

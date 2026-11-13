@@ -1,62 +1,77 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #include "proxyconfig.h"
 
-#include "log.h"
-#include "zbxnix.h"
-#include "proxy.h"
-#include "zbxself.h"
+#include "proxyconfigwrite/proxyconfigwrite.h"
 
-#include "zbxcrypto.h"
+#include "zbxregexp.h"
+#include "zbxtimekeeper.h"
+#include "zbxcachehistory.h"
+#include "zbxself.h"
+#include "zbxtime.h"
 #include "zbxcompress.h"
 #include "zbxrtc.h"
 #include "zbxcommshigh.h"
+#include "zbx_rtc_constants.h"
+#include "zbx_host_constants.h"
+#include "zbxstr.h"
+#include "zbxalgo.h"
+#include "zbxcacheconfig.h"
+#include "zbxdb.h"
+#include "zbxipcservice.h"
+#include "zbxnum.h"
+#include "zbxjson.h"
+#include "zbxsupervisor_client.h"
+#include "zbxthreads.h"
+#include "zbxprof.h"
+#ifdef HAVE_ARES_QUERY_CACHE
+#include "zbxresolver.h"
+#endif
 
-#define CONFIG_PROXYCONFIG_RETRY	120	/* seconds */
-
-extern ZBX_THREAD_LOCAL unsigned char	process_type;
-extern unsigned char			program_type;
-extern ZBX_THREAD_LOCAL int		server_num, process_num;
-
-extern zbx_vector_ptr_t	zbx_addrs;
-extern char		*CONFIG_HOSTNAME;
-extern char		*CONFIG_SOURCE_IP;
-extern unsigned int	configured_tls_connect_mode;
-
-static void	process_configuration_sync(size_t *data_size, zbx_synced_new_config_t *synced)
+static void	process_configuration_sync(zbx_dbconn_pool_t *dbpool, size_t *data_size,
+		zbx_synced_new_config_t *synced, const zbx_thread_info_t *thread_info,
+		zbx_thread_proxyconfig_args *args, int *vault_ret)
 {
-	zbx_socket_t		sock;
-	struct	zbx_json_parse	jp, jp_kvs_paths = {0};
-	char			value[16], *error = NULL, *buffer = NULL;
-	size_t			buffer_size, reserved;
-	struct zbx_json		j;
+	zbx_socket_t			sock;
+	struct	zbx_json_parse		jp, jp_kvs_paths = {0};
+	char				value[16], *error = NULL, *buffer = NULL;
+	size_t				buffer_size, reserved;
+	struct zbx_json			j;
+	int				ret = FAIL;
+	zbx_uint64_t			config_revision, hostmap_revision;
+	zbx_proxyconfig_write_status_t	status = ZBX_PROXYCONFIG_WRITE_STATUS_DATA;
+	zbx_config_t			cfg;
 
 	zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __func__);
 
 	/* reset the performance metric */
 	*data_size = 0;
 
+	zbx_dc_get_upstream_revision(&config_revision, &hostmap_revision);
+
 	zbx_json_init(&j, 128);
 	zbx_json_addstring(&j, "request", ZBX_PROTO_VALUE_PROXY_CONFIG, ZBX_JSON_TYPE_STRING);
-	zbx_json_addstring(&j, "host", CONFIG_HOSTNAME, ZBX_JSON_TYPE_STRING);
+	zbx_json_addstring(&j, "host", args->config_hostname, ZBX_JSON_TYPE_STRING);
 	zbx_json_addstring(&j, ZBX_PROTO_TAG_VERSION, ZABBIX_VERSION, ZBX_JSON_TYPE_STRING);
+	zbx_json_addstring(&j, ZBX_PROTO_TAG_SESSION, zbx_dc_get_session_token(), ZBX_JSON_TYPE_STRING);
+	zbx_json_adduint64(&j, ZBX_PROTO_TAG_CONFIG_REVISION, config_revision);
+	zbx_config_get(&cfg, ZBX_CONFIG_FLAGS_PROXY_SECRETS_PROVIDER);
+	zbx_json_adduint64(&j, ZBX_PROTO_TAG_PROXY_SECRETS_PROVIDER, (zbx_uint64_t)cfg.proxy_secrets_provider);
+
+	if (0 != hostmap_revision)
+		zbx_json_adduint64(&j, ZBX_PROTO_TAG_HOSTMAP_REVISION, hostmap_revision);
 
 	if (SUCCEED != zbx_compress(j.buffer, j.buffer_size, &buffer, &buffer_size))
 	{
@@ -67,16 +82,17 @@ static void	process_configuration_sync(size_t *data_size, zbx_synced_new_config_
 	reserved = j.buffer_size;
 	zbx_json_free(&j);
 
-	update_selfmon_counter(ZBX_PROCESS_STATE_IDLE);
-
-	if (FAIL == zbx_connect_to_server(&sock,CONFIG_SOURCE_IP, &zbx_addrs, 600, CONFIG_TIMEOUT,
-			configured_tls_connect_mode, CONFIG_PROXYCONFIG_RETRY, LOG_LEVEL_WARNING))	/* retry till have a connection */
+	zbx_update_selfmon_counter(thread_info, ZBX_PROCESS_STATE_IDLE);
+#define CONFIG_PROXYCONFIG_RETRY	10	/* seconds */
+	if (FAIL == zbx_connect_to_server(&sock, args->config_source_ip, args->config_server_addrs, 600,
+			args->config_timeout, CONFIG_PROXYCONFIG_RETRY, LOG_LEVEL_WARNING,
+			args->config_tls)) /* retry till have a connection */
 	{
-		update_selfmon_counter(ZBX_PROCESS_STATE_BUSY);
+		zbx_update_selfmon_counter(thread_info, ZBX_PROCESS_STATE_BUSY);
 		goto out;
 	}
-
-	update_selfmon_counter(ZBX_PROCESS_STATE_BUSY);
+#undef CONFIG_PROXYCONFIG_RETRY
+	zbx_update_selfmon_counter(thread_info, ZBX_PROCESS_STATE_BUSY);
 
 	if (SUCCEED != zbx_get_data_from_server(&sock, &buffer, buffer_size, reserved, &error))
 	{
@@ -118,27 +134,162 @@ static void	process_configuration_sync(size_t *data_size, zbx_synced_new_config_
 		goto error;
 	}
 
-	zabbix_log(LOG_LEVEL_WARNING, "received configuration data from server at \"%s\", datalen " ZBX_FS_SIZE_T,
-			sock.peer, (zbx_fs_size_t)*data_size);
-
-	if (SUCCEED == process_proxyconfig(&jp, &jp_kvs_paths))
+	if (SUCCEED == (ret = zbx_proxyconfig_process(dbpool, sock.peer, &jp, &status, &error)))
 	{
-		DCsync_configuration(ZBX_DBSYNC_UPDATE, *synced);
+		zbx_vector_uint64_t	deleted_itemids;
+
+		zbx_vector_uint64_create(&deleted_itemids);
+
+		zbx_dbconn_t	*db = zbx_dbconn_pool_acquire_connection(dbpool);
+		zbx_dc_sync_configuration(db, ZBX_DBSYNC_UPDATE, *synced, &deleted_itemids, args->config_vault,
+				args->config_proxyconfig_frequency);
+		zbx_dbconn_pool_release_connection(dbpool, db);
+
 		*synced = ZBX_SYNCED_NEW_CONFIG_YES;
 
-		if (NULL != jp_kvs_paths.start)
-			DCsync_kvs_paths(&jp_kvs_paths);
+		if (SUCCEED == zbx_json_brackets_by_name(&jp, ZBX_PROTO_TAG_MACRO_SECRETS, &jp_kvs_paths))
+		{
+			zbx_dc_sync_kvs_paths(&jp_kvs_paths, args->config_vault, args->config_source_ip,
+					args->config_ssl_ca_location, args->config_ssl_cert_location,
+					args->config_ssl_key_location, vault_ret);
+		}
 
-		DCupdate_interfaces_availability();
+		zbx_dc_update_interfaces_availability();
+		zbx_hc_remove_items_by_ids(&deleted_itemids);
+		zbx_vector_uint64_destroy(&deleted_itemids);
 	}
+	else
+	{
+		zabbix_log(LOG_LEVEL_WARNING, "cannot process received configuration data from server at \"%s\": %s",
+				sock.peer, error);
+		zbx_free(error);
+	}
+
+	zbx_dc_set_proxy_lastonline((int)time(NULL));
 error:
 	zbx_disconnect_from_server(&sock);
+	if (SUCCEED != ret)
+	{
+		/* reset received config_revision to force full resync after data transfer failure */
+		zbx_dc_set_upstream_revision(0, 0);
+
+		zbx_addrs_failover(args->config_server_addrs);
+	}
+
 out:
 	zbx_free(error);
 	zbx_free(buffer);
 	zbx_json_free(&j);
-
+#ifdef	HAVE_MALLOC_TRIM
+	/* avoid memory not being released back to the system if large proxy configuration is retrieved from database */
+	if (ZBX_PROXYCONFIG_WRITE_STATUS_DATA == status)
+		malloc_trim(ZBX_MALLOC_TRIM);
+#endif
 	zabbix_log(LOG_LEVEL_DEBUG, "End of %s()", __func__);
+}
+
+static void	proxyconfig_remove_unused_templates(zbx_dbconn_t *db)
+{
+	zbx_vector_uint64_t	hostids, templateids;
+	zbx_hashset_t		templates;
+	int			removed_num;
+	zbx_db_row_t		row;
+	zbx_db_result_t		result;
+
+	zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __func__);
+
+	zbx_vector_uint64_create(&hostids);
+	zbx_vector_uint64_create(&templateids);
+	zbx_hashset_create(&templates, 100, ZBX_DEFAULT_UINT64_HASH_FUNC, ZBX_DEFAULT_UINT64_COMPARE_FUNC);
+
+	result = zbx_dbconn_select(db, "select hostid,status from hosts");
+
+	while (NULL != (row = zbx_db_fetch(result)))
+	{
+		zbx_uint64_t	hostid;
+		unsigned char	status;
+
+		ZBX_STR2UINT64(hostid, row[0]);
+		ZBX_STR2UCHAR(status, row[1]);
+
+		if (HOST_STATUS_TEMPLATE == status)
+			zbx_hashset_insert(&templates, &hostid, sizeof(hostid));
+		else
+			zbx_vector_uint64_append(&hostids, hostid);
+	}
+	zbx_db_free_result(result);
+
+	zbx_dc_get_unused_macro_templates(&templates, &hostids, &templateids);
+
+	if (0 != templateids.values_num)
+	{
+		char	*sql = NULL;
+		size_t	sql_alloc = 0, sql_offset = 0;
+
+		zbx_dbconn_begin(db);
+
+		zbx_strcpy_alloc(&sql, &sql_alloc, &sql_offset, "delete from hosts_templates where");
+		zbx_db_add_condition_alloc(&sql, &sql_alloc, &sql_offset, "hostid", templateids.values,
+				templateids.values_num);
+		if (ZBX_DB_OK > zbx_dbconn_execute(db, "%s", sql))
+			goto fail;
+
+		sql_offset = 0;
+		zbx_strcpy_alloc(&sql, &sql_alloc, &sql_offset, "delete from hostmacro where");
+		zbx_db_add_condition_alloc(&sql, &sql_alloc, &sql_offset, "hostid", templateids.values,
+				templateids.values_num);
+		if (ZBX_DB_OK > zbx_dbconn_execute(db, "%s", sql))
+			goto fail;
+
+		sql_offset = 0;
+		zbx_strcpy_alloc(&sql, &sql_alloc, &sql_offset, "delete from hosts where");
+		zbx_db_add_condition_alloc(&sql, &sql_alloc, &sql_offset, "hostid", templateids.values,
+				templateids.values_num);
+		if (ZBX_DB_OK > zbx_dbconn_execute(db, "%s", sql))
+			goto fail;
+fail:
+		zbx_dbconn_commit(db);
+
+		zbx_free(sql);
+	}
+
+	removed_num = templateids.values_num;
+
+	zbx_hashset_destroy(&templates);
+	zbx_vector_uint64_destroy(&templateids);
+	zbx_vector_uint64_destroy(&hostids);
+
+	zabbix_log(LOG_LEVEL_DEBUG, "End of %s() removed:%d", __func__, removed_num);
+}
+
+static void	proxyconfig_update_vault_macros(zbx_thread_proxyconfig_args *proxyconfig_args_in, int *vault_ret)
+{
+	zbx_config_t	cfg;
+
+	zbx_config_get(&cfg, ZBX_CONFIG_FLAGS_PROXY_SECRETS_PROVIDER);
+
+	if (ZBX_PROXY_SECRETS_PROVIDER_PROXY != cfg.proxy_secrets_provider)
+		return;
+
+	zbx_dc_sync_kvs_paths(NULL, proxyconfig_args_in->config_vault, proxyconfig_args_in->config_source_ip,
+			proxyconfig_args_in->config_ssl_ca_location, proxyconfig_args_in->config_ssl_cert_location,
+			proxyconfig_args_in->config_ssl_key_location, vault_ret);
+}
+
+static void	proxyconfig_prof_enable(const unsigned char *data)
+{
+	pid_t	pid;
+	int	proc_type, proc_num, scope;
+	char	*error = NULL;
+
+	if (SUCCEED != zbx_rtc_get_command_target((const char *)data, &pid, &proc_type, &proc_num, &scope, &error))
+	{
+		THIS_SHOULD_NEVER_HAPPEN_MSG("cannot get rtc target: %s", error);
+		zbx_free(error);
+		return;
+	}
+
+	zbx_prof_enable(scope);
 }
 
 /******************************************************************************
@@ -148,93 +299,199 @@ out:
  * Comments: never returns                                                    *
  *                                                                            *
  ******************************************************************************/
-ZBX_THREAD_ENTRY(proxyconfig_thread, args)
+void	*zbx_proxyconfig_thread(void *args)
 {
-	size_t			data_size;
-	double			sec;
-	zbx_ipc_async_socket_t	rtc;
-	int			sleeptime;
-	zbx_synced_new_config_t	synced = ZBX_SYNCED_NEW_CONFIG_NO;
+	size_t				data_size;
+	double				sec, last_template_cleanup_sec = 0, interval;
+	zbx_ipc_async_socket_t		rtc;
+	int				sleeptime = 1;
+	zbx_synced_new_config_t		synced = ZBX_SYNCED_NEW_CONFIG_NO;
+	zbx_supervisor_unit_args_t	*unit_args = (zbx_supervisor_unit_args_t *)args;
+	zbx_thread_proxyconfig_args	*proxyconfig_args_in = (zbx_thread_proxyconfig_args *)unit_args->args.args;
+	const zbx_thread_info_t		*info = &unit_args->args.info;
+	int				server_num = info->server_num;
+	int				process_num = info->process_num;
+	unsigned char			process_type = info->process_type;
+	zbx_uint32_t			rtc_msgs[] = {ZBX_RTC_CONFIG_CACHE_RELOAD, ZBX_RTC_VAULT_NEW_TOKEN,
+							ZBX_RTC_PROF_ENABLE, ZBX_RTC_PROF_DISABLE};
+	time_t				nextcheck;
+	zbx_dbconn_pool_t		*dbpool = unit_args->shared->dbpool;
+	zbx_dbconn_t			*db;
 
-	process_type = ((zbx_thread_args_t *)args)->process_type;
-	server_num = ((zbx_thread_args_t *)args)->server_num;
-	process_num = ((zbx_thread_args_t *)args)->process_num;
+	zbx_supervisor_update_activity("%s starting", unit_args->name);
 
-	zabbix_log(LOG_LEVEL_INFORMATION, "%s #%d started [%s #%d]", get_program_type_string(program_type),
-			server_num, get_process_type_string(process_type), process_num);
-	update_selfmon_counter(ZBX_PROCESS_STATE_BUSY);
+	zabbix_log(LOG_LEVEL_INFORMATION, "thread started");
+	zbx_update_selfmon_counter(info, ZBX_PROCESS_STATE_BUSY);
+
+	zbx_dc_config_local_init();
+
 #if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
-	zbx_tls_init_child();
+	zbx_tls_init_child(proxyconfig_args_in->config_tls, proxyconfig_args_in->zbx_get_program_type_cb_arg,
+		proxyconfig_args_in->zbx_find_psk_in_cache_cb_arg);
+#else
+	ZBX_UNUSED(args);
 #endif
 
-	zbx_rtc_subscribe(&rtc, process_type, process_num);
+	zbx_rtc_subscribe(process_type, process_num, rtc_msgs, ARRSIZE(rtc_msgs), proxyconfig_args_in->config_timeout,
+			&rtc);
 
-	zbx_setproctitle("%s [connecting to the database]", get_process_type_string(process_type));
+	zbx_supervisor_update_activity("%s [syncing configuration]", unit_args->name);
 
-	DBconnect(ZBX_DB_CONNECT_NORMAL);
+	zabbix_log(LOG_LEVEL_INFORMATION, "starting initial configuration cache synchronization");
 
-	zbx_setproctitle("%s [syncing configuration]", get_process_type_string(process_type));
-	DCsync_configuration(ZBX_DBSYNC_INIT, ZBX_SYNCED_NEW_CONFIG_NO);
+	db = zbx_dbconn_pool_acquire_connection(dbpool);
+	zbx_dc_sync_configuration(db, ZBX_DBSYNC_INIT, ZBX_SYNCED_NEW_CONFIG_NO, NULL,
+			proxyconfig_args_in->config_vault, proxyconfig_args_in->config_proxyconfig_frequency);
+	zbx_dbconn_pool_release_connection(dbpool, db);
 
-	zbx_rtc_notify_config_sync(&rtc);
+	proxyconfig_update_vault_macros(proxyconfig_args_in, NULL);
 
-	sleeptime = (ZBX_PROGRAM_TYPE_PROXY_PASSIVE == program_type ? ZBX_IPC_WAIT_FOREVER : 0);
+	zabbix_log(LOG_LEVEL_INFORMATION, "finished initial configuration cache synchronization");
 
-	while (ZBX_IS_RUNNING())
+	if (ZBX_PROGRAM_TYPE_PROXY_PASSIVE == info->program_type)
+		nextcheck = 0;
+	else
+		nextcheck = time(NULL) + proxyconfig_args_in->config_proxyconfig_frequency;
+
+	zbx_supervisor_set_process_running(server_num);
+
+	while (UNIT_RUNNING == *unit_args->runstate)
 	{
 		zbx_uint32_t	rtc_cmd;
 		unsigned char	*rtc_data;
-		int		config_cache_reload = 0;
+		int		config_cache_reload = 0, vault_ret = SUCCEED;
 
-		while (SUCCEED == zbx_rtc_wait(&rtc, &rtc_cmd, &rtc_data, sleeptime) && 0 != rtc_cmd)
+		while (SUCCEED == zbx_rtc_wait(&rtc, info, &rtc_cmd, &rtc_data, sleeptime) && 0 != rtc_cmd)
 		{
-			if (ZBX_RTC_CONFIG_CACHE_RELOAD == rtc_cmd)
-				config_cache_reload = 1;
-			else if (ZBX_RTC_SHUTDOWN == rtc_cmd)
-				goto stop;
+			switch (rtc_cmd)
+			{
+				case ZBX_RTC_VAULT_NEW_TOKEN:
+					proxyconfig_args_in->config_vault->token =
+						zbx_strdup(proxyconfig_args_in->config_vault->token,
+							(const char *)rtc_data);
+					break;
+				case ZBX_RTC_CONFIG_CACHE_RELOAD:
+					config_cache_reload = 1;
+					break;
+				case ZBX_RTC_PROF_ENABLE:
+					proxyconfig_prof_enable(rtc_data);
+					break;
+				case ZBX_RTC_PROF_DISABLE:
+					zbx_prof_disable();
+					break;
+				case ZBX_RTC_SHUTDOWN:
+					goto stop;
+			}
 
 			sleeptime = 0;
+			zbx_free(rtc_data);
 		}
 
-		sec = zbx_time();
-		zbx_update_env(sec);
+		sleeptime = (0 == nextcheck || time(NULL) < nextcheck) ? 1 : 0;
 
-		if (ZBX_PROGRAM_TYPE_PROXY_PASSIVE == program_type)
+		if (0 == config_cache_reload && 0 != sleeptime)
+			continue;
+
+		sec = zbx_time();
+		zbx_prof_update(unit_args->name, sec);
+
+		if (ZBX_PROGRAM_TYPE_PROXY_PASSIVE == info->program_type)
 		{
 			if (0 != config_cache_reload)
 			{
-				zbx_setproctitle("%s [loading configuration]", get_process_type_string(process_type));
+				zbx_vector_uint64_t	deleted_itemids;
 
-				DCsync_configuration(ZBX_DBSYNC_UPDATE, synced);
+				zbx_supervisor_update_activity("%s [loading configuration]", unit_args->name);
+
+				zbx_vector_uint64_create(&deleted_itemids);
+
+				db = zbx_dbconn_pool_acquire_connection(dbpool);
+				zbx_dc_sync_configuration(db, ZBX_DBSYNC_UPDATE, synced, &deleted_itemids,
+						proxyconfig_args_in->config_vault,
+						proxyconfig_args_in->config_proxyconfig_frequency);
+
 				synced = ZBX_SYNCED_NEW_CONFIG_YES;
-				DCupdate_interfaces_availability();
-				zbx_rtc_notify_config_sync(&rtc);
+				zbx_dc_update_interfaces_availability();
 
-				zbx_setproctitle("%s [synced config in " ZBX_FS_DBL " sec]",
-						get_process_type_string(process_type), zbx_time() - sec);
+				proxyconfig_update_vault_macros(proxyconfig_args_in, &vault_ret);
+
+				if (SUCCEED != vault_ret && NULL != proxyconfig_args_in->config_vault->token)
+				{
+					zbx_ipc_async_socket_send(&rtc, ZBX_RTC_VAULT_RELOGIN,
+						(unsigned char *)proxyconfig_args_in->config_vault->token,
+						(zbx_uint32_t)strlen(proxyconfig_args_in->config_vault->token) + 1);
+				}
+
+				zbx_hc_remove_items_by_ids(&deleted_itemids);
+
+				zbx_rtc_notify_finished_sync(proxyconfig_args_in->config_timeout,
+					ZBX_RTC_CONFIG_SYNC_NOTIFY, get_process_type_string(process_type), &rtc);
+
+				if (SEC_PER_HOUR < sec - last_template_cleanup_sec)
+				{
+					proxyconfig_remove_unused_templates(db);
+					last_template_cleanup_sec = sec;
+				}
+				zbx_dbconn_pool_release_connection(dbpool, db);
+
+				zbx_vector_uint64_destroy(&deleted_itemids);
+				zbx_supervisor_update_activity("%s [synced config in " ZBX_FS_DBL " sec]",
+					unit_args->name, zbx_time() - sec);
 			}
 
-			sleeptime = ZBX_IPC_WAIT_FOREVER;
 			continue;
 		}
 
 		if (1 == config_cache_reload)
 			zabbix_log(LOG_LEVEL_WARNING, "forced reloading of the configuration cache");
 
-		zbx_setproctitle("%s [loading configuration]", get_process_type_string(process_type));
+		zbx_supervisor_update_activity("%s [loading configuration]", unit_args->name);
 
-		process_configuration_sync(&data_size, &synced);
-		sec = zbx_time() - sec;
+		process_configuration_sync(dbpool, &data_size, &synced, info, proxyconfig_args_in, &vault_ret);
+		proxyconfig_update_vault_macros(proxyconfig_args_in, &vault_ret);
 
-		zbx_setproctitle("%s [synced config " ZBX_FS_SIZE_T " bytes in " ZBX_FS_DBL " sec, idle %d sec]",
-				get_process_type_string(process_type), (zbx_fs_size_t)data_size, sec,
-				CONFIG_PROXYCONFIG_FREQUENCY);
+		interval = zbx_time() - sec;
 
-		sleeptime = CONFIG_PROXYCONFIG_FREQUENCY;
+		if (1 == config_cache_reload)
+			zabbix_log(LOG_LEVEL_WARNING, "finished forced reloading of the configuration cache");
+
+		zbx_supervisor_update_activity("%s [synced config " ZBX_FS_SIZE_T " bytes in " ZBX_FS_DBL
+				" sec, idle %d sec]", unit_args->name, (zbx_fs_size_t)data_size, interval,
+				proxyconfig_args_in->config_proxyconfig_frequency);
+
+		if (SEC_PER_HOUR < sec - last_template_cleanup_sec)
+		{
+			db = zbx_dbconn_pool_acquire_connection(dbpool);
+			proxyconfig_remove_unused_templates(db);
+			zbx_dbconn_pool_release_connection(dbpool, db);
+
+			last_template_cleanup_sec = sec;
+		}
+
+		if (SUCCEED != vault_ret && NULL != proxyconfig_args_in->config_vault->token)
+		{
+			zbx_ipc_async_socket_send(&rtc, ZBX_RTC_VAULT_RELOGIN,
+				(unsigned char *)proxyconfig_args_in->config_vault->token,
+				(zbx_uint32_t)strlen(proxyconfig_args_in->config_vault->token) + 1);
+		}
+
+		nextcheck = time(NULL) + proxyconfig_args_in->config_proxyconfig_frequency;
 	}
 stop:
-	zbx_setproctitle("%s #%d [terminated]", get_process_type_string(process_type), process_num);
+	zbx_deinit_regexp_env();
+	zbx_prof_destroy();
 
-	while (1)
-		zbx_sleep(SEC_PER_MIN);
+	zbx_history_cache_destroy_local_cache();
+	zbx_ipc_async_socket_close(&rtc);
+
+#if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
+	zbx_tls_free();
+#endif
+	zbx_dc_config_local_release();
+
+	zbx_supervisor_update_activity("%s [terminated]", unit_args->name);
+
+	zbx_free(args);
+
+	return NULL;
 }

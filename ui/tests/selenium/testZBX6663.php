@@ -1,26 +1,19 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../include/CLegacyWebTest.php';
-
-use Facebook\WebDriver\WebDriverBy;
+require_once __DIR__.'/../include/CLegacyWebTest.php';
 
 /**
  * @backup profiles
@@ -125,7 +118,7 @@ class testZBX6663 extends CLegacyWebTest {
 			[
 				[
 					'template' => 'Template ZBX6663 First',
-					'link' => 'Discovery rules',
+					'link' => 'Discovery',
 					'checkbox' => 'items'
 				]
 			],
@@ -153,7 +146,7 @@ class testZBX6663 extends CLegacyWebTest {
 			[
 				[
 					'template' => 'Template ZBX6663 First',
-					'link' => 'Web scenarios',
+					'link' => 'Web',
 					'checkbox' => 'httptests'
 				]
 			]
@@ -174,46 +167,49 @@ class testZBX6663 extends CLegacyWebTest {
 			$form = $this->query('name:zbx_filter')->asForm()->waitUntilReady()->one();
 			$form->fill(['Name' => $zbx_data['host']]);
 			$this->query('button:Apply')->one()->waitUntilClickable()->click();
+			$this->page->waitUntilReady();
+			$table = $this->query('id:datatable-hosts')->asDatatable()->one()->waitUntilReady();
 
 			if (isset($zbx_data['discoveryRule'])) {
-				$this->query('xpath://table[@class="list-table"]')->asTable()->one()->findRow('Name', $zbx_data['host'])
-						->getColumn('Discovery')->query('link:Discovery')->one()->click();
+				$table->findRow('Name', $zbx_data['host'])->getColumn('Discovery')->query('link:Discovery')->one()->click();
 				$this->zbxTestCheckHeader('Discovery rules');
-				$this->zbxTestClickLinkTextWait($this->discoveryRule);
-				$this->zbxTestClickLinkTextWait($zbx_data['discoveryRule']);
+				$this->query('class:list-table')->asTable()->one()->findRow('Name', $this->discoveryRule, true)
+						->query('link', $zbx_data['discoveryRule'])->waitUntilClickable()->one()->click();
 			}
 			else {
-				$this->query('xpath://table[@class="list-table"]')->asTable()->one()->findRow('Name', $zbx_data['host'])
-					->getColumn($zbx_data['link'])->query('link', $zbx_data['link'])->one()->click();
+				$table->findRow('Name', $zbx_data['host'])->getColumn($zbx_data['link'])
+						->query('link', $zbx_data['link'])->one()->click();
 			}
 		}
 
 		if (isset($zbx_data['template'])) {
-			$this->zbxTestLogin('templates.php');
+			$this->zbxTestLogin('zabbix.php?action=template.list');
 			$this->query('button:Reset')->one()->click();
 			$form = $this->query('name:zbx_filter')->asForm()->waitUntilReady()->one();
 			$form->fill(['Name' => $zbx_data['template']]);
+			$table = $this->query('id:datatable-templates')->asDatatable()->one();
 			$this->query('button:Apply')->one()->waitUntilClickable()->click();
-			$this->zbxTestClickLinkText($zbx_data['template']);
+			$this->page->waitUntilReady();
+			$table->waitUntilReloaded();
+			$table->waitUntilRowsCount(1);
 
 			if (isset($zbx_data['discoveryRule'])) {
-				$this->zbxTestClickLinkTextWait('Discovery rules');
+				$table->getRow(0)->query('link:Discovery')->waitUntilVisible()->one()->click();
 				$this->zbxTestCheckHeader('Discovery rules');
-				$this->zbxTestClickLinkTextWait($this->discoveryRule);
-				$this->zbxTestClickLinkTextWait($zbx_data['discoveryRule']);
+				$this->query('class:list-table')->asTable()->one()->findRow('Name', $this->discoveryRule, true)
+						->query('link', $zbx_data['discoveryRule'])->waitUntilClickable()->one()->click();
 			}
 			else {
-				$link = $zbx_data['link'];
-				$this->zbxTestClickXpathWait('//div[@class="header-navigation"]//a[text()="'.$link.'"]');
+				$table->getRow(0)->query('link', $zbx_data['link'])->waitUntilVisible()->one()->click();
 			}
 		}
 
-		$this->zbxTestWaitUntilElementVisible(WebDriverBy::id('selected_count'));
+		$this->query('id:selected_count')->waitUntilVisible()->one();
 		$this->zbxTestTextPresent('0 selected');
 		$this->zbxTestCheckboxSelect("all_$checkbox");
 
 		$this->zbxTestClickLinkText($this->templated);
-		$this->zbxTestWaitUntilElementPresent(WebDriverBy::id('selected_count'));
+		$this->query('id:selected_count')->waitUntilPresent()->one();
 		$this->zbxTestTextPresent('0 selected');
 	}
 }

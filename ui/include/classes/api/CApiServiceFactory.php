@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -28,15 +23,23 @@ class CApiServiceFactory extends CRegistryFactory {
 		'action' => CAction::class,
 		'alert' => CAlert::class,
 		'apiinfo' => CAPIInfo::class,
+		'apmtrace' => CApmTrace::class,
+		'apmspan' => CApmSpan::class,
+		'apmlog' => CApmLog::class,
+		'apmmetric' => CApmMetric::class,
 		'auditlog' => CAuditLog::class,
 		'authentication' => CAuthentication::class,
 		'autoregistration' => CAutoregistration::class,
 		'configuration' => CConfiguration::class,
+		'ceprule' => CCepRule::class,
+		'connector' => CConnector::class,
 		'correlation' => CCorrelation::class,
 		'dashboard' => CDashboard::class,
 		'dcheck' => CDCheck::class,
+		'device' => CDevice::class,
 		'dhost' => CDHost::class,
 		'discoveryrule' => CDiscoveryRule::class,
+		'discoveryruleprototype' => CDiscoveryRulePrototype::class,
 		'drule' => CDRule::class,
 		'dservice' => CDService::class,
 		'event' => CEvent::class,
@@ -45,6 +48,7 @@ class CApiServiceFactory extends CRegistryFactory {
 		'graphprototype' => CGraphPrototype::class,
 		'hanode' => CHaNode::class,
 		'host' => CHost::class,
+		'hostdashboard' => CHostDashboard::class,
 		'hostgroup' => CHostGroup::class,
 		'hostprototype' => CHostPrototype::class,
 		'history' => CHistory::class,
@@ -58,12 +62,15 @@ class CApiServiceFactory extends CRegistryFactory {
 		'maintenance' => CMaintenance::class,
 		'map' => CMap::class,
 		'mediatype' => CMediatype::class,
+		'mfa' => CMfa::class,
 		'module' => CModule::class,
 		'problem' => CProblem::class,
 		'proxy' => CProxy::class,
+		'proxygroup' => CProxyGroup::class,
 		'report' => CReport::class,
 		'regexp' => CRegexp::class,
 		'role' => CRole::class,
+		'serverinfo' => CServerInfo::class,
 		'service' => CService::class,
 		'sla' => CSla::class,
 		'script' => CScript::class,
@@ -71,6 +78,7 @@ class CApiServiceFactory extends CRegistryFactory {
 		'task' => CTask::class,
 		'template' => CTemplate::class,
 		'templatedashboard' => CTemplateDashboard::class,
+		'templategroup' => CTemplateGroup::class,
 		'token' => CToken::class,
 		'trend' => CTrend::class,
 		'trigger' => CTrigger::class,

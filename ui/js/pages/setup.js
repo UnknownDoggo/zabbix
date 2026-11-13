@@ -1,24 +1,17 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-
-const ZBX_STYLE_DISPLAY_NONE = 'display-none';
 
 const ZBX_DB_MYSQL		= 'MYSQL';
 const ZBX_DB_POSTGRESQL	= 'POSTGRESQL';
@@ -26,16 +19,14 @@ const ZBX_DB_POSTGRESQL	= 'POSTGRESQL';
 const DB_STORE_CREDS_VAULT_HASHICORP	= 1;
 const DB_STORE_CREDS_VAULT_CYBERARK		= 2;
 
+const DB_VAULT_HASHICORP_AUTH_TYPE_TOKEN = 0;
+const DB_VAULT_HASHICORP_AUTH_TYPE_APP_ROLE = 1;
+
 const STEP_WELCOME			= 1;
 const STEP_DB_CONNECTION	= 3;
 const STEP_SETTINGS			= 4;
 
 const view = new class {
-
-	constructor() {
-		this._is_endpoint_default = true;
-	}
-
 	init({step, hashicorp_endpoint_default, cyberark_endpoint_default}) {
 		this._hashicorp_endpoint_default = hashicorp_endpoint_default;
 		this._cyberark_endpoint_default = cyberark_endpoint_default;
@@ -49,27 +40,52 @@ const view = new class {
 
 			case STEP_DB_CONNECTION:
 				for (const id of ['type', 'server', 'tls_encryption', 'verify_certificate', 'creds_storage',
-						'vault_certificates_toggle', 'vault_url']) {
-					document.getElementById(id).addEventListener('change', () => this._update());
+						'vault_certificates_toggle', 'vault_url', 'vault_auth_type']) {
+					document.getElementById(id).addEventListener('change', () => this.#update());
 				}
 
-				this._update();
+				form.addEventListener('submit', () => {
+					const input_ids = ['server', 'database', 'schema', 'vault_url', 'vault_prefix_hashicorp',
+						'vault_prefix_cyberark', 'vault_db_path', 'vault_query_string', 'vault_token',
+						'vault_app_role_id', 'vault_app_secret_id', 'vault_cert_file', 'vault_key_file', 'ca_file',
+						'key_file', 'cert_file'
+					];
+
+					for (const id of input_ids) {
+						const input = document.getElementById(id);
+
+						input.value = input.value.trim();
+					}
+				});
+
+				this.#update();
 				break;
 
 			case STEP_SETTINGS:
-				document.getElementById('default-theme').addEventListener('change', () => form.submit())
+				document.getElementById('default-theme').addEventListener('change', () => form.submit());
+				document.getElementById('zbx_server_tls').addEventListener('change', () =>
+					this.#updateEncryptionFields()
+				);
+				document.getElementById('zbx_server_tls_certificate_check').addEventListener('change', () =>
+					this.#updateEncryptionFields()
+				);
+
+				this.#updateEncryptionFields();
 				break;
 		}
 	}
 
-	_update() {
+	#update() {
 		const verify_host = document.getElementById('verify_host');
 		const tls_encryption = document.getElementById('tls_encryption');
 		const tls_encryption_hint = document.getElementById('tls_encryption_hint');
 		const vault_url = document.getElementById('vault_url');
-
+		const db_host_row = document.getElementById('db_host_row');
 		const db_type = document.querySelector('[name=type]').value;
 		const host = document.querySelector('[name=server]').value;
+		const hintbox = document.querySelector('label[for="server"] button[data-hintbox]');
+
+		hintbox.style.display = db_type === ZBX_DB_POSTGRESQL ? '' : 'none';
 
 		const encryption_enabled = tls_encryption.checked;
 		const encryption_supported = (db_type === ZBX_DB_MYSQL || db_type === ZBX_DB_POSTGRESQL);
@@ -84,6 +100,12 @@ const view = new class {
 		const vault_enabled = [DB_STORE_CREDS_VAULT_HASHICORP, DB_STORE_CREDS_VAULT_CYBERARK].includes(vault_selected);
 		const vault_certificates_enabled = document.getElementById('vault_certificates_toggle').checked;
 
+		let vault_auth_type = null;
+
+		if (vault_selected == DB_STORE_CREDS_VAULT_HASHICORP) {
+			vault_auth_type = parseInt(document.querySelector('input[name="vault_auth_type"]:checked').value);
+		}
+
 		const rows = {
 			'db_schema_row': db_type === ZBX_DB_POSTGRESQL,
 			'db_encryption_row': encryption_supported,
@@ -94,14 +116,22 @@ const view = new class {
 			'db_verify_host_row': encryption_customizable,
 			'db_cipher_row': encryption_customizable && db_type === ZBX_DB_MYSQL,
 			'vault_url_row': vault_enabled,
+			'vault_prefix_hashicorp_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP,
 			'vault_db_path_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP,
-			'vault_token_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP,
+			'vault_auth_type_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP,
+			'vault_token_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP
+				&& vault_auth_type == DB_VAULT_HASHICORP_AUTH_TYPE_TOKEN,
+			'vault_app_role_id_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP
+				&& vault_auth_type == DB_VAULT_HASHICORP_AUTH_TYPE_APP_ROLE,
+			'vault_app_secret_id_row': vault_selected == DB_STORE_CREDS_VAULT_HASHICORP
+				&& vault_auth_type == DB_VAULT_HASHICORP_AUTH_TYPE_APP_ROLE,
 			'db_user': !vault_enabled,
 			'db_password': !vault_enabled,
+			'vault_prefix_cyberark_row': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK,
 			'vault_query_string_row': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK,
-			'vault_certificates': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK,
-			'vault_cert_file': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK && vault_certificates_enabled,
-			'vault_key_file': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK && vault_certificates_enabled
+			'vault_certificates_row': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK,
+			'vault_cert_file_row': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK && vault_certificates_enabled,
+			'vault_key_file_row': vault_selected == DB_STORE_CREDS_VAULT_CYBERARK && vault_certificates_enabled
 		};
 
 		for (let id in rows) {
@@ -123,7 +153,7 @@ const view = new class {
 				&& [this._hashicorp_endpoint_default, this._cyberark_endpoint_default].includes(vault_url.value)) {
 			vault_url.value = vault_selected == DB_STORE_CREDS_VAULT_CYBERARK
 				? this._cyberark_endpoint_default
-				: this._hashicorp_endpoint_default
+				: this._hashicorp_endpoint_default;
 		}
 
 		// TLS encryption checkbox and secure connection hint message.
@@ -148,6 +178,29 @@ const view = new class {
 		}
 		else if (encryption_customizable) {
 			verify_host.removeAttribute('disabled');
+		}
+
+		db_host_row.querySelector('button').classList.toggle(ZBX_STYLE_BTN_ICON, db_type !== ZBX_DB_MYSQL);
+	}
+
+	#updateEncryptionFields() {
+		const encryption_enabled = document.getElementById('zbx_server_tls').checked;
+		const server_verification_enabled = document.getElementById('zbx_server_tls_certificate_check').checked;
+
+		const rows = {
+			'zbx_server_tls_ca_file': encryption_enabled,
+			'zbx_server_tls_key_file': encryption_enabled,
+			'zbx_server_tls_cert_file': encryption_enabled,
+			'zbx_server_tls_certificate_check': encryption_enabled,
+			'zbx_server_tls_certificate_issuer': encryption_enabled && server_verification_enabled,
+			'zbx_server_tls_certificate_subject': encryption_enabled && server_verification_enabled
+		}
+
+		for (let id in rows) {
+			const input = document.getElementById(id);
+
+			input.parentElement.classList.toggle(ZBX_STYLE_DISPLAY_NONE, !rows[id]);
+			input.parentElement.previousElementSibling.classList.toggle(ZBX_STYLE_DISPLAY_NONE, !rows[id]);
 		}
 	}
 };

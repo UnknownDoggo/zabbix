@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -25,24 +20,11 @@
 class CControllerGeomapsEdit extends CController {
 
 	protected function init(): void {
-		$this->disableSIDValidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput(): bool {
-		$fields = [
-			'geomaps_tile_provider'	=> 'string',
-			'geomaps_tile_url'		=> 'string',
-			'geomaps_max_zoom'		=> 'string',
-			'geomaps_attribution'	=> 'string'
-		];
-
-		$ret = $this->validateInput($fields);
-
-		if (!$ret) {
-			$this->setResponse(new CControllerResponseFatal());
-		}
-
-		return $ret;
+		return true;
 	}
 
 	protected function checkPermissions(): bool {
@@ -50,26 +32,32 @@ class CControllerGeomapsEdit extends CController {
 	}
 
 	protected function doAction(): void {
+		$geomaps_tile_provider = CSettingsHelper::get(CSettingsHelper::GEOMAPS_TILE_PROVIDER);
+		$tile_providers = getTileProviders();
+
 		$data = [
-			'geomaps_tile_provider' => $this->getInput('geomaps_tile_provider', CSettingsHelper::get(
-				CSettingsHelper::GEOMAPS_TILE_PROVIDER
-			)),
-			'tile_providers' => getTileProviders()
+			'geomaps_tile_provider' => $geomaps_tile_provider,
+			'tile_providers' => $tile_providers,
+			'js_validation_rules' => (new CFormValidator(
+				CControllerGeomapsUpdate::getValidationRules()
+			))->getRules()
 		];
 
-		$data += (array_key_exists($data['geomaps_tile_provider'], $data['tile_providers']))
-			? $data['tile_providers'][$data['geomaps_tile_provider']]
-			: [
-				'geomaps_tile_url' => $this->getInput('geomaps_tile_url', CSettingsHelper::get(
-					CSettingsHelper::GEOMAPS_TILE_URL
-				)),
-				'geomaps_max_zoom' => $this->getInput('geomaps_max_zoom', CSettingsHelper::get(
-					CSettingsHelper::GEOMAPS_MAX_ZOOM
-				)),
-				'geomaps_attribution' => $this->getInput('geomaps_attribution', CSettingsHelper::get(
-					CSettingsHelper::GEOMAPS_ATTRIBUTION
-				))
+		if ($geomaps_tile_provider === '') {
+			$data += [
+				'geomaps_tile_url' => CSettingsHelper::get(CSettingsHelper::GEOMAPS_TILE_URL),
+				'geomaps_max_zoom' => CSettingsHelper::get(CSettingsHelper::GEOMAPS_MAX_ZOOM),
+				'geomaps_attribution' => CSettingsHelper::get(CSettingsHelper::GEOMAPS_ATTRIBUTION)
 			];
+		}
+		elseif (array_key_exists($geomaps_tile_provider, $tile_providers)) {
+			$data += $tile_providers[$geomaps_tile_provider];
+		}
+		else {
+			$data['geomaps_tile_provider'] = array_key_first($tile_providers);
+
+			$data += reset($tile_providers);
+		}
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Geographical maps'));

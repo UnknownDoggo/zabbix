@@ -1,129 +1,187 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package zbxcmd
 
 import (
 	"bytes"
+	"context"
+	"errors"
 	"fmt"
 	"os/exec"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 	"unsafe"
 
-	"git.zabbix.com/ap/plugin-support/log"
-
 	"golang.org/x/sys/windows"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
 )
 
-type process struct {
-	Pid    int
-	Handle uintptr
+const cmd = "cmd.exe"
+
+// ZBXExec holds wrapper for os.exec.
+type ZBXExec struct {
+	shellPath string
 }
 
-var ntResumeProcess *syscall.Proc
+func InitExecutor() (Executor, error) {
+	cmdPath, err := exec.LookPath(cmd)
+	if err != nil && !errors.Is(err, exec.ErrDot) {
+		return nil, fmt.Errorf("cannot find path to %s command: %s", cmdPath, err)
+	}
 
-func execute(s string, timeout time.Duration, path string, strict bool) (out string, err error) {
-	cmd := exec.Command("cmd")
-	cmd.Dir = path
+	cmdFullPath, err := filepath.Abs(cmdPath)
+	if err != nil {
+		return nil, fmt.Errorf("cannot find full path to %s command: %s", cmdFullPath, err)
+	}
+
+	return &ZBXExec{shellPath: cmdFullPath}, nil
+}
+
+func (e *ZBXExec) execute(command string, timeout time.Duration, execDir string, strict bool) (string, error) {
+	job, err := createWinJob()
+	if err != nil {
+		return "", err
+	}
 
 	var b bytes.Buffer
+
+	cmd := exec.Command(e.shellPath)
+	cmd.Dir = execDir
 	cmd.Stdout = &b
 	cmd.Stderr = &b
-
-	var job windows.Handle
-	if job, err = windows.CreateJobObject(nil, nil); err != nil {
-		return
-	}
-	defer windows.CloseHandle(job)
-
 	cmd.SysProcAttr = &windows.SysProcAttr{
-		CreationFlags: windows.CREATE_SUSPENDED,
-		CmdLine:       fmt.Sprintf(`/C "%s"`, s),
-	}
-	if err = cmd.Start(); err != nil {
-		return "", fmt.Errorf("Cannot execute command: %s", err)
+		CreationFlags: windows.CREATE_BREAKAWAY_FROM_JOB,
+		CmdLine:       fmt.Sprintf(`/C "%s"`, command),
 	}
 
-	processHandle := windows.Handle((*process)(unsafe.Pointer(cmd.Process)).Handle)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
 
-	defer func() {
-		if cmd.ProcessState == nil {
-			log.Warningf("attempting to terminate process because normal processing was interrupted by error: %s", err)
-			windows.TerminateProcess(processHandle, 0)
-			_ = cmd.Wait()
+	err = cmd.Start()
+	if err != nil {
+		windows.CloseHandle(job)
+
+		return "", errs.Errorf("failed to start command (%s, path: %s): %s", command, execDir, err)
+	}
+
+	procHandle, err := windows.OpenProcess(
+		windows.PROCESS_SET_QUOTA|windows.PROCESS_TERMINATE,
+		false,
+		uint32(cmd.Process.Pid),
+	)
+	if err != nil {
+		windows.CloseHandle(job)
+
+		perr := cmd.Process.Kill()
+		if perr != nil {
+			return "", errs.Errorf("open process failed: %s and process kill failed: %s", err, perr)
 		}
-	}()
 
-	if err = windows.AssignProcessToJobObject(job, processHandle); err != nil {
-		log.Warningf("cannot assign process to a job: %s", err)
-		return
+		return "", errs.Errorf("open process failed: %s", err)
 	}
 
-	t := time.AfterFunc(timeout, func() {
-		if err = windows.TerminateJobObject(job, 0); err != nil {
-			log.Warningf("failed to kill [%s]: %s", s, err)
+	defer windows.CloseHandle(procHandle)
+
+	err = windows.AssignProcessToJobObject(job, procHandle)
+	if err != nil {
+		windows.CloseHandle(job)
+
+		perr := cmd.Process.Kill()
+		if perr != nil {
+			return "", errs.Errorf("process job assignment failed: %s and process kill failed: %s", err, perr)
 		}
-	})
 
-	var rc uintptr
-	if rc, _, err = ntResumeProcess.Call(uintptr(processHandle)); int32(rc) < 0 {
-		log.Warningf("cannot resume process: %s", err)
-		return
+		return "", errs.Errorf("process job assignment failed: %s", err)
 	}
 
-	werr := cmd.Wait()
+	done := make(chan error, 1)
 
-	if !t.Stop() {
-		return "", fmt.Errorf("Timeout while executing a shell script.")
+	go jobDoneListener(done, cmd)
+	go timeoutListener(ctx, job)
+
+	err = <-done
+
+	// we need to check context error so we can inform the user if timeout was reached and Zabbix agent2
+	// terminated the command
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return "", fmt.Errorf("command execution failed: %s", ctx.Err())
 	}
 
-	// we need to check error after t.Stop so we can inform the user if timeout was reached and Zabbix agent2 terminated the command
-	if strict && werr != nil {
-		return "", fmt.Errorf("Command execution failed: %s", werr)
+	if strict && err != nil {
+		return "", fmt.Errorf("command execution failed: %s", err.Error())
 	}
 
 	if MaxExecuteOutputLenB <= len(b.String()) {
-		return "", fmt.Errorf("Command output exceeded limit of %d KB", MaxExecuteOutputLenB/1024)
+		return "", fmt.Errorf("command output exceeded limit of %d KB", MaxExecuteOutputLenB/1024)
 	}
 
 	return strings.TrimRight(b.String(), " \t\r\n"), nil
 }
 
-func ExecuteBackground(s string) error {
-	cmd := exec.Command("cmd")
+func (e *ZBXExec) executeBackground(s string) (err error) {
+	cmd := exec.Command(e.shellPath)
 	cmd.SysProcAttr = &windows.SysProcAttr{
-		CmdLine: fmt.Sprintf(`/C %s`, s),
+		CmdLine: fmt.Sprintf(`/C "%s"`, s),
 	}
 
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("Cannot execute command: %s", err)
+	if err = cmd.Start(); err != nil {
+		return errs.Wrapf(err, "cannot execute command (%s)", s)
 	}
 
-	go func() { _ = cmd.Wait() }()
+	go cmd.Wait()
 
 	return nil
 }
 
-func init() {
-	dll := syscall.MustLoadDLL("ntdll.dll")
-	defer dll.Release()
-	ntResumeProcess = dll.MustFindProc("NtResumeProcess")
+func jobDoneListener(done chan<- error, cmd *exec.Cmd) {
+	done <- cmd.Wait()
+}
+
+func timeoutListener(ctx context.Context, job windows.Handle) {
+	<-ctx.Done()
+
+	err := windows.CloseHandle(job)
+	if err != nil {
+		log.Debugf("failed to kill cmd processes %s", err)
+	}
+}
+
+func createWinJob() (windows.Handle, error) {
+	job, err := windows.CreateJobObject(nil, nil)
+	if err != nil {
+		return 0, errs.Errorf("failed to create win job: %s", err)
+	}
+
+	info := windows.JOBOBJECT_EXTENDED_LIMIT_INFORMATION{
+		BasicLimitInformation: windows.JOBOBJECT_BASIC_LIMIT_INFORMATION{
+			LimitFlags: windows.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+		},
+	}
+
+	if _, err := windows.SetInformationJobObject(
+		job,
+		windows.JobObjectExtendedLimitInformation,
+		uintptr(unsafe.Pointer(&info)),
+		uint32(unsafe.Sizeof(info))); err != nil {
+
+		windows.CloseHandle(job)
+
+		return 0, errs.Errorf("failed to populate win job: %s", err)
+	}
+
+	return job, nil
 }

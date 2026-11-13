@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -24,29 +19,23 @@
  */
 class CTimePeriodParser extends CParser {
 
-	private $options = [
+	private array $macro_parsers = [];
+
+	private array $period_parts = [];
+
+	private array $options = [
 		'usermacros' => false,
 		'lldmacros' => false
 	];
 
-	private $user_macro_parser;
-	private $lld_macro_parser;
-	private $lld_macro_function_parser;
-
 	public function __construct($options = []) {
-		if (array_key_exists('usermacros', $options)) {
-			$this->options['usermacros'] = $options['usermacros'];
-		}
-		if (array_key_exists('lldmacros', $options)) {
-			$this->options['lldmacros'] = $options['lldmacros'];
-		}
+		$this->options = $options + $this->options;
 
 		if ($this->options['usermacros']) {
-			$this->user_macro_parser = new CUserMacroParser();
+			array_push($this->macro_parsers, new CUserMacroParser, new CUserMacroFunctionParser);
 		}
 		if ($this->options['lldmacros']) {
-			$this->lld_macro_parser = new CLLDMacroParser();
-			$this->lld_macro_function_parser = new CLLDMacroFunctionParser();
+			array_push($this->macro_parsers, new CLLDMacroParser, new CLLDMacroFunctionParser);
 		}
 	}
 
@@ -59,20 +48,18 @@ class CTimePeriodParser extends CParser {
 	public function parse($source, $pos = 0) {
 		$this->length = 0;
 		$this->match = '';
+		$this->period_parts = [];
 
 		$p = $pos;
 
-		if ($this->options['usermacros'] && $this->user_macro_parser->parse($source, $p) != self::PARSE_FAIL) {
-			$p += $this->user_macro_parser->getLength();
+		foreach ($this->macro_parsers as $macro_parser) {
+			if ($macro_parser->parse($source, $p) != self::PARSE_FAIL) {
+				$p += $macro_parser->getLength();
+				break;
+			}
 		}
-		elseif ($this->options['lldmacros'] && $this->lld_macro_parser->parse($source, $p) != self::PARSE_FAIL) {
-			$p += $this->lld_macro_parser->getLength();
-		}
-		elseif ($this->options['lldmacros']
-				&& $this->lld_macro_function_parser->parse($source, $p) != self::PARSE_FAIL) {
-			$p += $this->lld_macro_function_parser->getLength();
-		}
-		elseif (!self::parseTimePeriod($source, $p)) {
+
+		if ($p == $pos && !$this->parseTimePeriod($source, $p)) {
 			return self::PARSE_FAIL;
 		}
 
@@ -90,16 +77,17 @@ class CTimePeriodParser extends CParser {
 	 *
 	 * @return bool
 	 */
-	private static function parseTimePeriod($source, &$pos) {
-		$pattern_wdays = '(?P<w_from>[1-7])(-(?P<w_till>[1-7]))?';
+	private function parseTimePeriod($source, &$pos) {
+		$pattern_wdays = '(?P<wd_from>[1-7])(-(?P<wd_till>[1-7]))?';
 		$pattern_hours = '(?P<h_from>[0-9]{1,2}):(?P<m_from>[0-9]{2})-(?P<h_till>[0-9]{1,2}):(?P<m_till>[0-9]{2})';
 
 		if (!preg_match('/^'.$pattern_wdays.','.$pattern_hours.'/', substr($source, $pos), $matches)) {
 			return false;
 		}
 
-		if (($matches['w_till'] !== '' && $matches['w_from'] > $matches['w_till'])
-				|| $matches['m_from'] > 59 || $matches['m_till'] > 59) {
+		$matches['wd_till'] = $matches['wd_till'] ?: $matches['wd_from'];
+
+		if ($matches['wd_from'] > $matches['wd_till'] || $matches['m_from'] > 59 || $matches['m_till'] > 59) {
 			return false;
 		}
 
@@ -110,8 +98,19 @@ class CTimePeriodParser extends CParser {
 			return false;
 		}
 
+		$this->period_parts = array_filter($matches, static fn($key) => !is_int($key), ARRAY_FILTER_USE_KEY);
+
 		$pos += strlen($matches[0]);
 
 		return true;
+	}
+
+	/**
+	 * Retrieve the time period parts.
+	 *
+	 * @return array
+	 */
+	public function getPeriodParts(): array {
+		return $this->period_parts;
 	}
 }

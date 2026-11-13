@@ -1,30 +1,156 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../include/CAPITest.php';
-require_once dirname(__FILE__).'/../include/helpers/CDataHelper.php';
+
+require_once __DIR__.'/traitItemTelemetryQueryTests.php';
+require_once __DIR__.'/../include/CAPITest.php';
+require_once __DIR__.'/../include/helpers/CDataHelper.php';
+require_once __DIR__.'/../include/helpers/CTestDataHelper.php';
 
 /**
  * @backup items
+ * @onBefore prepareTestData
  */
 class testItemPrototype extends CAPITest {
+
+	use traitItemTelemetryQueryTests;
+
+	/**
+	 * @dataProvider dataProviderItemPrototypeTelemetryQueryCreate
+	 * @dataProvider dataProviderTelemetryQueryCreate
+	 */
+	public function testHostItemPrototypeTelemetryQueryCreate(array $item, ?string $expected_error) {
+		static $i = 1;
+
+		$item += [
+			'hostid' => ':host:telemetry_query_host',
+			'ruleid' => ':lld_rule:host_lld_telemetry_query',
+			'name' => 'Telemetry query create '.$i,
+			'key_' => 'telemetry_query_host_create_'.$i.'[{#M}]',
+			'type' => ITEM_TYPE_TELEMETRY_QUERY,
+			'delay' => '1m',
+			'value_type' => ITEM_VALUE_TYPE_UINT64
+		];
+		$item['hostid'] = CTestDataHelper::getConvertedValueReference($item['hostid']);
+		$item['ruleid'] = CTestDataHelper::getConvertedValueReference($item['ruleid']);
+		$i++;
+
+		$this->call('itemprototype.create', $item, $expected_error);
+	}
+
+	/**
+	 * @dataProvider dataProviderItemPrototypeTelemetryQueryCreate
+	 * @dataProvider dataProviderTelemetryQueryCreate
+	 */
+	public function testTemplateItemPrototypeTelemetryQueryCreate(array $item, ?string $expected_error) {
+		static $i = 1;
+
+		$item += [
+			'hostid' => ':template:telemetry_query_template',
+			'ruleid' => ':lld_rule:template_lld_telemetry_query',
+			'name' => 'Telemetry query create '.$i,
+			'key_' => 'telemetry_query_template_create_'.$i.'[{#M}]',
+			'type' => ITEM_TYPE_TELEMETRY_QUERY,
+			'delay' => '1m',
+			'value_type' => ITEM_VALUE_TYPE_UINT64
+		];
+		$item['hostid'] = CTestDataHelper::getConvertedValueReference($item['hostid']);
+		$item['ruleid'] = CTestDataHelper::getConvertedValueReference($item['ruleid']);
+		$i++;
+
+		$this->call('itemprototype.create', $item, $expected_error);
+	}
+
+	/**
+	 * @dataProvider dataProviderItemPrototypeTelemetryQueryUpdate
+	 * @dataProvider dataProviderTelemetryQueryUpdate
+	 */
+	public function testHostItemPrototypeTelemetryQueryUpdate(array $item, ?string $expected_error) {
+		$item += [
+			'itemid' => ':item_prototype:host_item_prototype_telemetry_query[{#M}]'
+		];
+		$item['itemid'] = CTestDataHelper::getConvertedValueReference($item['itemid']);
+
+		$this->call('itemprototype.update', $item, $expected_error);
+	}
+
+	/**
+	 * @dataProvider dataProviderItemPrototypeTelemetryQueryUpdate
+	 * @dataProvider dataProviderTelemetryQueryUpdate
+	 */
+	public function testTemplateItemPrototypeTelemetryQueryUpdate(array $item, ?string $expected_error) {
+		$item += [
+			'itemid' => ':item_prototype:template_item_prototype_telemetry_query[{#M}]'
+		];
+		$item['itemid'] = CTestDataHelper::getConvertedValueReference($item['itemid']);
+
+		$this->call('itemprototype.update', $item, $expected_error);
+	}
+
+	/**
+	 * @dataProvider dataProviderItemDiscoveredTelemetryQueryUpdate
+	 */
+	public function testItemDiscoveredTelemetryQueryUpdate(array $item, ?string $expected_error) {
+		$item += [
+			'itemid' => ':discovered_item:host_discovered_telemetry_query[A]'
+		];
+		$item['itemid'] = CTestDataHelper::getConvertedValueReference($item['itemid']);
+
+		$this->call('item.update', $item, $expected_error);
+	}
+
+	public function testTemplateItemPrototypeTelemetryQueryUpdateConflictingWithInheritedItem(): void {
+		$template_itemid = CTestDataHelper::getConvertedValueReference(':item_prototype:template_item_prototype_telemetry_query[{#M}]');
+		$hostid = CTestDataHelper::getConvertedValueReference(':host:telemetry_query_host');
+
+		$this->call('itemprototype.update', [
+			'itemid' => $template_itemid,
+			'lookback_limit' => '10m',
+			'granularity' => '1m'
+		]);
+
+		['result' => $result] = $this->call('itemprototype.get', [
+			'output' => ['itemid'],
+			'hostids' => $hostid,
+			'filter' => ['key_' => 'template_item_prototype_telemetry_query[{#M}]'],
+			'inherited' => true
+		]);
+		$this->assertCount(1, $result);
+		$inherited_itemid = $result[0]['itemid'];
+
+		$this->call('itemprototype.update', [
+			'itemid' => $inherited_itemid,
+			'granularity' => '5m'
+		]);
+
+		$this->call('itemprototype.update', [
+			'itemid' => $template_itemid,
+			'lookback_limit' => '2m'
+		], 'Cannot update inherited item prototype with key "template_item_prototype_telemetry_query[{#M}]" on host "telemetry_query_host" because granularity cannot be greater than lookback limit.');
+
+		['result' => $result] = $this->call('itemprototype.get', [
+			'output' => ['lookback_limit', 'granularity'],
+			'itemids' => [$template_itemid, $inherited_itemid],
+			'preservekeys' => true
+		]);
+
+		$this->assertSame('10m', $result[$template_itemid]['lookback_limit']);
+		$this->assertSame('1m', $result[$template_itemid]['granularity']);
+		$this->assertSame('10m', $result[$inherited_itemid]['lookback_limit']);
+		$this->assertSame('5m', $result[$inherited_itemid]['granularity']);
+	}
 
 	public static function getItemPrototypeCreateData() {
 		$valid_item_types = [
@@ -43,62 +169,102 @@ class testItemPrototype extends CAPITest {
 			ITEM_TYPE_DEPENDENT => null,
 			ITEM_TYPE_HTTPAGENT => '50022',
 			ITEM_TYPE_SNMP => '50029',
-			ITEM_TYPE_SCRIPT => '50022'
+			ITEM_TYPE_SCRIPT => null,
+			ITEM_TYPE_BROWSER => null
 		];
 
 		$item_type_tests = [];
 		foreach ($valid_item_types as $type => $interfaceid) {
 			switch ($type) {
-				case ITEM_TYPE_IPMI:
+				case ITEM_TYPE_ZABBIX:
+				case ITEM_TYPE_SIMPLE:
+				case ITEM_TYPE_INTERNAL:
+				case ITEM_TYPE_ZABBIX_ACTIVE:
+				case ITEM_TYPE_EXTERNAL:
 					$params = [
-						'ipmi_sensor' => '1.2.3'
+						'delay' => '30s'
 					];
 					break;
 
-				case ITEM_TYPE_TRAPPER:
+				case ITEM_TYPE_DB_MONITOR:
 					$params = [
-						'delay' => '0'
+						'params' => 'SELECT * FROM table',
+						'delay' => '30s'
+					];
+					break;
+
+				case ITEM_TYPE_IPMI:
+					$params = [
+						'ipmi_sensor' => '1.2.3',
+						'delay' => '30s'
+					];
+					break;
+
+				case ITEM_TYPE_SSH:
+					$params = [
+						'username' => 'username',
+						'authtype' => ITEM_AUTHTYPE_PASSWORD,
+						'params' => 'return true;',
+						'delay' => '30s'
 					];
 					break;
 
 				case ITEM_TYPE_TELNET:
-				case ITEM_TYPE_SSH:
 					$params = [
 						'username' => 'username',
-						'authtype' => ITEM_AUTHTYPE_PASSWORD
+						'params' => 'return true;',
+						'delay' => '30s'
 					];
 					break;
 
-				case ITEM_TYPE_DEPENDENT:
+				case ITEM_TYPE_CALCULATED:
 					$params = [
-						'master_itemid' => '150151',
-						'delay' => '0'
+						'params' => '1+1',
+						'delay' => '30s'
 					];
 					break;
 
 				case ITEM_TYPE_JMX:
 					$params = [
 						'username' => 'username',
-						'password' => 'password'
+						'password' => 'password',
+						'delay' => '30s'
+					];
+					break;
+
+				case ITEM_TYPE_DEPENDENT:
+					$params = [
+						'master_itemid' => '150151'
 					];
 					break;
 
 				case ITEM_TYPE_HTTPAGENT:
 					$params = [
-						'url' => 'http://0.0.0.0'
+						'url' => 'http://0.0.0.0',
+						'delay' => '30s'
 					];
 					break;
 
 				case ITEM_TYPE_SNMP:
 					$params = [
-						'snmp_oid' => '1.2.3'
+						'snmp_oid' => '1.2.3',
+						'delay' => '30s'
 					];
 					break;
 
 				case ITEM_TYPE_SCRIPT:
 					$params = [
-						'params' => 'script',
-						'timeout' => '30s'
+						'params' => 'return JSON.encode({});',
+						'timeout' => '30s',
+						'delay' => '30s'
+					];
+					break;
+
+				case ITEM_TYPE_BROWSER:
+					$params = [
+						'params' => 'return JSON.encode({});',
+						'timeout' => '30s',
+						'delay' => '30s'
 					];
 					break;
 
@@ -116,16 +282,45 @@ class testItemPrototype extends CAPITest {
 					'hostid' => '50009',
 					'ruleid' => '400660',
 					'name' => 'Test item prototype of type '.$type,
-					'key_' => 'test_item_prototype_of_type_'.$type,
+					'key_' => 'test_item_prototype_of_type_'.$type.'[{#LLD_MACRO}]',
 					'value_type' => ITEM_VALUE_TYPE_UINT64,
-					'type' => (string) $type,
-					'delay' => '30s'
+					'type' => (string) $type
 				],
 				'expected_error' => null
 			];
 		}
 
-		return [
+		$interfaces_tests = [];
+		$optional = [ITEM_TYPE_SIMPLE, ITEM_TYPE_EXTERNAL, ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_HTTPAGENT];
+		$required = [ITEM_TYPE_SNMP, ITEM_TYPE_SNMPTRAP, ITEM_TYPE_IPMI, ITEM_TYPE_ZABBIX, ITEM_TYPE_JMX];
+
+		foreach ($item_type_tests as $item_type_test) {
+			if (in_array($item_type_test['request_data']['type'], $optional)) {
+				unset($item_type_test['request_data']['interfaceid']);
+
+				$request_data = [
+					'name' => $item_type_test['request_data']['name'].' missing',
+					'key_' => substr($item_type_test['request_data']['key_'], 0, -1).', missing]'
+				] + $item_type_test['request_data'];
+
+				$interfaces_tests[] = ['request_data' => $request_data] + $item_type_test;
+
+				$request_data = [
+					'name' => $item_type_test['request_data']['name'].' zero',
+					'key_' => substr($item_type_test['request_data']['key_'], 0, -1).', zero]',
+					'interfaceid' => '0'
+				] + $item_type_test['request_data'];
+
+				$interfaces_tests[] = ['request_data' => $request_data] + $item_type_test;
+			}
+			else if (in_array($item_type_test['request_data']['type'], $required)) {
+				unset($item_type_test['request_data']['interfaceid']);
+				$item_type_test['expected_error'] = 'Invalid parameter "/1": the parameter "interfaceid" is missing.';
+				$interfaces_tests[] = $item_type_test;
+			}
+		}
+
+		return array_merge([
 			[
 				'request_data' => [
 					'hostid' => '50009',
@@ -141,7 +336,7 @@ class testItemPrototype extends CAPITest {
 					ITEM_TYPE_ZABBIX, ITEM_TYPE_TRAPPER, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL, ITEM_TYPE_ZABBIX_ACTIVE,
 					ITEM_TYPE_EXTERNAL, ITEM_TYPE_DB_MONITOR, ITEM_TYPE_IPMI, ITEM_TYPE_SSH, ITEM_TYPE_TELNET,
 					ITEM_TYPE_CALCULATED, ITEM_TYPE_JMX, ITEM_TYPE_SNMPTRAP, ITEM_TYPE_DEPENDENT, ITEM_TYPE_HTTPAGENT,
-					ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT
+					ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER, ITEM_TYPE_TELEMETRY_QUERY
 				]).'.'
 			],
 			// Test update interval for mqtt key of the Agent item type.
@@ -167,7 +362,7 @@ class testItemPrototype extends CAPITest {
 					'value_type' => ITEM_VALUE_TYPE_UINT64,
 					'type' => ITEM_TYPE_ZABBIX
 				],
-				'expected_error' => 'Incorrect arguments passed to function.'
+				'expected_error' => 'Invalid parameter "/1": the parameter "ruleid" is missing.'
 			],
 			[
 				'request_data' => [
@@ -180,7 +375,7 @@ class testItemPrototype extends CAPITest {
 					'type' => ITEM_TYPE_ZABBIX,
 					'delay' => '0'
 				],
-				'expected_error' => 'Item will not be refreshed. Specified update interval requires having at least one either flexible or scheduling interval.'
+				'expected_error' => 'Invalid parameter "/1/delay": cannot be equal to zero without custom intervals.'
 			],
 			// Test update interval for mqtt key of the Active agent type.
 			[
@@ -189,7 +384,6 @@ class testItemPrototype extends CAPITest {
 					'ruleid' => '400660',
 					'name' => 'Test mqtt key for active agent',
 					'key_' => 'mqtt.get[{#3}]',
-					'interfaceid' => '50022',
 					'value_type' => ITEM_VALUE_TYPE_UINT64,
 					'type' => ITEM_TYPE_ZABBIX_ACTIVE
 				],
@@ -201,7 +395,6 @@ class testItemPrototype extends CAPITest {
 					'ruleid' => '400660',
 					'name' => 'Test mqtt key with 0 delay for active agent',
 					'key_' => 'mqtt.get[{#4}]',
-					'interfaceid' => '50022',
 					'value_type' => ITEM_VALUE_TYPE_UINT64,
 					'type' => ITEM_TYPE_ZABBIX_ACTIVE,
 					'delay' => '0'
@@ -214,14 +407,97 @@ class testItemPrototype extends CAPITest {
 					'ruleid' => '400660',
 					'name' => 'Test mqtt with wrong key and 0 delay',
 					'key_' => 'mqt.get[{#5}]',
-					'interfaceid' => '50022',
 					'value_type' => ITEM_VALUE_TYPE_UINT64,
 					'type' => ITEM_TYPE_ZABBIX_ACTIVE,
 					'delay' => '0'
 				],
-				'expected_error' => 'Item will not be refreshed. Specified update interval requires having at least one either flexible or scheduling interval.'
+				'expected_error' => 'Invalid parameter "/1/delay": cannot be equal to zero without custom intervals.'
+			],
+			//Test trapper items
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'Trapper item 2',
+					'key_' => 'trapper_item[{#2}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_TRAPPER,
+					'trapper_hosts' => ''
+				],
+				'expected_error' => null
+			],
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'Trapper item 3',
+					'key_' => 'trapper_item[{#3}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_TRAPPER,
+					'trapper_hosts' => 'localhost'
+				],
+				'expected_error' => null
+			],
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'Trapper item with empty trapper_hosts',
+					'key_' => 'httpagent_item[{#1}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_HTTPAGENT,
+					'allow_traps' => HTTPCHECK_ALLOW_TRAPS_ON,
+					'trapper_hosts' => 'localhost',
+					'delay' => '30s',
+					'url' => '192.168.0.1'
+				],
+				'expected_error' => null
+			],
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'HTTP agent without trapper_hosts',
+					'key_' => 'httpagent_item[{#2}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_HTTPAGENT,
+					'allow_traps' => HTTPCHECK_ALLOW_TRAPS_ON,
+					'delay' => '30s',
+					'url' => '192.168.0.1'
+				],
+				'expected_error' => null
+			],
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'HTTP agent with empty trapper_hosts',
+					'key_' => 'httpagent_item[{#3}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_HTTPAGENT,
+					'allow_traps' => HTTPCHECK_ALLOW_TRAPS_ON,
+					'trapper_hosts' => '',
+					'delay' => '30s',
+					'url' => '192.168.0.1'
+				],
+				'expected_error' => null
+			],
+			[
+				'request_data' => [
+					'hostid' => '50009',
+					'ruleid' => '400660',
+					'name' => 'HTTP agent with localhost trapper_hosts',
+					'key_' => 'httpagent_item[{#4}]',
+					'value_type' => ITEM_VALUE_TYPE_UINT64,
+					'type' => ITEM_TYPE_HTTPAGENT,
+					'allow_traps' => HTTPCHECK_ALLOW_TRAPS_ON,
+					'trapper_hosts' => 'localhost',
+					'delay' => '30s',
+					'url' => '192.168.0.1'
+				],
+				'expected_error' => null
 			]
-		] + $item_type_tests;
+		], $item_type_tests, $interfaces_tests);
 	}
 
 	/**
@@ -231,17 +507,37 @@ class testItemPrototype extends CAPITest {
 		$result = $this->call('itemprototype.create', $request_data, $expected_error);
 
 		if ($expected_error === null) {
-		if ($request_data['type'] === ITEM_TYPE_ZABBIX_ACTIVE && substr($request_data['key_'], 0, 8) === 'mqtt.get') {
-			$request_data['delay'] = CTestArrayHelper::get($request_data, 'delay', '0');
-		}
+			if ($request_data['type'] === ITEM_TYPE_ZABBIX_ACTIVE && substr($request_data['key_'], 0, 8) === 'mqtt.get') {
+				$request_data['delay'] = CTestArrayHelper::get($request_data, 'delay', '0');
+			}
+
+			if ($request_data['type'] === ITEM_TYPE_TRAPPER || $request_data['type'] === ITEM_TYPE_HTTPAGENT
+				&& array_key_exists('allow_traps', $request_data)
+				&& $request_data['allow_traps'] == HTTPCHECK_ALLOW_TRAPS_ON) {
+				if (!array_key_exists('trapper_hosts', $request_data)) {
+					$request_data['trapper_hosts'] = '{$TRAPPER.ALLOWED_HOSTS}';
+				}
+			}
+
+			if (!array_key_exists('delay', $request_data)) {
+				$request_data['delay'] = 0;
+			}
 
 			foreach ($result['result']['itemids'] as $id) {
-				$db_item = CDBHelper::getRow('SELECT hostid, name, key_, type, delay FROM items WHERE itemid='.zbx_dbstr($id));
+				$db_item = CDBHelper::getRow('SELECT hostid, name, key_, type, delay, trapper_hosts FROM items WHERE itemid='.zbx_dbstr($id));
 
 				foreach (['hostid', 'name', 'key_', 'type', 'delay'] as $field) {
 					$this->assertSame($db_item[$field], strval($request_data[$field]));
 				}
+
+				if (array_key_exists('trapper_hosts', $request_data)) {
+					$this->assertSame($db_item['trapper_hosts'], strval($request_data['trapper_hosts']));
+				}
 			}
 		}
+	}
+
+	public function prepareTestData() {
+		self::initItemPrototypeTestsData();
 	}
 }

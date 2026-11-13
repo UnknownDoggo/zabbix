@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -47,7 +42,7 @@ class CHttpTest extends CApiService {
 
 		$sqlParts = [
 			'select'	=> ['httptests' => 'ht.httptestid'],
-			'from'		=> ['httptest' => 'httptest ht'],
+			'from'		=> 'httptest ht',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -64,8 +59,6 @@ class CHttpTest extends CApiService {
 			'templated'      => null,
 			'monitored'      => null,
 			'nopermissions'  => null,
-			'evaltype'		=> TAG_EVAL_TYPE_AND_OR,
-			'tags'			=> null,
 			// filter
 			'filter'         => null,
 			'search'         => null,
@@ -78,7 +71,6 @@ class CHttpTest extends CApiService {
 			'expandStepName' => null,
 			'selectHosts'    => null,
 			'selectSteps'    => null,
-			'selectTags'	 => null,
 			'countOutput'    => false,
 			'groupCount'     => false,
 			'preservekeys'   => false,
@@ -88,22 +80,21 @@ class CHttpTest extends CApiService {
 		];
 		$options = zbx_array_merge($defOptions, $options);
 
+		self::validateGet($options);
+
 		// editable + PERMISSION CHECK
 		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
-			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
-			$userGroups = getUserGroupsByUserId(self::$userData['userid']);
+			if (self::$userData['ugsetid'] == 0) {
+				return $options['countOutput'] ? '0' : [];
+			}
 
-			$sqlParts['where'][] = 'EXISTS ('.
-					'SELECT NULL'.
-					' FROM hosts_groups hgg'.
-						' JOIN rights r'.
-							' ON r.id=hgg.groupid'.
-								' AND '.dbConditionInt('r.groupid', $userGroups).
-					' WHERE ht.hostid=hgg.hostid'.
-					' GROUP BY hgg.hostid'.
-					' HAVING MIN(r.permission)>'.PERM_DENY.
-						' AND MAX(r.permission)>='.zbx_dbstr($permission).
-					')';
+			$sqlParts['join']['hh'] = ['table' => 'host_hgset', 'using' => 'hostid'];
+			$sqlParts['join']['p'] = ['left_table' => 'hh', 'table' => 'permission', 'using' => 'hgsetid'];
+			$sqlParts['where'][] = 'p.ugsetid='.self::$userData['ugsetid'];
+
+			if ($options['editable']) {
+				$sqlParts['where'][] = 'p.permission='.PERM_READ_WRITE;
+			}
 		}
 
 		// httptestids
@@ -137,19 +128,35 @@ class CHttpTest extends CApiService {
 		}
 
 		// tags
-		if ($options['tags'] !== null && $options['tags']) {
-			$sqlParts['where'][] = CApiTagHelper::addWhereCondition($options['tags'], $options['evaltype'], 'ht',
-				'httptest_tag', 'httptestid'
-			);
+		if ($options['tags'] !== null) {
+			if ($options['inheritedTags']) {
+				$positive_tag_operators = [TAG_OPERATOR_LIKE, TAG_OPERATOR_EQUAL, TAG_OPERATOR_EXISTS];
+
+				if (array_intersect(array_column($options['tags'], 'operator'), $positive_tag_operators)) {
+					$sqlParts['join']['hti'] = ['table' => 'httptestitem', 'using' => 'httptestid'];
+					$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'],
+						['ht', 'hti'], 'httptest_tag', 'httptestid', true
+					);
+				}
+				else {
+					$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'],
+						['ht'], 'httptest_tag', 'httptestid', true
+					);
+				}
+			}
+			else {
+				$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'], ['ht'],
+					'httptest_tag', 'httptestid'
+				);
+			}
 		}
 
 		// groupids
 		if (!is_null($options['groupids'])) {
 			zbx_value2array($options['groupids']);
 
-			$sqlParts['from']['hosts_groups'] = 'hosts_groups hg';
+			$sqlParts['join']['hg'] = ['table' => 'hosts_groups', 'using' => 'hostid'];
 			$sqlParts['where'][] = dbConditionInt('hg.groupid', $options['groupids']);
-			$sqlParts['where'][] = 'hg.hostid=ht.hostid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['hg'] = 'hg.groupid';
@@ -163,8 +170,7 @@ class CHttpTest extends CApiService {
 
 		// templated
 		if (isset($options['templated'])) {
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where']['ha'] = 'h.hostid=ht.hostid';
+			$sqlParts['join']['h'] = ['table' => 'hosts', 'using' => 'hostid'];
 			if ($options['templated']) {
 				$sqlParts['where'][] = 'h.status='.HOST_STATUS_TEMPLATE;
 			}
@@ -175,8 +181,7 @@ class CHttpTest extends CApiService {
 
 		// monitored
 		if (!is_null($options['monitored'])) {
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where']['hht'] = 'h.hostid=ht.hostid';
+			$sqlParts['join']['h'] = ['table' => 'hosts', 'using' => 'hostid'];
 
 			if ($options['monitored']) {
 				$sqlParts['where'][] = 'h.status='.HOST_STATUS_MONITORED;
@@ -245,14 +250,93 @@ class CHttpTest extends CApiService {
 			}
 
 			$result = $this->unsetExtraFields($result, ['hostid'], $options['output']);
-		}
 
-		// removing keys (hash -> array)
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
 		return $result;
+	}
+
+	private static function validateGet(array &$options): void {
+		$api_input_rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+			// Filters.
+			'evaltype' =>				['type' => API_INT32, 'in' => implode(',', [TAG_EVAL_TYPE_AND_OR, TAG_EVAL_TYPE_OR]), 'default' => TAG_EVAL_TYPE_AND_OR],
+			'tags' =>					['type' => API_OBJECTS, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'default' => null, 'fields' => [
+				'tag' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED],
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [TAG_OPERATOR_LIKE, TAG_OPERATOR_EQUAL, TAG_OPERATOR_NOT_LIKE, TAG_OPERATOR_NOT_EQUAL, TAG_OPERATOR_EXISTS, TAG_OPERATOR_NOT_EXISTS]), 'default' => TAG_OPERATOR_LIKE],
+				'value' =>					['type' => API_STRING_UTF8, 'default' => '']
+			]],
+			'inheritedTags' =>			['type' => API_BOOLEAN, 'default' => false],
+			// Output.
+			'selectTags' =>				['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', ['tag', 'value']), 'default' => null],
+			'selectInheritedTags' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', ['tag', 'value', 'object', 'objectid']), 'default' => null]
+		]];
+
+		if (!CApiInputValidator::validate($api_input_rules, $options, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
+	}
+
+	private static function addRelatedTags(array $options, array &$httptests): void {
+		if ($options['selectTags'] === null) {
+			return;
+		}
+
+		foreach ($httptests as &$httptest) {
+			$httptest['tags'] = [];
+		}
+		unset($httptest);
+
+		$sql_options = [
+			'output' => array_merge(['httptesttagid', 'httptestid'], $options['selectTags']),
+			'filter' => ['httptestid' => array_keys($httptests)]
+		];
+		$resource = DBselect(DB::makeSql('httptest_tag', $sql_options));
+
+		while ($row = DBfetch($resource)) {
+			$httptests[$row['httptestid']]['tags'][] =
+				array_diff_key($row, array_flip(['httptesttagid', 'httptestid']));
+		}
+	}
+
+	private static function addRelatedInheritedTags(array $options, array &$httptests): void {
+		if ($options['selectInheritedTags'] === null) {
+			return;
+		}
+
+		foreach ($httptests as &$httptest) {
+			$httptest['inheritedTags'] = [];
+		}
+		unset($httptest);
+
+		$output = ['hi.httptestid'];
+
+		foreach ($options['selectInheritedTags'] as $field) {
+			$output[] = match ($field) {
+				'tag', 'value' => 'ht.'.$field,
+				'object' =>
+					'CASE WHEN h.status='.HOST_STATUS_TEMPLATE.
+					' THEN '.ZBX_TAG_OBJECT_TEMPLATE.
+					' ELSE '.ZBX_TAG_OBJECT_HOST.
+					' END AS object',
+				'objectid' => 'itc.link_hostid AS objectid'
+			};
+		}
+
+		$resource = DBselect(
+			'SELECT DISTINCT '.implode(',', $output).
+			' FROM httptestitem hi'.
+			' JOIN item_template_cache itc ON hi.itemid=itc.itemid'.
+			' JOIN host_tag ht ON itc.link_hostid=ht.hostid'.
+			(in_array('object', $options['selectInheritedTags']) ? ' JOIN hosts h ON itc.link_hostid=h.hostid' : '').
+			' WHERE '.dbConditionId('hi.httptestid', array_keys($httptests))
+		);
+
+		while ($row = DBfetch($resource)) {
+			$httptests[$row['httptestid']]['inheritedTags'][] = array_diff_key($row, array_flip(['httptestid']));
+		}
 	}
 
 	/**
@@ -280,9 +364,9 @@ class CHttpTest extends CApiService {
 	 * @throws APIException if the input is invalid.
 	 */
 	protected function validateCreate(array &$httptests): void {
-		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['uuid'], ['hostid', 'name']], 'fields' => [
+		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['hostid', 'name']], 'fields' => [
 			'hostid' =>				['type' => API_ID, 'flags' => API_REQUIRED],
-			'uuid' =>				['type' => API_UUID],
+			'uuid' =>				['type' => API_ANY],
 			'name' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest', 'name')],
 			'delay' =>				['type' => API_TIME_UNIT, 'flags' => API_NOT_EMPTY | API_ALLOW_USER_MACRO, 'in' => '1:'.SEC_PER_DAY],
 			'retries' =>			['type' => API_INT32, 'in' => '1:10'],
@@ -294,14 +378,14 @@ class CHttpTest extends CApiService {
 			]],
 			'headers' =>			['type' => API_OBJECTS, 'fields' => [
 				'name' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest_field', 'name')],
-				'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest_field', 'value')]
+				'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED, 'length' => DB::getFieldLength('httptest_field', 'value')]
 			]],
 			'status' =>				['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STATUS_ACTIVE, HTTPTEST_STATUS_DISABLED])],
-			'authentication' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_AUTH_NONE, HTTPTEST_AUTH_BASIC, HTTPTEST_AUTH_NTLM, HTTPTEST_AUTH_KERBEROS, HTTPTEST_AUTH_DIGEST])],
+			'authentication' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_AUTH_NONE, ZBX_HTTP_AUTH_BASIC, ZBX_HTTP_AUTH_NTLM, ZBX_HTTP_AUTH_KERBEROS, ZBX_HTTP_AUTH_DIGEST])],
 			'http_user' =>			['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'http_user')],
 			'http_password' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'http_password')],
-			'verify_peer' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_VERIFY_PEER_OFF, HTTPTEST_VERIFY_PEER_ON])],
-			'verify_host' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_VERIFY_HOST_OFF, HTTPTEST_VERIFY_HOST_ON])],
+			'verify_peer' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_VERIFY_PEER_OFF, ZBX_HTTP_VERIFY_PEER_ON])],
+			'verify_host' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_VERIFY_HOST_OFF, ZBX_HTTP_VERIFY_HOST_ON])],
 			'ssl_cert_file' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_cert_file')],
 			'ssl_key_file' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_key_file')],
 			'ssl_key_password' =>	['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_key_password')],
@@ -320,7 +404,7 @@ class CHttpTest extends CApiService {
 				]],
 				'headers' =>			['type' => API_OBJECTS, 'fields' => [
 					'name' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httpstep_field', 'name')],
-					'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httpstep_field', 'value')]
+					'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED, 'length' => DB::getFieldLength('httpstep_field', 'value')]
 				]],
 				'follow_redirects' =>	['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STEP_FOLLOW_REDIRECTS_OFF, HTTPTEST_STEP_FOLLOW_REDIRECTS_ON])],
 				'retrieve_mode' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STEP_RETRIEVE_MODE_CONTENT, HTTPTEST_STEP_RETRIEVE_MODE_HEADERS, HTTPTEST_STEP_RETRIEVE_MODE_BOTH])],
@@ -344,8 +428,14 @@ class CHttpTest extends CApiService {
 			$names_by_hostid[$httptest['hostid']][] = $httptest['name'];
 		}
 
-		$this->checkAndAddUuid($httptests);
-		$this->checkHostPermissions(array_keys($names_by_hostid));
+		$this->checkHostsAndTemplates($httptests, $db_hosts, $db_templates);
+		self::addHostStatus($httptests, $db_hosts, $db_templates);
+
+		self::validateUuid($httptests, $db_hosts + $db_templates);
+
+		self::addUuid($httptests, $db_templates);
+
+		self::checkUuidDuplicates($httptests);
 		$this->checkDuplicates($names_by_hostid);
 		$this->validateAuthParameters($httptests, __FUNCTION__);
 		$this->validateSslParameters($httptests, __FUNCTION__);
@@ -353,51 +443,96 @@ class CHttpTest extends CApiService {
 	}
 
 	/**
-	 * Check that only httptests on templates have UUID. Add UUID to all httptests on templates, if it does not exists.
-	 *
-	 * @param array $httptests_to_create
+	 * @param array $httptests
+	 * @param array $db_hosts
 	 *
 	 * @throws APIException
 	 */
-	protected function checkAndAddUuid(array &$httptests_to_create): void {
-		$db_templateids = API::Template()->get([
-			'output' => [],
-			'templateids' => array_column($httptests_to_create, 'hostid'),
-			'preservekeys' => true
-		]);
+	private static function validateUuid(array $httptests, array $db_hosts): void {
+		foreach ($httptests as &$httptest) {
+			$httptest['host_status'] = array_key_exists('status', $db_hosts[$httptest['hostid']])
+				? $db_hosts[$httptest['hostid']]['status']
+				: HOST_STATUS_TEMPLATE;
+		}
+		unset($httptest);
 
-		foreach ($httptests_to_create as $index => &$httptest) {
-			if (!array_key_exists($httptest['hostid'], $db_templateids) && array_key_exists('uuid', $httptest)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS,
-					_s('Invalid parameter "%1$s": %2$s.', '/' . ($index + 1), _s('unexpected parameter "%1$s"', 'uuid'))
-				);
-			}
+		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_ALLOW_UNEXPECTED, 'uniq' => [['uuid']], 'fields' => [
+			'host_status' =>	['type' => API_ANY],
+			'uuid' =>			['type' => API_MULTIPLE, 'rules' => [
+									['if' => ['field' => 'host_status', 'in' => HOST_STATUS_TEMPLATE], 'type' => API_UUID],
+									['else' => true, 'type' => API_STRING_UTF8, 'in' => DB::getDefault('httptest', 'uuid'), 'unset' => true]
+			]]
+		]];
 
-			if (array_key_exists($httptest['hostid'], $db_templateids) && !array_key_exists('uuid', $httptest)) {
+		if (!CApiInputValidator::validate($api_input_rules, $httptests, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
+	}
+
+	/**
+	 * Add the UUID to those of the given web scenarios that belong to a template and don't have the 'uuid' parameter
+	 * set.
+	 *
+	 * @param array $httptests
+	 * @param array $db_templates
+	 */
+	private static function addUuid(array &$httptests, array $db_templates): void {
+		foreach ($httptests as &$httptest) {
+			if (array_key_exists($httptest['hostid'], $db_templates) && !array_key_exists('uuid', $httptest)) {
 				$httptest['uuid'] = generateUuidV4();
 			}
 		}
 		unset($httptest);
+	}
 
-		$db_uuid = DB::select('httptest', [
+	/**
+	 * Verify web scenario UUIDs are not repeated.
+	 *
+	 * @param array      $httptests
+	 * @param array|null $db_httptests
+	 *
+	 * @throws APIException
+	 */
+	private static function checkUuidDuplicates(array $httptests, ?array $db_httptests = null): void {
+		$httptest_indexes = [];
+
+		foreach ($httptests as $i => $httptest) {
+			if (!array_key_exists('uuid', $httptest) || $httptest['uuid'] === '') {
+				continue;
+			}
+
+			if ($db_httptests === null || $httptest['uuid'] !== $db_httptests[$httptest['httptestid']]['uuid']) {
+				$httptest_indexes[$httptest['uuid']] = $i;
+			}
+		}
+
+		if (!$httptest_indexes) {
+			return;
+		}
+
+		$duplicates = DB::select('httptest', [
 			'output' => ['uuid'],
-			'filter' => ['uuid' => array_column($httptests_to_create, 'uuid')],
+			'filter' => [
+				'uuid' => array_keys($httptest_indexes)
+			],
 			'limit' => 1
 		]);
 
-		if ($db_uuid) {
+		if ($duplicates) {
 			self::exception(ZBX_API_ERROR_PARAMETERS,
-				_s('Entry with UUID "%1$s" already exists.', $db_uuid[0]['uuid'])
+				_s('Invalid parameter "%1$s": %2$s.', '/'.($httptest_indexes[$duplicates[0]['uuid']] + 1),
+					_('web scenario with the same UUID already exists')
+				)
 			);
 		}
 	}
 
 	/**
-	 * @param $httptests
+	 * @param array $httptests
 	 *
 	 * @return array
 	 */
-	public function update($httptests) {
+	public function update(array $httptests) {
 		$this->validateUpdate($httptests, $db_httptests);
 
 		Manager::HttpTest()->persist($httptests);
@@ -418,8 +553,9 @@ class CHttpTest extends CApiService {
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	protected function validateUpdate(array &$httptests, array &$db_httptests = null) {
+	protected function validateUpdate(array &$httptests, ?array &$db_httptests = null) {
 		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['httptestid']], 'fields' => [
+			'uuid' => 				['type' => API_ANY],
 			'httptestid' =>			['type' => API_ID, 'flags' => API_REQUIRED],
 			'name' =>				['type' => API_STRING_UTF8, 'flags' => API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest', 'name')],
 			'delay' =>				['type' => API_TIME_UNIT, 'flags' => API_NOT_EMPTY | API_ALLOW_USER_MACRO, 'in' => '1:'.SEC_PER_DAY],
@@ -432,14 +568,14 @@ class CHttpTest extends CApiService {
 			]],
 			'headers' =>			['type' => API_OBJECTS, 'fields' => [
 				'name' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest_field', 'name')],
-				'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httptest_field', 'value')]
+				'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED, 'length' => DB::getFieldLength('httptest_field', 'value')]
 			]],
 			'status' =>				['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STATUS_ACTIVE, HTTPTEST_STATUS_DISABLED])],
-			'authentication' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_AUTH_NONE, HTTPTEST_AUTH_BASIC, HTTPTEST_AUTH_NTLM, HTTPTEST_AUTH_KERBEROS, HTTPTEST_AUTH_DIGEST])],
+			'authentication' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_AUTH_NONE, ZBX_HTTP_AUTH_BASIC, ZBX_HTTP_AUTH_NTLM, ZBX_HTTP_AUTH_KERBEROS, ZBX_HTTP_AUTH_DIGEST])],
 			'http_user' =>			['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'http_user')],
 			'http_password' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'http_password')],
-			'verify_peer' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_VERIFY_PEER_OFF, HTTPTEST_VERIFY_PEER_ON])],
-			'verify_host' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_VERIFY_HOST_OFF, HTTPTEST_VERIFY_HOST_ON])],
+			'verify_peer' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_VERIFY_PEER_OFF, ZBX_HTTP_VERIFY_PEER_ON])],
+			'verify_host' =>		['type' => API_INT32, 'in' => implode(',', [ZBX_HTTP_VERIFY_HOST_OFF, ZBX_HTTP_VERIFY_HOST_ON])],
 			'ssl_cert_file' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_cert_file')],
 			'ssl_key_file' =>		['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_key_file')],
 			'ssl_key_password' =>	['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest', 'ssl_key_password')],
@@ -459,7 +595,7 @@ class CHttpTest extends CApiService {
 				]],
 				'headers' =>			['type' => API_OBJECTS, 'fields' => [
 					'name' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httpstep_field', 'name')],
-					'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('httpstep_field', 'value')]
+					'value' =>				['type' => API_STRING_UTF8, 'flags' => API_REQUIRED, 'length' => DB::getFieldLength('httpstep_field', 'value')]
 				]],
 				'follow_redirects' =>	['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STEP_FOLLOW_REDIRECTS_OFF, HTTPTEST_STEP_FOLLOW_REDIRECTS_ON])],
 				'retrieve_mode' =>		['type' => API_INT32, 'in' => implode(',', [HTTPTEST_STEP_RETRIEVE_MODE_CONTENT, HTTPTEST_STEP_RETRIEVE_MODE_HEADERS, HTTPTEST_STEP_RETRIEVE_MODE_BOTH])],
@@ -472,28 +608,36 @@ class CHttpTest extends CApiService {
 				'value' =>				['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('httptest_tag', 'value'), 'default' => DB::getDefault('httptest_tag', 'value')]
 			]]
 		]];
+
 		if (!CApiInputValidator::validate($api_input_rules, $httptests, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
 
 		// permissions
 		$db_httptests = $this->get([
-			'output' => ['httptestid', 'hostid', 'name', 'delay', 'retries', 'agent', 'http_proxy',
+			'output' => ['uuid', 'httptestid', 'hostid', 'name', 'delay', 'retries', 'agent', 'http_proxy',
 				'status', 'authentication', 'http_user', 'http_password', 'verify_peer', 'verify_host',
 				'ssl_cert_file', 'ssl_key_file', 'ssl_key_password', 'templateid'
 			],
 			'selectSteps' => ['httpstepid', 'name', 'no', 'url', 'timeout', 'posts', 'required',
 				'status_codes', 'follow_redirects', 'retrieve_mode', 'post_type'
 			],
+			'selectHosts' => ['status'],
 			'httptestids' => zbx_objectValues($httptests, 'httptestid'),
 			'editable' => true,
 			'preservekeys' => true
 		]);
 
+		$db_hosts = [];
+
 		foreach ($db_httptests as &$db_httptest) {
 			$db_httptest['headers'] = [];
 			$db_httptest['variables'] = [];
 			$db_httptest['steps'] = zbx_toHash($db_httptest['steps'], 'httpstepid');
+
+			$db_hosts[$db_httptest['hostid']] = $db_httptest['hosts'][0]['status'] == HOST_STATUS_TEMPLATE
+				? []
+				: $db_httptest['hosts'][0];
 		}
 		unset($db_httptest);
 
@@ -529,7 +673,7 @@ class CHttpTest extends CApiService {
 			$db_httptest = $db_httptests[$httptest['httptestid']];
 
 			if (array_key_exists('steps', $httptest)) {
-				// unexpected patameters for templated web scenario steps
+				// unexpected parameters for templated web scenario steps
 				if ($db_httptest['templateid'] != 0) {
 					foreach ($httptest['steps'] as $httpstep) {
 						foreach (['name', 'no'] as $field_name) {
@@ -561,6 +705,10 @@ class CHttpTest extends CApiService {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
 
+		self::validateUuid($httptests, $db_hosts);
+
+		self::checkUuidDuplicates($httptests, $db_httptests);
+
 		// validation
 		if ($names_by_hostid) {
 			$this->checkDuplicates($names_by_hostid);
@@ -573,17 +721,25 @@ class CHttpTest extends CApiService {
 	}
 
 	/**
-	 * Delete web scenario.
-	 *
 	 * @param array $httptestids
-	 * @param bool  $nopermissions
 	 *
 	 * @return array
 	 */
-	public function delete(array $httptestids, $nopermissions = false) {
-		// TODO: remove $nopermissions hack
+	public function delete(array $httptestids) {
+		$this->validateDelete($httptestids, $db_httptests);
 
+		self::deleteForce($db_httptests);
+
+		return ['httptestids' => $httptestids];
+	}
+
+	/**
+	 * @param array      $httptestids
+	 * @param array|null $db_httptests
+	 */
+	private function validateDelete(array $httptestids, ?array &$db_httptests): void {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
+
 		if (!CApiInputValidator::validate($api_input_rules, $httptestids, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
@@ -595,101 +751,174 @@ class CHttpTest extends CApiService {
 			'preservekeys' => true
 		]);
 
-		if (!$nopermissions) {
-			foreach ($httptestids as $httptestid) {
-				if (!array_key_exists($httptestid, $db_httptests)) {
-					self::exception(ZBX_API_ERROR_PERMISSIONS,
-						_('No permissions to referred object or it does not exist!')
-					);
-				}
-
-				$db_httptest = $db_httptests[$httptestid];
-
-				if ($db_httptest['templateid'] != 0) {
-					self::exception(ZBX_API_ERROR_PARAMETERS,
-						_s('Cannot delete templated web scenario "%1$s".', $db_httptest['name'])
-					);
-				}
-			}
+		if (count($db_httptests) != count($httptestids)) {
+			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
 
-		$parent_httptestids = $httptestids;
-		$child_httptestids = [];
-		do {
-			$parent_httptestids = array_keys(DB::select('httptest', [
-				'output' => [],
-				'filter' => ['templateid' => $parent_httptestids],
-				'preservekeys' => true
-			]));
-
-			$child_httptestids = array_merge($child_httptestids, $parent_httptestids);
-		}
-		while ($parent_httptestids);
-
-		$del_httptestids = array_merge($httptestids, $child_httptestids);
-		$del_itemids = [];
-
-		$db_httptestitems = DBselect(
-			'SELECT hti.itemid'.
-			' FROM httptestitem hti'.
-			' WHERE '.dbConditionInt('hti.httptestid', $del_httptestids)
-		);
-		while ($db_httptestitem = DBfetch($db_httptestitems)) {
-			$del_itemids[] = $db_httptestitem['itemid'];
-		}
-
-		$db_httpstepitems = DBselect(
-			'SELECT hsi.itemid'.
-			' FROM httpstepitem hsi,httpstep hs'.
-			' WHERE hsi.httpstepid=hs.httpstepid'.
-				' AND '.dbConditionInt('hs.httptestid', $del_httptestids)
-		);
-		while ($db_httpstepitem = DBfetch($db_httpstepitems)) {
-			$del_itemids[] = $db_httpstepitem['itemid'];
-		}
-
-		if ($del_itemids) {
-			CItemManager::delete($del_itemids);
-		}
-
-		DB::delete('httptest', ['httptestid' => $del_httptestids]);
-
-		$this->addAuditBulk(CAudit::ACTION_DELETE, CAudit::RESOURCE_SCENARIO, $db_httptests);
-
-		return ['httptestids' => $httptestids];
-	}
-
-	/**
-	 * Checks if the current user has access to the given hosts and templates.
-	 *
-	 * @param array $hostids  an array of host or template IDs
-	 *
-	 * @throws APIException if the user doesn't have write permissions for the given hosts.
-	 */
-	private function checkHostPermissions(array $hostids) {
-		if ($hostids) {
-			$count = API::Host()->get([
-				'countOutput' => true,
-				'hostids' => $hostids,
-				'editable' => true
-			]);
-
-			if ($count == count($hostids)) {
-				return;
-			}
-
-			$count += API::Template()->get([
-				'countOutput' => true,
-				'templateids' => $hostids,
-				'editable' => true
-			]);
-
-			if ($count != count($hostids)) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS,
-					_('No permissions to referred object or it does not exist!')
+		foreach ($httptestids as $httptestid) {
+			if ($db_httptests[$httptestid]['templateid'] != 0) {
+				self::exception(ZBX_API_ERROR_PARAMETERS,
+					_s('Cannot delete templated web scenario "%1$s".', $db_httptests[$httptestid]['name'])
 				);
 			}
 		}
+	}
+
+	/**
+	 * @param array $db_httptests
+	 */
+	public static function deleteForce(array $db_httptests): void {
+		self::addInheritedHttptests($db_httptests);
+
+		$del_httptestids = array_keys($db_httptests);
+
+		self::deleteAffectedItems($del_httptestids);
+		self::deleteAffectedSteps($del_httptestids);
+
+		DB::delete('httptest_field', ['httptestid' => $del_httptestids]);
+		DB::update('httptest', [
+			'values' => ['templateid' => 0],
+			'where' => ['httptestid' => $del_httptestids]
+		]);
+		DB::delete('httptest', ['httptestid' => $del_httptestids]);
+
+		self::addAuditLog(CAudit::ACTION_DELETE, CAudit::RESOURCE_SCENARIO, $db_httptests);
+	}
+
+	/**
+	 * Add the inherited web scenarios of the given web scenarios to the given web scenario array.
+	 *
+	 * @param array $db_httptests
+	 */
+	private static function addInheritedHttptests(array &$db_httptests): void {
+		$templateids = array_keys($db_httptests);
+
+		do {
+			$options = [
+				'output' => ['httptestid', 'name'],
+				'filter' => ['templateid' => $templateids]
+			];
+			$result = DBselect(DB::makeSql('httptest', $options));
+
+			$templateids = [];
+
+			while ($row = DBfetch($result)) {
+				if (!array_key_exists($row['httptestid'], $db_httptests)) {
+					$templateids[] = $row['httptestid'];
+
+					$db_httptests[$row['httptestid']] = $row;
+				}
+			}
+		} while ($templateids);
+	}
+
+	/**
+	 * Delete items, which would remain without web scenarios after the given web scenarios deletion.
+	 *
+	 * @param array $del_httptestids
+	 */
+	private static function deleteAffectedItems(array $del_httptestids): void {
+		$db_items = DBfetchArrayAssoc(DBselect(
+			'SELECT hti.itemid,i.name'.
+			' FROM httptestitem hti,items i'.
+			' WHERE hti.itemid=i.itemid'.
+				' AND '.dbConditionId('hti.httptestid', $del_httptestids)
+		), 'itemid');
+
+		CItem::addInheritedItems($db_items);
+		DB::delete('httptestitem', ['itemid' => array_keys($db_items)]);
+		CItem::deleteForce($db_items);
+	}
+
+	/**
+	 * Delete steps of the given web scenarios.
+	 *
+	 * @param array $del_httptestids
+	 */
+	private static function deleteAffectedSteps(array $del_httptestids): void {
+		$del_stepids = array_column(DB::select('httpstep', [
+			'output' => ['httpstepid'],
+			'filter' => ['httptestid' => $del_httptestids]
+		]), 'httpstepid');
+
+		self::deleteAffectedStepItems($del_stepids);
+
+		DB::delete('httpstep_field', ['httpstepid' => $del_stepids]);
+		DB::delete('httpstep', ['httpstepid' => $del_stepids]);
+	}
+
+	/**
+	 * Delete items of the given web scenario steps.
+	 *
+	 * @param array $del_stepids
+	 */
+	private static function deleteAffectedStepItems(array $del_stepids): void {
+		$db_items = DBfetchArrayAssoc(DBselect(
+			'SELECT hsi.itemid,i.name'.
+			' FROM httpstepitem hsi,items i'.
+			' WHERE hsi.itemid=i.itemid'.
+				' AND '.dbConditionId('hsi.httpstepid', $del_stepids)
+		), 'itemid');
+
+		CItem::addInheritedItems($db_items);
+		DB::delete('httpstepitem', ['itemid' => array_keys($db_items)]);
+		CItem::deleteForce($db_items);
+	}
+
+	/**
+	 * Check that host IDs of given web scenarios are valid.
+	 * If host IDs are valid, $db_hosts and $db_templates parameters will be filled with found hosts and templates.
+	 *
+	 * @param array      $httptests
+	 * @param array|null $db_hosts
+	 * @param array|null $db_templates
+	 *
+	 * @throws APIException
+	 */
+	protected static function checkHostsAndTemplates(array $httptests, ?array &$db_hosts = null,
+			?array &$db_templates = null): void {
+		$hostids = array_unique(array_column($httptests, 'hostid'));
+
+		$db_templates = API::Template()->get([
+			'output' => [],
+			'templateids' => $hostids,
+			'editable' => true,
+			'preservekeys' => true
+		]);
+
+		$_hostids = array_diff($hostids, array_keys($db_templates));
+
+		$db_hosts = $_hostids
+			? API::Host()->get([
+				'output' => ['status'],
+				'hostids' => $_hostids,
+				'editable' => true,
+				'preservekeys' => true
+			])
+			: [];
+
+		if (count($db_templates) + count($db_hosts) != count($hostids)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, _('No permissions to referred object or it does not exist!'));
+		}
+	}
+
+	/**
+	 * Add host_status property to given web scenarios in accordance of given hosts and templates statuses.
+	 *
+	 * @param array $httptests
+	 * @param array $db_hosts
+	 * @param array $db_templates
+	 */
+	protected static function addHostStatus(array &$httptests, array $db_hosts, array $db_templates): void {
+		foreach ($httptests as &$httptest) {
+			if (array_key_exists($httptest['hostid'], $db_templates)) {
+				$httptest['host_status'] = HOST_STATUS_TEMPLATE;
+			}
+			else {
+				$httptest['host_status'] = $db_hosts[$httptest['hostid']]['status'];
+			}
+		}
+		unset($httptest);
 	}
 
 	/**
@@ -723,7 +952,7 @@ class CHttpTest extends CApiService {
 	 *
 	 * @throws APIException
 	 */
-	protected function validateSteps(array &$httptests, $method, array $db_httptests = null) {
+	protected function validateSteps(array &$httptests, $method, ?array $db_httptests = null) {
 		if ($method === 'validateUpdate') {
 			foreach ($httptests as $httptest) {
 				if (!array_key_exists('steps', $httptest)) {
@@ -732,23 +961,27 @@ class CHttpTest extends CApiService {
 
 				$db_httptest = $db_httptests[$httptest['httptestid']];
 
-				if ($db_httptest['templateid'] != 0) {
-					if (count($httptest['steps']) != count($db_httptest['steps'])) {
-						self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect templated web scenario step count.'));
-					}
+				if ($db_httptest['templateid'] != 0 && count($httptest['steps']) != count($db_httptest['steps'])) {
+					self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect templated web scenario step count.'));
+				}
 
-					foreach ($httptest['steps'] as $httpstep) {
-						if (!array_key_exists('httpstepid', $httpstep)) {
+				foreach ($httptest['steps'] as $step) {
+					if (!array_key_exists('httpstepid', $step)) {
+						if ($db_httptest['templateid'] == 0) {
+							continue;
+						}
+						else {
 							self::exception(ZBX_API_ERROR_PARAMETERS, _s(
 								'Cannot update step for a templated web scenario "%1$s": %2$s.', $httptest['name'],
 								_s('the parameter "%1$s" is missing', 'httpstepid')
 							));
 						}
-						elseif (!array_key_exists($httpstep['httpstepid'], $db_httptest['steps'])) {
-							self::exception(ZBX_API_ERROR_PARAMETERS,
-								_('No permissions to referred object or it does not exist!')
-							);
-						}
+					}
+
+					if (!array_key_exists($step['httpstepid'], $db_httptest['steps'])) {
+						self::exception(ZBX_API_ERROR_PARAMETERS,
+							_('No permissions to referred object or it does not exist!')
+						);
 					}
 				}
 			}
@@ -930,29 +1163,8 @@ class CHttpTest extends CApiService {
 			}
 		}
 
-		// Adding web scenario tags.
-		if ($options['selectTags'] !== null) {
-			$options['selectTags'] = ($options['selectTags'] !== API_OUTPUT_EXTEND)
-				? (array) $options['selectTags']
-				: ['tag', 'value'];
-
-			$options['selectTags'] = array_intersect(['tag', 'value'], $options['selectTags']);
-			$requested_output = array_flip($options['selectTags']);
-
-			$db_tags = DBselect(
-				'SELECT '.implode(',', array_merge($options['selectTags'], ['httptestid'])).
-				' FROM httptest_tag'.
-				' WHERE '.dbConditionInt('httptestid', $httpTestIds)
-			);
-
-			array_walk($result, function (&$http_test) {
-				$http_test['tags'] = [];
-			});
-
-			while ($db_tag = DBfetch($db_tags)) {
-				$result[$db_tag['httptestid']]['tags'][] = array_intersect_key($db_tag, $requested_output);
-			}
-		}
+		self::addRelatedTags($options, $result);
+		self::addRelatedInheritedTags($options, $result);
 
 		return $result;
 	}
@@ -964,17 +1176,17 @@ class CHttpTest extends CApiService {
 	 *
 	 * @throws APIException  if auth parameters are invalid.
 	 */
-	private function validateAuthParameters(array &$httptests, $method, array $db_httptests = null) {
+	private function validateAuthParameters(array &$httptests, $method, ?array $db_httptests = null) {
 		foreach ($httptests as &$httptest) {
 			if (array_key_exists('authentication', $httptest) || array_key_exists('http_user', $httptest)
 					|| array_key_exists('http_password', $httptest)) {
 				$httptest += [
 					'authentication' => ($method === 'validateUpdate')
 						? $db_httptests[$httptest['httptestid']]['authentication']
-						: HTTPTEST_AUTH_NONE
+						: ZBX_HTTP_AUTH_NONE
 				];
 
-				if ($httptest['authentication'] == HTTPTEST_AUTH_NONE) {
+				if ($httptest['authentication'] == ZBX_HTTP_AUTH_NONE) {
 					foreach (['http_user', 'http_password'] as $field_name) {
 						$httptest += [$field_name => ''];
 
@@ -997,7 +1209,7 @@ class CHttpTest extends CApiService {
 	 *
 	 * @throws APIException if SSL cert is present but SSL key is not.
 	 */
-	private function validateSslParameters(array &$httptests, $method, array $db_httptests = null) {
+	private function validateSslParameters(array &$httptests, $method, ?array $db_httptests = null) {
 		foreach ($httptests as &$httptest) {
 			if (array_key_exists('ssl_key_password', $httptest)
 					|| array_key_exists('ssl_key_file', $httptest)
@@ -1041,7 +1253,7 @@ class CHttpTest extends CApiService {
 	 *
 	 * @throws APIException if parameters is invalid.
 	 */
-	private function validateRetrieveMode(array &$httptests, $method, array $db_httptests = null) {
+	private function validateRetrieveMode(array &$httptests, $method, ?array $db_httptests = null) {
 		foreach ($httptests as &$httptest) {
 			if (!array_key_exists('steps', $httptest)) {
 				continue;
@@ -1085,5 +1297,110 @@ class CHttpTest extends CApiService {
 			unset($httpstep);
 		}
 		unset($httptest);
+	}
+
+	/**
+	 * @param array      $templateids
+	 * @param array|null $hostids
+	 */
+	public static function unlinkTemplateObjects(array $templateids, ?array $hostids = null): void {
+		$hostids_condition = $hostids ? ' AND '.dbConditionId('hht.hostid', $hostids) : '';
+
+		$result = DBselect(
+			'SELECT hht.httptestid,hht.name,hht.hostid,hht.templateid,h.status AS host_status'.
+			' FROM httptest ht,httptest hht,hosts h'.
+			' WHERE ht.httptestid=hht.templateid'.
+				' AND hht.hostid=h.hostid'.
+				' AND '.dbConditionId('ht.hostid', $templateids).
+				$hostids_condition
+		);
+
+		$httptests = [];
+		$db_httptests = [];
+
+		while ($row = DBfetch($result)) {
+			$httptest = [
+				'httptestid' => $row['httptestid'],
+				'name' => $row['name'],
+				'hostid' => $row['hostid'],
+				'templateid' => 0
+			];
+
+			if ($row['host_status'] == HOST_STATUS_TEMPLATE) {
+				$httptest += ['uuid' => generateUuidV4()];
+			}
+
+			$httptests[] = $httptest;
+			$db_httptests[$row['httptestid']] = ['templateid' => $row['templateid']];
+		}
+
+		if ($httptests) {
+			self::addDelTemplateCaches($httptests, $db_httptests);
+
+			$httptests = Manager::HttpTest()->update($httptests);
+			Manager::HttpTest()->inherit($httptests);
+		}
+	}
+
+	public static function addInsTemplateCaches(array &$httptests): void {
+		$items = DBfetchArrayAssoc(DBselect(
+			'SELECT hti.httptestid,hti.itemid,i.hostid,i.templateid'.
+			' FROM httptestitem hti'.
+			' JOIN items i ON hti.itemid=i.itemid'.
+			' WHERE '.dbConditionId('hti.httptestid', array_column($httptests, 'httptestid')).
+				' AND hti.type='.HTTPSTEP_ITEM_TYPE_IN
+		), 'httptestid');
+
+		CItem::addInsTemplateCaches($items);
+
+		foreach ($httptests as &$httptest) {
+			$httptest['ins_template_cache'] = $items[$httptest['httptestid']]['ins_template_cache'];
+		}
+		unset($httptest);
+	}
+
+	public static function addDelTemplateCaches(array &$httptests, array $db_httptests): void {
+		$resource = DBselect(
+			'SELECT hti.httptestid,hti.itemid,i.templateid'.
+			' FROM httptestitem hti'.
+			' JOIN items i ON hti.itemid=i.itemid'.
+			' WHERE '.dbConditionId('hti.httptestid', array_keys($db_httptests)).
+				' AND hti.type='.HTTPSTEP_ITEM_TYPE_IN
+		);
+
+		$items = [];
+		$db_items = [];
+
+		while ($row = DBfetch($resource)) {
+			$items[$row['httptestid']] = ['itemid' => $row['itemid']];
+			$db_items[$row['itemid']] = ['templateid' => $row['templateid']];
+		}
+
+		CItem::addDelTemplateCaches($items, $db_items);
+
+		foreach ($httptests as &$httptest) {
+			$httptest['del_template_cache'] = $items[$httptest['httptestid']]['del_template_cache'];
+		}
+		unset($httptest);
+	}
+
+	/**
+	 * @param array      $templateids
+	 * @param array|null $hostids
+	 */
+	public static function clearTemplateObjects(array $templateids, ?array $hostids = null): void {
+		$hostids_condition = $hostids ? ' AND '.dbConditionId('hht.hostid', $hostids) : '';
+
+		$db_httptests = DBfetchArrayAssoc(DBselect(
+			'SELECT hht.httptestid,hht.name'.
+			' FROM httptest ht,httptest hht'.
+			' WHERE ht.httptestid=hht.templateid'.
+				' AND '.dbConditionId('ht.hostid', $templateids).
+				$hostids_condition
+		), 'httptestid');
+
+		if ($db_httptests) {
+			self::deleteForce($db_httptests);
+		}
 	}
 }

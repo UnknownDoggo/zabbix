@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -32,6 +27,7 @@ final class CHistFunctionData {
 
 	/**
 	 * Known history functions along with definition of parameters.
+	 * If updated, must be aligned with CTriggerConditionFunctionData.
 	 *
 	 * @var array
 	 */
@@ -78,7 +74,11 @@ final class CHistFunctionData {
 		],
 		'count_foreach' => [
 			['rules' => [['type' => 'query']]],
-			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_SEC_ONLY]]]
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_SEC_ONLY]]],
+			['rules' => [['type' => 'regexp', 'pattern' => '/^(eq|ne|gt|ge|lt|le|like|bitand|regexp|iregexp)$/']],
+				'required' => false
+			],
+			['required' => false]
 		],
 		'countunique' => [
 			['rules' => [['type' => 'query']]],
@@ -103,6 +103,10 @@ final class CHistFunctionData {
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_SEC]]]
 		],
+		'firstclock' => [
+			['rules' => [['type' => 'query']]],
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_SEC]]]
+		],
 		'forecast' => [
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_DEFAULT]]],
@@ -119,11 +123,20 @@ final class CHistFunctionData {
 		'item_count' => [
 			['rules' => [['type' => 'query']]]
 		],
+		'jsonpath' => [
+			['rules' => [['type' => 'query']]],
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_DEFAULT]]],
+			[]
+		],
 		'kurtosis' => [
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_DEFAULT]]]
 		],
 		'last' => [
+			['rules' => [['type' => 'query']]],
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_NUM_ONLY]], 'required' => false]
+		],
+		'lastclock' => [
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_NUM_ONLY]], 'required' => false]
 		],
@@ -144,6 +157,10 @@ final class CHistFunctionData {
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_NUM_ONLY]], 'required' => false],
 			['required' => false]
+		],
+		'logtimestamp' => [
+			['rules' => [['type' => 'query']]],
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_NUM_ONLY]], 'required' => false]
 		],
 		'mad' => [
 			['rules' => [['type' => 'query']]],
@@ -290,6 +307,11 @@ final class CHistFunctionData {
 		'varsamp' => [
 			['rules' => [['type' => 'query']]],
 			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_DEFAULT]]]
+		],
+		'xmlxpath' => [
+			['rules' => [['type' => 'query']]],
+			['rules' => [['type' => 'period', 'mode' => self::PERIOD_MODE_DEFAULT]]],
+			[]
 		]
 	];
 
@@ -299,54 +321,156 @@ final class CHistFunctionData {
 	 * @var array
 	 */
 	private const EXPRESSION_RULES = [
-		'avg_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
+		'avg_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
 		'bucket_rate_foreach' => [[
 			'type' => 'require_math_parent',
 			'in' => ['histogram_quantile'],
 			'parameters' => ['count' => 2],
 			'position' => 1
 		]],
-		'count_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
-		'exists_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
-		'last_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
-		'max_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
-		'min_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]],
-		'sum_foreach' => [[
-			'type' => 'require_math_parent',
-			'in' => ['avg', 'count', 'max', 'min', 'sum'],
-			'parameters' => ['count' => 1],
-			'position' => 0
-		]]
+		'count_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'exists_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'jsonpath' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'last_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'max_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'min_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'sum_foreach' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		],
+		'xmlxpath' => [
+			[
+				'type' => 'require_math_parent',
+				'in' => ['avg', 'kurtosis', 'mad', 'max', 'min', 'skewness', 'stddevpop', 'stddevsamp', 'sum',
+					'sumofsquares', 'varpop', 'varsamp'
+				],
+				'parameters' => ['count' => 1],
+				'position' => 0
+			],
+			[
+				'type' => 'require_math_parent',
+				'in' => ['count'],
+				'parameters' => ['min' => 1, 'max' => 3],
+				'position' => 0
+			]
+		]
 	];
 
 	/**
@@ -372,6 +496,7 @@ final class CHistFunctionData {
 	private const ITEM_VALUE_TYPES_ALL = [ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_UINT64, ITEM_VALUE_TYPE_STR,
 		ITEM_VALUE_TYPE_TEXT, ITEM_VALUE_TYPE_LOG
 	];
+	private const ITEM_VALUE_TYPES_STRING = [ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_LOG, ITEM_VALUE_TYPE_TEXT];
 
 	/**
 	 * Known history functions along with supported item value types.
@@ -391,15 +516,19 @@ final class CHistFunctionData {
 		'exists_foreach' => self::ITEM_VALUE_TYPES_ALL,
 		'find' => self::ITEM_VALUE_TYPES_ALL,
 		'first' => self::ITEM_VALUE_TYPES_ALL,
+		'firstclock' => self::ITEM_VALUE_TYPES_ALL,
 		'forecast' => self::ITEM_VALUE_TYPES_NUM,
 		'fuzzytime' => self::ITEM_VALUE_TYPES_NUM,
 		'item_count' => self::ITEM_VALUE_TYPES_ALL,
+		'jsonpath' => self::ITEM_VALUE_TYPES_STRING,
 		'kurtosis' => self::ITEM_VALUE_TYPES_NUM,
 		'last' => self::ITEM_VALUE_TYPES_ALL,
+		'lastclock' => self::ITEM_VALUE_TYPES_ALL,
 		'last_foreach' => self::ITEM_VALUE_TYPES_ALL,
 		'logeventid' => self::ITEM_VALUE_TYPES_LOG,
 		'logseverity' => self::ITEM_VALUE_TYPES_LOG,
 		'logsource' => self::ITEM_VALUE_TYPES_LOG,
+		'logtimestamp' => self::ITEM_VALUE_TYPES_LOG,
 		'mad' => self::ITEM_VALUE_TYPES_NUM,
 		'max' => self::ITEM_VALUE_TYPES_NUM,
 		'max_foreach' => self::ITEM_VALUE_TYPES_NUM,
@@ -426,7 +555,8 @@ final class CHistFunctionData {
 		'trendstl' => self::ITEM_VALUE_TYPES_NUM,
 		'trendsum' => self::ITEM_VALUE_TYPES_NUM,
 		'varpop' => self::ITEM_VALUE_TYPES_NUM,
-		'varsamp' => self::ITEM_VALUE_TYPES_NUM
+		'varsamp' => self::ITEM_VALUE_TYPES_NUM,
+		'xmlxpath' => self::ITEM_VALUE_TYPES_STRING
 	];
 
 	/**
@@ -495,8 +625,6 @@ final class CHistFunctionData {
 
 	/**
 	 * Check if function is aggregating wildcarded host/item queries and is exclusive to calculated item formulas.
-	 *
-	 * @static
 	 *
 	 * @param string $function
 	 *

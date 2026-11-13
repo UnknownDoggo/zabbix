@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -67,6 +62,41 @@ class CInput extends CTag {
 	}
 
 	/**
+	 * Disable this field to be validated using inline validator.
+	 */
+	public function disableInlineValidation() {
+		$this->removeAttribute('data-field-type');
+
+		return $this;
+	}
+
+	/**
+	 * Specify ID of error container.
+	 *
+	 * @param string|null $container_id    ID of form element where to display field errors.
+	 *
+	 * @return static
+	 */
+	public function setErrorContainer(?string $container_id): static {
+		$this->setAttribute('data-error-container', $container_id);
+
+		return $this;
+	}
+
+	/**
+	 * Specify the field label used for error message.
+	 *
+	 * @param string|null $label    Field label used in error message.
+	 *
+	 * @return static
+	 */
+	public function setErrorLabel(?string $label): static {
+		$this->setAttribute('data-error-label', $label);
+
+		return $this;
+	}
+
+	/**
 	 * Enable or disable the element.
 	 *
 	 * @param bool $value
@@ -92,9 +122,11 @@ class CInput extends CTag {
 
 	public function setAttribute($name, $value) {
 		if ($name === 'disabled') {
-			$this->enabled = ($value !== 'disabled');
+			$this->enabled = $value !== 'disabled';
 		}
 
-		return parent::setAttribute($name, $value);
+		parent::setAttribute($name, $value);
+
+		return $this;
 	}
 }

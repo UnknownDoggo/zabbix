@@ -1,21 +1,16 @@
 /*
- ** Zabbix
- ** Copyright (C) 2001-2022 Zabbix SIA
- **
- ** This program is free software; you can redistribute it and/or modify
- ** it under the terms of the GNU General Public License as published by
- ** the Free Software Foundation; either version 2 of the License, or
- ** (at your option) any later version.
- **
- ** This program is distributed in the hope that it will be useful,
- ** but WITHOUT ANY WARRANTY; without even the implied warranty of
- ** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- ** GNU General Public License for more details.
- **
- ** You should have received a copy of the GNU General Public License
- ** along with this program; if not, write to the Free Software
- ** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- **/
+** Copyright (C) 2001-2026 Zabbix SIA
+**
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
+**
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
+**
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
+**/
 
 
 jQuery(function($) {
@@ -46,9 +41,13 @@ jQuery(function($) {
 			this.prepareNext(timeout);
 
 			this.$elem = $elem;
-			this.updateWidth();
 			this.$elem.on('mouseenter', this.hideMessage.bind(this));
-			$(window).on('resize', this.updateWidth.bind(this));
+
+			const resize_observer = new ResizeObserver(() => this.updateWidth());
+
+			document.querySelectorAll('main, aside').forEach(element => {
+				resize_observer.observe(element);
+			});
 		},
 
 		prepareNext: function(delay) {
@@ -71,7 +70,7 @@ jQuery(function($) {
 				this.hideMessage();
 			}
 			else {
-				this.$elem.text(response.message);
+				this.$elem.html($('<span>').text(response.message));
 				this.showMessage()
 			}
 
@@ -106,10 +105,32 @@ jQuery(function($) {
 		},
 
 		updateWidth: function() {
-			let $wrapper = $('.wrapper');
+			const split_view = document.querySelector('body > z-split-view');
+
+			if (split_view) {
+				let width_modifier = 20;
+
+				const rect = split_view.getBoundingClientRect();
+
+				const wrapper = split_view.querySelector(':scope > .wrapper');
+
+				if (wrapper.scrollHeight > wrapper.clientHeight) {
+					width_modifier += 15;
+				}
+
+				this.$elem.css({
+					left: rect.left + 10,
+					width: rect.width - width_modifier
+				});
+
+				return;
+			}
+
+			const wrapper_rect = document.querySelector('main').getBoundingClientRect();
+
 			this.$elem.css({
-				left: $wrapper.offset().left + 10,
-				width: $wrapper[0].clientWidth - 20
+				left: wrapper_rect.left + 10,
+				width: wrapper_rect.width - 20
 			});
 		}
 	};

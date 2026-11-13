@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -31,17 +26,32 @@ abstract class CControllerUserUpdateGeneral extends CController {
 	 */
 	protected $allow_empty_password;
 
-
-	/**
-	 * @var array
-	 */
-	protected $timezones;
-
 	protected function init() {
 		parent::init();
 
-		$this->timezones = array_keys(CTimezoneHelper::getList());
-		$this->timezones[] = TIMEZONE_DEFAULT;
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+	}
+
+	public static function getAllowedTimezones(): array {
+		$timezones = array_keys(CTimezoneHelper::getList());
+		$timezones[] = TIMEZONE_DEFAULT;
+
+		return $timezones;
+	}
+
+	public static function getAllowedLocales(): array {
+		$locales = array_keys(getLocales());
+		$locales[] = LANG_DEFAULT;
+
+		return $locales;
+	}
+
+	public static function getAllowedThemes(): array {
+		$themes = array_keys(APP::getThemes());
+		$themes[] = THEME_DEFAULT;
+
+		return $themes;
 	}
 
 	/**
@@ -52,11 +62,15 @@ abstract class CControllerUserUpdateGeneral extends CController {
 	 *
 	 * @return int
 	 */
-	private static function hasInternalAuth($usrgrps) {
+	public static function hasInternalAuth($usrgrps) {
 		$system_gui_access =
 			(CAuthenticationHelper::get(CAuthenticationHelper::AUTHENTICATION_TYPE) == ZBX_AUTH_INTERNAL)
 				? GROUP_GUI_ACCESS_INTERNAL
 				: GROUP_GUI_ACCESS_LDAP;
+
+		if (!$usrgrps) {
+			return $system_gui_access == GROUP_GUI_ACCESS_INTERNAL;
+		}
 
 		foreach($usrgrps as $usrgrp) {
 			$gui_access = ($usrgrp['gui_access'] == GROUP_GUI_ACCESS_SYSTEM)
@@ -72,31 +86,30 @@ abstract class CControllerUserUpdateGeneral extends CController {
 	}
 
 	/**
+	 * Validate current password directly from input when updating user.
+	 *
+	 * @return bool
+	 */
+	protected function validateCurrentPassword(): bool {
+		$this->allow_empty_password = !self::hasInternalAuth($this->getUserGroups());
+
+		$current_password = $this->hasInput('current_password') ? $this->getInput('current_password') : null;
+
+		if ($current_password === '' && !$this->allow_empty_password) {
+			error(_s('Incorrect value for field "%1$s": %2$s.', _('Current password'), _('cannot be empty')));
+			return false;
+		}
+
+		return true;
+	}
+
+	/**
 	 * Validate password directly from input when updating user.
 	 *
 	 * @return bool
 	 */
-	protected function validatePassword() {
-		if ($this instanceof CControllerUserProfileUpdate) {
-			$usrgrps = API::UserGroup()->get([
-				'output' => ['gui_access'],
-				'userids' => CWebUser::$data['userid'],
-				'filter' => [
-					'gui_access' => [GROUP_GUI_ACCESS_SYSTEM, GROUP_GUI_ACCESS_INTERNAL]
-				]
-			]);
-		}
-		else {
-			$usrgrps = API::UserGroup()->get([
-				'output' => ['gui_access'],
-				'usrgrpids' => $this->getInput('user_groups'),
-				'filter' => [
-					'gui_access' => [GROUP_GUI_ACCESS_SYSTEM, GROUP_GUI_ACCESS_INTERNAL]
-				]
-			]);
-		}
-
-		$this->allow_empty_password = !self::hasInternalAuth($usrgrps);
+	protected function validatePassword(): bool {
+		$this->allow_empty_password = !self::hasInternalAuth($this->getUserGroups());
 
 		$password1 = $this->hasInput('password1') ? $this->getInput('password1') : null;
 		$password2 = $this->hasInput('password2') ? $this->getInput('password2') : null;
@@ -122,20 +135,69 @@ abstract class CControllerUserUpdateGeneral extends CController {
 	 * @return bool
 	 */
 	protected function validateUserRole(): bool {
-		if (!$this->hasInput('roleid')) {
-			error(_s('Field "%1$s" is mandatory.', 'roleid'));
+		if ($this->hasInput('roleid')) {
+			$role = API::Role()->get(['output' => [], 'roleids' => [$this->getInput('roleid')]]);
 
-			return false;
+			if (!$role) {
+				error(_('No permissions to referred object or it does not exist!'));
+
+				return false;
+			}
 		}
+		else {
+			[$db_user] = API::User()->get([
+				'output' => [],
+				'selectRole' => ['roleid'],
+				'userids' => $this->getInput('userid')
+			]);
 
-		$role = API::Role()->get(['output' => [], 'roleids' => [$this->getInput('roleid')]]);
+			if ($db_user['role']) {
+				error(_s('Field "%1$s" is mandatory.', 'roleid'));
 
-		if (!$role) {
-			error(_('No permissions to referred object or it does not exist!'));
-
-			return false;
+				return false;
+			}
 		}
 
 		return true;
+	}
+
+	/**
+	 * Get user medias data from form input.
+	 *
+	 * @return array of user medias sent by form.
+	 */
+	protected function getInputUserMedia(): array {
+		$medias = [];
+		$media_fields = array_flip(['mediaid', 'mediatypeid', 'sendto', 'active', 'severity', 'period']);
+
+		foreach ($this->getInput('medias', []) as $media) {
+			$medias[] = array_intersect_key($media, $media_fields);
+		}
+
+		return $medias;
+	}
+
+	/**
+	 * Get user groups.
+	 *
+	 * @return array of usergroupids.
+	 */
+	protected function getUserGroups(): array {
+		$usrgrps = [];
+
+		if ($this instanceof CControllerUserProfileUpdate) {
+			$usrgrps = API::UserGroup()->get([
+				'output' => ['gui_access'],
+				'userids' => CWebUser::$data['userid']
+			]);
+		}
+		elseif ($this->getInput('user_groups', [])) {
+			$usrgrps = API::UserGroup()->get([
+				'output' => ['gui_access'],
+				'usrgrpids' => $this->getInput('user_groups')
+			]);
+		}
+
+		return $usrgrps;
 	}
 }

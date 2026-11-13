@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package scheduler
@@ -24,8 +19,8 @@ import (
 	"time"
 )
 
-// performer interface provides common access to plugin tasks
-type performer interface {
+// Performer interface provides common access to plugin tasks.
+type Performer interface {
 	// returns the task plugin
 	getPlugin() *pluginAgent
 	// sets the task plugin
@@ -53,7 +48,7 @@ type performer interface {
 }
 
 // performerHeap -
-type performerHeap []performer
+type performerHeap []Performer
 
 func (h performerHeap) Len() int {
 	return len(h)
@@ -73,7 +68,7 @@ func (h performerHeap) Swap(i, j int) {
 func (h *performerHeap) Push(x interface{}) {
 	// Push and Pop use pointer receivers because they modify the slice's length,
 	// not just its contents.
-	p := x.(performer)
+	p := x.(Performer)
 	p.setIndex(len(*h))
 	*h = append(*h, p)
 }
@@ -91,14 +86,14 @@ func (h *performerHeap) Pop() interface{} {
 }
 
 // Peek -
-func (h *performerHeap) Peek() performer {
+func (h *performerHeap) Peek() Performer {
 	if len(*h) == 0 {
 		return nil
 	}
 	return (*h)[0]
 }
 
-func (h *performerHeap) Update(p performer) {
+func (h *performerHeap) Update(p Performer) {
 	if p.getIndex() != -1 {
 		heap.Fix(h, p.getIndex())
 	}

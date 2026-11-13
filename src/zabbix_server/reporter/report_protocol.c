@@ -1,27 +1,27 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-#include "../zbxreport.h"
+#include "reporter.h"
 #include "report_protocol.h"
 
+#include "zbxalerter.h"
+#include "zbxipcservice.h"
+#include "zbxjson.h"
 #include "zbxserialize.h"
-#include "zbxalert.h"
+#include "zbxnum.h"
+#include "zbxdb.h"
+#include "zbxdbwrap.h"
 
 static int	json_uint_by_tag(const struct zbx_json_parse *jp, const char *tag, zbx_uint64_t *value, char **error)
 {
@@ -33,7 +33,7 @@ static int	json_uint_by_tag(const struct zbx_json_parse *jp, const char *tag, zb
 		return FAIL;
 	}
 
-	if (SUCCEED != is_uint64(buf, value))
+	if (SUCCEED != zbx_is_uint64(buf, value))
 	{
 		*error = zbx_dsprintf(*error, "invalid tag %s value: %s", tag, buf);
 		return FAIL;
@@ -49,24 +49,21 @@ static int	json_uint_by_tag(const struct zbx_json_parse *jp, const char *tag, zb
  ******************************************************************************/
 
 static zbx_uint32_t	report_serialize_test_report(unsigned char **data, const char *name, zbx_uint64_t dashboardid,
-		zbx_uint64_t userid, zbx_uint64_t viewer_userid, int report_time, unsigned char period,
-		const zbx_vector_ptr_pair_t *params)
+		zbx_uint64_t userid, int report_time, unsigned char period, const zbx_vector_ptr_pair_t *params)
 {
 	zbx_uint32_t	data_len = 0, *len, name_len;
-	int		i;
 	unsigned char	*ptr;
 
 	zbx_serialize_prepare_str(data_len, name);
 	zbx_serialize_prepare_value(data_len, dashboardid);
 	zbx_serialize_prepare_value(data_len, userid);
-	zbx_serialize_prepare_value(data_len, viewer_userid);
 	zbx_serialize_prepare_value(data_len, report_time);
 	zbx_serialize_prepare_value(data_len, period);
 	zbx_serialize_prepare_value(data_len, params->values_num);
 
 	len = (zbx_uint32_t *)zbx_malloc(NULL, params->values_num * 2 * sizeof(zbx_uint32_t));
 
-	for (i = 0; i < params->values_num; i++)
+	for (int i = 0; i < params->values_num; i++)
 	{
 		zbx_serialize_prepare_str_len(data_len, params->values[i].first, len[i * 2]);
 		zbx_serialize_prepare_str_len(data_len, params->values[i].second, len[i * 2 + 1]);
@@ -78,12 +75,11 @@ static zbx_uint32_t	report_serialize_test_report(unsigned char **data, const cha
 	ptr += zbx_serialize_str(ptr, name, name_len);
 	ptr += zbx_serialize_value(ptr, dashboardid);
 	ptr += zbx_serialize_value(ptr, userid);
-	ptr += zbx_serialize_value(ptr, viewer_userid);
 	ptr += zbx_serialize_value(ptr, report_time);
 	ptr += zbx_serialize_value(ptr, period);
 	ptr += zbx_serialize_value(ptr, params->values_num);
 
-	for (i = 0; i < params->values_num; i++)
+	for (int i = 0; i < params->values_num; i++)
 	{
 		ptr += zbx_serialize_str(ptr, params->values[i].first, len[i * 2]);
 		ptr += zbx_serialize_str(ptr, params->values[i].second, len[i * 2 + 1]);
@@ -95,22 +91,20 @@ static zbx_uint32_t	report_serialize_test_report(unsigned char **data, const cha
 }
 
 void	report_deserialize_test_report(const unsigned char *data, char **name, zbx_uint64_t *dashboardid,
-		zbx_uint64_t *userid, zbx_uint64_t *viewer_userid, int *report_time, unsigned char *period,
-		zbx_vector_ptr_pair_t *params)
+		zbx_uint64_t *userid, int *report_time, unsigned char *period, zbx_vector_ptr_pair_t *params)
 {
-	int		params_num, i;
+	int		params_num;
 	zbx_uint32_t	len;
 
 	data += zbx_deserialize_str(data, name, len);
 	data += zbx_deserialize_value(data, dashboardid);
 	data += zbx_deserialize_value(data, userid);
-	data += zbx_deserialize_value(data, viewer_userid);
 	data += zbx_deserialize_value(data, report_time);
 	data += zbx_deserialize_value(data, period);
 	data += zbx_deserialize_value(data, &params_num);
 
 	zbx_vector_ptr_pair_reserve(params, (size_t)params_num);
-	for (i = 0; i < params_num; i++)
+	for (int i = 0; i < params_num; i++)
 	{
 		zbx_ptr_pair_t	pair;
 
@@ -128,7 +122,7 @@ void	report_deserialize_test_report(const unsigned char *data, char **name, zbx_
  ******************************************************************************/
 
 zbx_uint32_t	report_serialize_response(unsigned char **data, int status, const char *error,
-		const zbx_vector_ptr_t *results)
+		const zbx_vector_alerter_dispatch_result_t *results)
 {
 	zbx_uint32_t			data_len = 0, error_len, *recipient_len, *info_len;
 	unsigned char			*ptr;
@@ -146,7 +140,7 @@ zbx_uint32_t	report_serialize_response(unsigned char **data, int status, const c
 
 		for (i = 0; i < results->values_num; i++)
 		{
-			result = (zbx_alerter_dispatch_result_t *)results->values[i];
+			result = results->values[i];
 			zbx_serialize_prepare_value(data_len, result->status);
 			zbx_serialize_prepare_str_len(data_len, result->recipient, recipient_len[i]);
 			zbx_serialize_prepare_str_len(data_len, result->info, info_len[i]);
@@ -170,7 +164,7 @@ zbx_uint32_t	report_serialize_response(unsigned char **data, int status, const c
 
 		for (i = 0; i < results->values_num; i++)
 		{
-			result = (zbx_alerter_dispatch_result_t *)results->values[i];
+			result = results->values[i];
 			ptr += zbx_serialize_value(ptr, result->status);
 			ptr += zbx_serialize_str(ptr, result->recipient, recipient_len[i]);
 			ptr += zbx_serialize_str(ptr, result->info, info_len[i]);
@@ -185,7 +179,8 @@ zbx_uint32_t	report_serialize_response(unsigned char **data, int status, const c
 	return data_len;
 }
 
-void	report_deserialize_response(const unsigned char *data, int *status, char **error, zbx_vector_ptr_t *results)
+void	report_deserialize_response(const unsigned char *data, int *status, char **error,
+		zbx_vector_alerter_dispatch_result_t *results)
 {
 	zbx_uint32_t	len;
 
@@ -194,22 +189,22 @@ void	report_deserialize_response(const unsigned char *data, int *status, char **
 
 	if (SUCCEED == *status && NULL != results)
 	{
-		int				i, results_num;
+		int				results_num;
 		zbx_alerter_dispatch_result_t	*result;
 
 		data += zbx_deserialize_value(data, &results_num);
 
 		if (0 != results_num)
 		{
-			zbx_vector_ptr_reserve(results, (size_t)results_num);
+			zbx_vector_alerter_dispatch_result_reserve(results, (size_t)results_num);
 
-			for (i = 0; i < results_num; i++)
+			for (int i = 0; i < results_num; i++)
 			{
 				result = zbx_malloc(NULL, sizeof(zbx_alerter_dispatch_result_t));
 				data += zbx_deserialize_value(data, &result->status);
 				data += zbx_deserialize_str(data, &result->recipient, len);
 				data += zbx_deserialize_str(data, &result->info, len);
-				zbx_vector_ptr_append(results, result);
+				zbx_vector_alerter_dispatch_result_append(results, result);
 			}
 		}
 	}
@@ -222,21 +217,18 @@ void	report_deserialize_response(const unsigned char *data, int *status, char **
  ******************************************************************************/
 
 zbx_uint32_t	report_serialize_begin_report(unsigned char **data, const char *name, const char *url,
-		const char *cookie, int width, int height, const zbx_vector_ptr_pair_t *params)
+		const char *cookie, const zbx_vector_ptr_pair_t *params)
 {
 	zbx_uint32_t	data_len = 0, *params_len, url_len, cookie_len, name_len;
 	unsigned char	*ptr;
-	int		i;
 
 	zbx_serialize_prepare_str(data_len, name);
 	zbx_serialize_prepare_str(data_len, url);
 	zbx_serialize_prepare_str(data_len, cookie);
-	zbx_serialize_prepare_value(data_len, width);
-	zbx_serialize_prepare_value(data_len, height);
 	zbx_serialize_prepare_value(data_len, params->values_num);
 
 	params_len = (zbx_uint32_t *)zbx_malloc(NULL, params->values_num * 2 * sizeof(zbx_uint32_t));
-	for (i = 0; i < params->values_num; i++)
+	for (int i = 0; i < params->values_num; i++)
 	{
 		zbx_serialize_prepare_str_len(data_len, params->values[i].first, params_len[i * 2]);
 		zbx_serialize_prepare_str_len(data_len, params->values[i].second, params_len[i * 2 + 1]);
@@ -248,12 +240,10 @@ zbx_uint32_t	report_serialize_begin_report(unsigned char **data, const char *nam
 	ptr += zbx_serialize_str(ptr, name, name_len);
 	ptr += zbx_serialize_str(ptr, url, url_len);
 	ptr += zbx_serialize_str(ptr, cookie, cookie_len);
-	ptr += zbx_serialize_value(ptr, width);
-	ptr += zbx_serialize_value(ptr, height);
 
 	ptr += zbx_serialize_value(ptr, params->values_num);
 
-	for (i = 0; i < params->values_num; i++)
+	for (int i = 0; i < params->values_num; i++)
 	{
 		ptr += zbx_serialize_str(ptr, params->values[i].first, params_len[i * 2]);
 		ptr += zbx_serialize_str(ptr, params->values[i].second, params_len[i * 2 + 1]);
@@ -265,20 +255,19 @@ zbx_uint32_t	report_serialize_begin_report(unsigned char **data, const char *nam
 }
 
 void	report_deserialize_begin_report(const unsigned char *data, char **name, char **url, char **cookie,
-		int *width, int *height, zbx_vector_ptr_pair_t *params)
+		zbx_vector_ptr_pair_t *params)
 {
 	zbx_uint32_t	len;
-	int		i, params_num;
+	int		params_num;
 
 	data += zbx_deserialize_str(data, name, len);
 	data += zbx_deserialize_str(data, url, len);
 	data += zbx_deserialize_str(data, cookie, len);
-	data += zbx_deserialize_value(data, width);
-	data += zbx_deserialize_value(data, height);
 
 	data += zbx_deserialize_value(data, &params_num);
 	zbx_vector_ptr_pair_reserve(params, (size_t)params_num);
-	for (i = 0; i < params_num; i++)
+
+	for (int i = 0; i < params_num; i++)
 	{
 		zbx_ptr_pair_t	pair;
 
@@ -294,22 +283,23 @@ void	report_deserialize_begin_report(const unsigned char *data, char **name, cha
  *                                                                            *
  ******************************************************************************/
 
-zbx_uint32_t	report_serialize_send_report(unsigned char **data, const ZBX_DB_MEDIATYPE *mt,
-		const zbx_vector_str_t *emails)
+zbx_uint32_t	report_serialize_send_report(unsigned char **data, const zbx_db_mediatype *mt,
+		const zbx_vector_str_t *emails, zbx_uint64_t reportid, int message_type)
 {
-	zbx_uint32_t	data_len = 0, data_alloc = 1024, data_offset = 0, *params_len;
+	zbx_uint32_t	*params_len, data_len = 0, data_alloc = 1024, data_offset = 0;
 	unsigned char	*ptr;
-	int		i;
 
 	*data = zbx_malloc(NULL, data_alloc);
 	zbx_serialize_mediatype(data, &data_alloc, &data_offset, mt);
 
 	zbx_serialize_prepare_value(data_len, emails->values_num);
 	params_len = (zbx_uint32_t *)zbx_malloc(NULL, emails->values_num * sizeof(zbx_uint32_t));
-	for (i = 0; i < emails->values_num; i++)
-	{
+
+	for (int i = 0; i < emails->values_num; i++)
 		zbx_serialize_prepare_str_len(data_len, emails->values[i], params_len[i]);
-	}
+
+	zbx_serialize_prepare_value(data_len, reportid);
+	zbx_serialize_prepare_value(data_len, message_type);
 
 	if (data_alloc - data_offset < data_len)
 	{
@@ -319,39 +309,43 @@ zbx_uint32_t	report_serialize_send_report(unsigned char **data, const ZBX_DB_MED
 
 	ptr = *data + data_offset;
 	ptr += zbx_serialize_value(ptr, emails->values_num);
-	for (i = 0; i < emails->values_num; i++)
-	{
+
+	for (int i = 0; i < emails->values_num; i++)
 		ptr += zbx_serialize_str(ptr, emails->values[i], params_len[i]);
-	}
 
 	zbx_free(params_len);
+
+	ptr += zbx_serialize_value(ptr, reportid);
+	(void)zbx_serialize_value(ptr, message_type);
 
 	return data_offset + data_len;
 }
 
-void	report_deserialize_send_report(const unsigned char *data, ZBX_DB_MEDIATYPE *mt, zbx_vector_str_t *sendtos)
+void	report_deserialize_send_report(const unsigned char *data, zbx_db_mediatype *mt, zbx_vector_str_t *sendtos,
+			zbx_uint64_t *reportid, int *message_type)
 {
 	zbx_uint32_t	len;
-	int		i, sendto_num;
+	int		sendto_num;
 
 	data += zbx_deserialize_mediatype(data, mt);
 
 	data += zbx_deserialize_value(data, &sendto_num);
 	zbx_vector_str_reserve(sendtos, (size_t)sendto_num);
-	for (i = 0; i < sendto_num; i++)
+	for (int i = 0; i < sendto_num; i++)
 	{
 		char	*sendto;
 
 		data += zbx_deserialize_str(data, &sendto, len);
 		zbx_vector_str_append(sendtos, sendto);
 	}
+
+	data += zbx_deserialize_value(data, reportid);
+	(void)zbx_deserialize_value(data, message_type);
 }
 
 static void	report_clear_ptr_pairs(zbx_vector_ptr_pair_t *params)
 {
-	int	i;
-
-	for (i = 0; i < params->values_num; i++)
+	for (int i = 0; i < params->values_num; i++)
 	{
 		zbx_free(params->values[i].first);
 		zbx_free(params->values[i].second);
@@ -370,20 +364,93 @@ void	report_destroy_params(zbx_vector_ptr_pair_t *params)
 	zbx_vector_ptr_pair_destroy(params);
 }
 
-void	zbx_report_test(const struct zbx_json_parse *jp, zbx_uint64_t userid, struct zbx_json *j)
+/******************************************************************************
+ *                                                                            *
+ * Purpose: checks if user has access to dashboard                            *
+ *                                                                            *
+ * Parameters: userid      - [IN]                                             *
+ *             dashboardid - [IN]                                             *
+ *                                                                            *
+ * Return value: SUCCEED - access granted                                     *
+ *               FAIL    - no access                                          *
+ *                                                                            *
+ ******************************************************************************/
+static int	check_dashboard_access(zbx_uint64_t userid, zbx_uint64_t dashboardid)
 {
-	zbx_uint64_t		dashboardid, viewer_userid, ui64;
-	int			ret = FAIL, period, report_time;
-	struct zbx_json_parse	jp_params;
-	zbx_vector_ptr_pair_t	params;
-	zbx_vector_ptr_t	results;
-	zbx_uint32_t		size;
-	unsigned char		*data = NULL, *response = NULL;
-	char			*name = NULL, *error = NULL;
-	size_t			name_alloc = 0;
+#define ZBX_PUBLIC_SHARING	0
+
+	zbx_db_result_t	result;
+	int		ret = FAIL;
+
+	result = zbx_db_select("select d.dashboardid from dashboard d"
+			" where d.templateid is null"
+			" and ("
+				"d.userid=" ZBX_FS_UI64
+				" or d.private=%d"
+				" or exists ("
+					"select null from dashboard_user du"
+					" where d.dashboardid=du.dashboardid and du.userid=" ZBX_FS_UI64
+				")"
+				" or exists ("
+					"select null from dashboard_usrgrp dug"
+					" join users_groups ug on ug.usrgrpid=dug.usrgrpid"
+					" where dug.dashboardid=d.dashboardid and ug.userid=" ZBX_FS_UI64
+				")"
+			")"
+			" and d.dashboardid=" ZBX_FS_UI64,
+			userid, ZBX_PUBLIC_SHARING, userid, userid, dashboardid);
+
+	if (NULL != zbx_db_fetch(result))
+		ret = SUCCEED;
+
+	zbx_db_free_result(result);
+
+	return ret;
+
+#undef ZBX_PUBLIC_SHARING
+}
+
+/******************************************************************************
+ *                                                                            *
+ * Purpose: checks if user has permissions to generate reports                *
+ *                                                                            *
+ * Parameters: user - [IN]                                                    *
+ *                                                                            *
+ * Return value: SUCCEED                                                      *
+ *               FAIL                                                         *
+ *                                                                            *
+ ******************************************************************************/
+static int	check_report_generation_access(const zbx_user_t *user)
+{
+	if (USER_TYPE_ZABBIX_ADMIN > user->type)
+		return FAIL;
+
+	/* No super admin exception here. Any role, including a super admin role, can have the         */
+	/* "Manage scheduled reports" action disabled, and the frontend API then denies report.create, */
+	/* report.update and report.delete for that user. Report testing must be denied the same way.  */
+	if (SUCCEED != zbx_db_user_has_administration_actions_permissions(user, "actions.default_access",
+			"actions.manage_scheduled_reports"))
+	{
+		return FAIL;
+	}
+
+	return SUCCEED;
+}
+
+void	zbx_report_test(const struct zbx_json_parse *jp, const zbx_user_t *user, struct zbx_json *j)
+{
+	zbx_uint64_t				dashboardid, ui64;
+	int					period, report_time, ret = FAIL;
+	struct zbx_json_parse			jp_params;
+	zbx_vector_ptr_pair_t			params;
+	zbx_vector_alerter_dispatch_result_t	results;
+	zbx_uint32_t				size;
+	unsigned char				*data = NULL, *response = NULL;
+	char					*name = NULL, *error = NULL;
+	size_t					name_alloc = 0;
 
 	zbx_vector_ptr_pair_create(&params);
-	zbx_vector_ptr_create(&results);
+	zbx_vector_alerter_dispatch_result_create(&results);
 
 	if (SUCCEED != zbx_json_value_by_name_dyn(jp, ZBX_PROTO_TAG_NAME, &name, &name_alloc, NULL))
 	{
@@ -394,15 +461,14 @@ void	zbx_report_test(const struct zbx_json_parse *jp, zbx_uint64_t userid, struc
 	if (SUCCEED != json_uint_by_tag(jp, ZBX_PROTO_TAG_DASHBOARDID, &dashboardid, &error))
 		goto out;
 
-	if (SUCCEED != json_uint_by_tag(jp, ZBX_PROTO_TAG_USERID, &viewer_userid, &error))
-		goto out;
-
 	if (SUCCEED != json_uint_by_tag(jp, ZBX_PROTO_TAG_PERIOD, &ui64, &error))
 		goto out;
+
 	period = (int)ui64;
 
 	if (SUCCEED != json_uint_by_tag(jp, ZBX_PROTO_TAG_NOW, &ui64, &error))
 		goto out;
+
 	report_time = (int)ui64;
 
 	if (SUCCEED == zbx_json_brackets_by_name(jp, ZBX_PROTO_TAG_PARAMS, &jp_params))
@@ -416,15 +482,33 @@ void	zbx_report_test(const struct zbx_json_parse *jp, zbx_uint64_t userid, struc
 			size_t		value_alloc = 0;
 			zbx_ptr_pair_t	pair;
 
-			zbx_json_decodevalue_dyn(pnext, &value, &value_alloc, NULL);
+			if (NULL == zbx_json_decodevalue_dyn(pnext, &value, &value_alloc, NULL))
+				continue;
+
 			pair.first = zbx_strdup(NULL, key);
 			pair.second = value;
 			zbx_vector_ptr_pair_append(&params, pair);
 		}
 	}
 
-	size = report_serialize_test_report(&data, name, dashboardid, userid, viewer_userid, report_time, period,
-			&params);
+	if (SUCCEED != check_report_generation_access(user))
+	{
+		error = zbx_strdup(error, "no access to scheduled reports");
+		goto out;
+	}
+
+	/* Super admins skip the sharing check. check_dashboard_access() only grants access to the   */
+	/* dashboard owner, public dashboards, and dashboards shared with the user or the user's     */
+	/* groups. The frontend applies those sharing rules only to Zabbix users and Zabbix admins,  */
+	/* so a super admin can see and pick any dashboard for a report, including private ones that */
+	/* are not shared with them. Running the check for super admins would reject such reports.   */
+	if (USER_TYPE_SUPER_ADMIN != user->type && SUCCEED != check_dashboard_access(user->userid, dashboardid))
+	{
+		error = zbx_strdup(error, "no access to dashboard");
+		goto out;
+	}
+
+	size = report_serialize_test_report(&data, name, dashboardid, user->userid, report_time, period, &params);
 
 	if (SUCCEED != zbx_ipc_async_exchange(ZBX_IPC_SERVICE_REPORTER, ZBX_IPC_REPORTER_TEST,
 			SEC_PER_MIN, data, size, &response, &error))
@@ -438,18 +522,17 @@ out:
 
 	if (SUCCEED == ret)
 	{
-		int				i;
 		zbx_alerter_dispatch_result_t	*result;
 
 		zbx_json_addstring(j, ZBX_PROTO_TAG_RESPONSE, ZBX_PROTO_VALUE_SUCCESS, ZBX_JSON_TYPE_STRING);
 		zbx_json_addobject(j, ZBX_PROTO_TAG_DATA);
 		zbx_json_addarray(j, ZBX_PROTO_TAG_RECIPIENTS);
 
-		for (i = 0; i < results.values_num; i++)
+		for (int i = 0; i < results.values_num; i++)
 		{
 			zbx_json_addobject(j, NULL);
 
-			result = (zbx_alerter_dispatch_result_t *)results.values[i];
+			result = results.values[i];
 			zbx_json_addint64(j, ZBX_PROTO_TAG_STATUS, result->status);
 			zbx_json_addstring(j, ZBX_PROTO_TAG_RECIPIENT, result->recipient, ZBX_JSON_TYPE_STRING);
 			if (NULL != result->info)
@@ -469,7 +552,7 @@ out:
 	zbx_free(data);
 	zbx_free(name);
 
-	zbx_vector_ptr_clear_ext(&results, (zbx_clean_func_t)zbx_alerter_dispatch_result_free);
-	zbx_vector_ptr_destroy(&results);
+	zbx_vector_alerter_dispatch_result_clear_ext(&results, zbx_alerter_dispatch_result_free);
+	zbx_vector_alerter_dispatch_result_destroy(&results);
 	report_destroy_params(&params);
 }

@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2021 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -44,9 +39,11 @@ class ZSelect extends HTMLElement {
 	}
 
 	connectedCallback() {
-		this._is_connected = true;
+		if (!this.contains(this._button)) {
+			this.init();
+			this._is_connected = true;
+		}
 
-		this.init();
 		this.registerEvents();
 	}
 
@@ -68,7 +65,7 @@ class ZSelect extends HTMLElement {
 				break;
 
 			case 'value':
-				if (!this._is_connected || this._input.value !== new_value) {
+				if (this._input.value !== new_value) {
 					const option = this.getOptionByValue(new_value);
 
 					this._highlight(option ? option._index : -1);
@@ -77,6 +74,7 @@ class ZSelect extends HTMLElement {
 					if (option && !option.disabled) {
 						this._input.value = option.value;
 						this.dispatchEvent(new Event('change', {bubbles: true}));
+						this.dispatchEvent(new Event('input', {bubbles: true}));
 					}
 					else {
 						this._input.value = null;
@@ -136,13 +134,7 @@ class ZSelect extends HTMLElement {
 
 		if (this.hasAttribute('data-options')) {
 			const options = JSON.parse(this.getAttribute('data-options'));
-
-			for (const option of options) {
-				option.options instanceof Array
-					? this.addOptionGroup(option)
-					: this.addOption(option);
-			}
-
+			this.addOptions(options);
 			this.removeAttribute('data-options');
 		}
 
@@ -150,8 +142,29 @@ class ZSelect extends HTMLElement {
 			this.setAttribute('width', this._listWidth());
 		}
 
+		this.preselectHightlighted();
+	}
+
+	preselectHightlighted() {
 		this._preselect(this._highlighted_index >= 0 ? this._highlighted_index : this._first(this._highlighted_index));
 		this._input.value = this.getValueByIndex(this._preselected_index);
+	}
+
+	clearOptions() {
+		this._options_map.clear();
+		this._highlighted_index = -1;
+		this._preselected_index = -1;
+		this._list.innerHTML = '';
+		this._button.innerHTML = '';
+		this._input.value = '';
+	}
+
+	addOptions(options) {
+		for (const option of options) {
+			option.options instanceof Array
+				? this.addOptionGroup(option)
+				: this.addOption(option);
+		}
 	}
 
 	getOptions() {
@@ -184,6 +197,7 @@ class ZSelect extends HTMLElement {
 
 		li._index = this._options_map.size;
 		li.setAttribute('value', value);
+		li.setAttribute('title', label.trim().replace(/<[^>]*>/g, ''));
 		li.innerHTML = new Template(template || this._option_template).evaluate(
 			Object.assign({label: label.trim()}, extra || {})
 		);
@@ -205,6 +219,13 @@ class ZSelect extends HTMLElement {
 				set: (is_disabled) => {
 					option.is_disabled = is_disabled;
 					li.toggleAttribute('disabled', is_disabled);
+				}
+			},
+			hidden: {
+				set: (is_hidden) => {
+					option.disabled = is_hidden;
+					is_hidden ? li.setAttribute('disabled', 'disabled') : li.removeAttribute('disabled');
+					li.style.display = is_hidden ? 'none' : '';
 				}
 			}
 		}));
@@ -282,7 +303,13 @@ class ZSelect extends HTMLElement {
 	}
 
 	_expand() {
-		const {height: button_height, y: button_y, left: button_left} = this._button.getBoundingClientRect();
+		const {
+			width: button_width,
+			height: button_height,
+			y: button_y,
+			left: button_left,
+			right: button_right
+		} = this._button.getBoundingClientRect();
 		const {height: document_height} = document.body.getBoundingClientRect();
 
 		if (button_y + button_height < 0 && document_height - button_y < 0) {
@@ -293,6 +320,7 @@ class ZSelect extends HTMLElement {
 		this.classList.add('is-expanded');
 
 		const list_max_height = 362;
+		const list_offset = 2;
 		const offset_top = 4;
 		const offset_bottom = 38;
 		const list_height = Math.min(this._list.scrollHeight, list_max_height);
@@ -300,11 +328,12 @@ class ZSelect extends HTMLElement {
 		const space_above = button_y;
 
 		this._list.style.left = `${button_left}px`;
+		this._list.style.minWidth = `${button_width}px`;
 		this._list.style.maxHeight = '';
 
 		if (space_below - list_height > offset_bottom || space_below > space_above) {
 			this._list.classList.remove('fall-upwards');
-			this._list.style.top = `${button_y + button_height}px`;
+			this._list.style.top = `${button_y + button_height + list_offset}px`;
 			this._list.style.bottom = '';
 
 			if (space_below < list_height) {
@@ -314,13 +343,20 @@ class ZSelect extends HTMLElement {
 		else {
 			this._list.classList.add('fall-upwards');
 			this._list.style.top = '';
-			this._list.style.bottom = `${document_height - button_y}px`;
+			this._list.style.bottom = `${document_height - button_y + list_offset}px`;
 
 			if (space_above < list_height) {
 				this._list.style.maxHeight = `${space_above - offset_top}px`;
 			}
 		}
-		this._list.style.width = `${this.scrollWidth}px`;
+
+		const screen_width = window.innerWidth;
+		const list_right_edge = this._list.offsetLeft + this._list.offsetWidth;
+
+		if (list_right_edge > screen_width) {
+			this._list.style.left = '';
+			this._list.style.right = `${screen_width - button_right}px`;
+		}
 
 		this._highlight(this._preselected_index);
 
@@ -470,7 +506,7 @@ class ZSelect extends HTMLElement {
 
 		container.remove();
 
-		return width;
+		return Math.min(width, 453);
 	}
 
 	_isVisible() {
@@ -667,6 +703,14 @@ class ZSelect extends HTMLElement {
 			window_resize: () => {
 				this._change(this._preselected_index);
 				this._collapse();
+			},
+
+			window_pointerdown: event => {
+				if (!this._expanded || this.contains(event.target)) {
+					return;
+				}
+
+				this._collapse();
 			}
 		}
 
@@ -684,6 +728,7 @@ class ZSelect extends HTMLElement {
 		this.addEventListener('focus', this._events.focus);
 
 		window.addEventListener('resize', this._events.window_resize);
+		window.addEventListener('pointerdown', this._events.window_pointerdown);
 	}
 
 	unregisterEvents() {
@@ -701,6 +746,7 @@ class ZSelect extends HTMLElement {
 		this.removeEventListener('focus', this._events.focus);
 
 		window.removeEventListener('resize', this._events.window_resize);
+		window.removeEventListener('pointerdown', this._events.window_pointerdown);
 	}
 }
 

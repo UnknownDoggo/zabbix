@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once dirname(__FILE__).'/../include/CIntegrationTest.php';
@@ -74,7 +69,8 @@ class testServiceRoles extends CIntegrationTest {
 			'name' => self::TRAPPER_ITEM_NAME,
 			'key_' => self::TRAPPER_ITEM_NAME,
 			'type' => ITEM_TYPE_TRAPPER,
-			'value_type' => ITEM_VALUE_TYPE_UINT64
+			'value_type' => ITEM_VALUE_TYPE_UINT64,
+			'trapper_hosts' => '{$TRAPPER.ALLOWED_HOSTS}'
 		]);
 		$this->assertArrayHasKey('itemids', $response['result']);
 		$this->assertEquals(1, count($response['result']['itemids']));
@@ -192,7 +188,8 @@ class testServiceRoles extends CIntegrationTest {
 			"type" => USER_TYPE_ZABBIX_USER,
 			"rules" => [
 				'services.read.mode' => 0,
-				'services.write.mode' => 0
+				'services.write.mode' => 0,
+				'api.access' => ZBX_ROLE_RULE_ENABLED
 			]
 		]);
 		$this->assertArrayHasKey('roleids', $response['result']);
@@ -308,7 +305,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -326,9 +323,12 @@ class testServiceRoles extends CIntegrationTest {
 		$this->sendSenderValue(self::HOSTNAME, self::TRAPPER_ITEM_NAME, 0);
 		$this->sendSenderValue(self::HOSTNAME, self::TRAPPER_ITEM_NAME, 1);
 
+		$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, 'In escalation_execute()', true, 60, 3);
+		$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, 'End of escalation_execute()', true, 30, 3);
+
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -364,7 +364,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -399,7 +399,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -435,7 +435,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -471,7 +471,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]
@@ -510,7 +510,7 @@ class testServiceRoles extends CIntegrationTest {
 
 		$response = $this->call('alert.get', [
 			'output' => 'extend',
-			'actionsids' => self::$actionid,
+			'actionids' => self::$actionid,
 			'eventsource' => EVENT_SOURCE_SERVICE,
 			'eventobject' => EVENT_OBJECT_SERVICE,
 			'userids' => [self::$userid]

@@ -1,25 +1,21 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
+
 require_once 'vendor/autoload.php';
-require_once dirname(__FILE__).'/../CElement.php';
+require_once __DIR__.'/../CElement.php';
 
 /**
  * InputGroup element.
@@ -28,6 +24,7 @@ class CInputGroupElement extends CElement {
 
 	const TYPE_SECRET = 'Secret text';
 	const TYPE_TEXT = 'Text';
+	const TYPE_VAULT = 'Vault';
 
 	/**
 	 * Get value of InputGroup element.
@@ -35,8 +32,7 @@ class CInputGroupElement extends CElement {
 	 * @return string
 	 */
 	public function getValue() {
-		return $this->query('xpath:.//textarea[contains(@class, "textarea-flexible")]|.//input[@type="password"]')
-				->one()->getValue();
+		return $this->query('xpath:.//z-textarea-flexible|.//input[@type="password"]')->one()->getValue();
 	}
 
 	/**
@@ -47,10 +43,8 @@ class CInputGroupElement extends CElement {
 	 * @return $this
 	 */
 	public function changeInputType($new_type) {
-		$this->query('xpath:.//button['.CXPathHelper::fromClass('btn-dropdown-toggle').']')->one()->click();
-		$type_menu = CPopupMenuElement::find()->waitUntilVisible()->one();
-
-		return $type_menu->select($new_type);
+		return $this->query('xpath:.//button['.CXPathHelper::fromClass('btn-dropdown-toggle').']')
+				->asPopupButton()->one()->getMenu()->waitUntilReady()->select($new_type);
 	}
 
 	/**
@@ -77,10 +71,18 @@ class CInputGroupElement extends CElement {
 	 * @return string
 	 */
 	public function getInputType() {
-		$xpath = 'xpath:.//button['.CXPathHelper::fromClass('icon-text').']';
-		$type = ($this->query($xpath)->exists()) ? self::TYPE_TEXT : self::TYPE_SECRET;
+		$xpath_vault = 'xpath:./../div[contains(@class, "macro-value-vault")]';
+		$xpath_secret = 'xpath:.//div[@class="input-secret"]/..//button[contains(@id, "type_button")]';
 
-		return $type;
+		if ($this->query($xpath_secret)->exists()) {
+			return self::TYPE_SECRET;
+		}
+
+		if ($this->query($xpath_vault)->exists()) {
+			return self::TYPE_VAULT;
+		}
+
+		return self::TYPE_TEXT;
 	}
 
 	/**
@@ -92,14 +94,10 @@ class CInputGroupElement extends CElement {
 	 */
 	public function fill($input) {
 		if (!is_array($input)) {
-			$xpath = 'xpath:.//textarea[contains(@class, "textarea-flexible")]|.//input[@type="password"]';
+			$xpath = 'xpath:.//z-textarea-flexible|.//input[@type="password"]';
 			$this->query($xpath)->one()->fill($input);
 
 			return $this;
-		}
-
-		if (array_key_exists('type', $input) && $this->getInputType() !== $input['type']) {
-			$this->changeInputType($input['type']);
 		}
 
 		if (array_key_exists('text', $input)) {
@@ -108,8 +106,12 @@ class CInputGroupElement extends CElement {
 				$change_button->click();
 			}
 
-			$xpath = 'xpath:.//textarea[contains(@class, "textarea-flexible")]|.//input[@type="password"]';
+			$xpath = 'xpath:.//z-textarea-flexible|.//input[@type="password"]';
 			$this->query($xpath)->one()->fill($input['text']);
+		}
+
+		if (array_key_exists('type', $input) && $this->getInputType() !== $input['type']) {
+			$this->changeInputType($input['type']);
 		}
 
 		return $this;

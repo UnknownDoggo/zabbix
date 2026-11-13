@@ -1,218 +1,138 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package docker
 
 import (
-	"encoding/json"
 	"fmt"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
 
-	"git.zabbix.com/ap/plugin-support/zbxerr"
-
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/agent2/plugins/docker/handlers"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
 const (
-	pluginName    = "Docker"
-	dockerVersion = "1.28"
+	pluginName = "Docker"
 )
 
-const (
-	pingFailed = 0
-	pingOk     = 1
+var (
+	// name that starts with alphanumeric and continues with alphanumeric, dot or underscore.
+	containerNameRegex = regexp.MustCompile(`^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`)
 )
 
 // Plugin inherits plugin.Base and store plugin-specific data.
 type Plugin struct {
 	plugin.Base
+
 	options Options
-	client  *client
+	client  *http.Client
 }
 
-var impl Plugin
+//nolint:gochecknoinits // this is plugin only one init function.
+func init() {
+	impl := &Plugin{}
 
-// Export implements the Exporter interface.
-func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider) (interface{}, error) {
-	var result []byte
-
-	params, _, err := metrics[key].EvalParams(rawParams, nil)
+	err := plugin.RegisterMetrics(impl, pluginName, metrics.List()...)
 	if err != nil {
-		return nil, err
+		panic(errs.Wrap(err, "failed to register metrics"))
 	}
-
-	queryPath := metricsMeta[key].path
-
-	switch key {
-	case keyInfo:
-		var data Info
-
-		body, err := p.client.Query(queryPath)
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyContainers:
-		var data []Container
-
-		body, err := p.client.Query(queryPath)
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyContainersDiscovery:
-		var data []Container
-
-		body, err := p.client.Query(fmt.Sprintf(queryPath, params["All"]))
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = p.getContainersDiscovery(data)
-		if err != nil {
-			return nil, err
-		}
-
-	case keyImages:
-		var data []Image
-
-		body, err := p.client.Query(queryPath)
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyImagesDiscovery:
-		var data []Image
-
-		body, err := p.client.Query(queryPath)
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = p.getImagesDiscovery(data)
-		if err != nil {
-			return nil, err
-		}
-
-	case keyDataUsage:
-		var data DiskUsage
-
-		body, err := p.client.Query(queryPath)
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyContainerInfo:
-		var data ContainerInfo
-
-		body, err := p.client.Query(fmt.Sprintf(queryPath, params["Container"]))
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyContainerStats:
-		var data ContainerStats
-
-		body, err := p.client.Query(fmt.Sprintf(queryPath, params["Container"]))
-		if err != nil {
-			return nil, err
-		}
-
-		if err = json.Unmarshal(body, &data); err != nil {
-			return nil, zbxerr.ErrorCannotUnmarshalJSON.Wrap(err)
-		}
-
-		data.setCPUPercentUsage()
-
-		result, err = json.Marshal(data)
-		if err != nil {
-			return nil, zbxerr.ErrorCannotMarshalJSON.Wrap(err)
-		}
-
-	case keyPing:
-		body, err := p.client.Query(queryPath)
-		if err != nil || string(body) != "OK" {
-			return pingFailed, nil
-		}
-
-		return pingOk, nil
-	}
-
-	return string(result), nil
 }
 
-func (s *Stats) setCPUPercentUsage() {
-	// based on formula from docker api doc.
-	delta := s.CPUStats.CPUUsage.TotalUsage - s.PreCPUStats.CPUUsage.TotalUsage
-	systemDelta := s.CPUStats.SystemUsage - s.PreCPUStats.SystemUsage
-	cpuNum := s.CPUStats.OnlineCPUs
-	s.CPUStats.CPUUsage.PercentUsage = (float64(delta) / float64(systemDelta)) * float64(cpuNum) * 100.0
+// Export implements the plugin.Exporter interface.
+//
+//nolint:gocyclo,cyclop // this is export function, it can be with high cyclo sometimes.
+func (p *Plugin) Export(key string, rawParams []string, ctx plugin.ContextProvider) (any, error) {
+	params, _, _, err := metrics[key].EvalParams(rawParams, nil)
+	if err != nil {
+		return nil, errs.Wrap(err, "failed to evaluate params")
+	}
+
+	dockerKey := handlers.DockerKey(key)
+
+	handler := handlers.GetDockerHandler(dockerKey)
+	if handler == nil {
+		return nil, zbxerr.ErrorUnsupportedMetric
+	}
+
+	if ctx.LegacyTimeout() {
+		ctx = plugin.OverrideTimeout(ctx, time.Now(), p.options.LegacyTimeout)
+	}
+
+	p.Tracef("query timeout set to: %d", ctx.Timeout())
+
+	var (
+		queryPath = metricsMeta[dockerKey].path
+		query     string
+	)
+
+	switch dockerKey {
+	case handlers.KeyInfo,
+		handlers.KeyContainers,
+		handlers.KeyImages,
+		handlers.KeyImagesDiscovery,
+		handlers.KeyDataUsage,
+		handlers.KeyPing:
+		query = queryPath
+
+		return handler(ctx, p.client, query)
+	case handlers.KeyContainersDiscovery:
+		_, err = strconv.ParseBool(params["All"])
+		if err != nil {
+			return nil, errs.New("invalid value for second argument")
+		}
+
+		query = fmt.Sprintf(queryPath, params["All"])
+
+		return handler(ctx, p.client, query)
+	case handlers.KeyContainerInfo:
+		container := params["Container"]
+
+		// Strip leading slash if present to maintain backwards compatibility with older template discovery.
+		container = strings.TrimPrefix(container, "/")
+
+		if !containerNameRegex.MatchString(container) {
+			return nil, errs.New("invalid container identifier")
+		}
+
+		query = fmt.Sprintf(queryPath, container)
+
+		info := params["Info"]
+		if info != "full" && info != "short" {
+			return nil, errs.New("info must be either 'full' or 'short'")
+		}
+
+		return handler(ctx, p.client, query, info)
+	case handlers.KeyContainerStats:
+		container := params["Container"]
+
+		// Strip leading slash if present to maintain backwards compatibility with older template discovery.
+		container = strings.TrimPrefix(container, "/")
+
+		if !containerNameRegex.MatchString(container) {
+			return nil, errs.New("invalid container identifier")
+		}
+
+		query = fmt.Sprintf(queryPath, container)
+
+		return handler(ctx, p.client, query)
+	default:
+		return nil, zbxerr.ErrorUnsupportedMetric
+	}
 }

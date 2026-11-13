@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -146,7 +141,7 @@ CViewSwitcher.prototype = {
 			return null;
 		}
 
-		switch (obj.tagName.toLowerCase) {
+		switch (obj.tagName.toLowerCase()) {
 			case 'select':
 				return (obj.selectedIndex > -1) ? obj.options[obj.selectedIndex].value : null;
 
@@ -209,6 +204,9 @@ CViewSwitcher.prototype = {
 				obj.style.display = '';
 				break;
 			case 'z-select':
+				obj.style.display = 'inline-grid';
+				break
+			case 'z-textarea-flexible':
 				obj.style.display = 'inline-grid';
 				break
 			default:
@@ -352,7 +350,7 @@ ActionProcessor.prototype = {
 			failed = false;
 
 			for (elementId in conditions[i]) {
-				if (this.getValue(elementId) !== conditions[i][elementId]) {
+				if (this.getValue(elementId) != conditions[i][elementId]) {
 					failed = true;
 					break;
 				}
@@ -370,6 +368,7 @@ ActionProcessor.prototype = {
 
 		for (var i = 0; i < this.actions.length; i++) {
 			action = this.actions[i];
+
 			switch (action.action) {
 				case 'show':
 					this.actionToggle(action.value, this.checkConditions(action.cond));
@@ -378,16 +377,10 @@ ActionProcessor.prototype = {
 					this.actionToggle(action.value, !this.checkConditions(action.cond));
 					break;
 				case 'enable':
-					jQuery(action.value)
-						.prop('disabled', !this.checkConditions(action.cond))
-						.closest('.color-picker')
-						.toggleClass('disabled', !this.checkConditions(action.cond));
+					jQuery(action.value).prop('disabled', !this.checkConditions(action.cond));
 					break;
 				case 'disable':
-					jQuery(action.value)
-						.prop('disabled', this.checkConditions(action.cond))
-						.closest('.color-picker')
-						.toggleClass('disabled', this.checkConditions(action.cond));
+					jQuery(action.value).prop('disabled', this.checkConditions(action.cond));
 					break;
 			}
 		}

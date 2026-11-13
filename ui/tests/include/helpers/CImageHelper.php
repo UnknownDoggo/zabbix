@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 /**
@@ -24,11 +19,13 @@
 class CImageHelper {
 
 	/**
-	 * Image compare threshold.
+	 * Image compare threshold (maximum allowed sum of color channel differences for a single pixel).
+	 * Default of 4 tolerates anti-aliasing noise on rounded corners, where color channels of corner pixels
+	 * can differ by 1-3 units between test runs, while visible differences still fail the comparison.
 	 *
-	 * @var integer
+	 * @var float
 	 */
-	protected static $threshold = 0;
+	protected static $threshold = 4;
 
 	/**
 	 * Default color used to erase regions.
@@ -112,12 +109,8 @@ class CImageHelper {
 		}
 
 		$target = imagecrop($source, $rect);
-		imagedestroy($source);
 
-		$result = self::getImageString($target);
-		imagedestroy($target);
-
-		return $result;
+		return self::getImageString($target);
 	}
 
 	/**
@@ -172,10 +165,7 @@ class CImageHelper {
 			);
 		}
 
-		$result = self::getImageString($image);
-		imagedestroy($image);
-
-		return $result;
+		return self::getImageString($image);
 	}
 
 	/**
@@ -211,8 +201,6 @@ class CImageHelper {
 				$result['ref'] = self::getImageString($reference);
 				$message = 'Image size ('.imagesx($target).'x'.imagesy($target).
 						') doesn\'t match size of reference image ('.$width.'x'.$height.')';
-				imagedestroy($reference);
-				imagedestroy($target);
 
 				throw new Exception($message);
 			}
@@ -238,15 +226,16 @@ class CImageHelper {
 						continue;
 					}
 
-					$diff = ($color1 ^ $color2);
-					if ((((0xff0000 & $diff) >> 16) + ((0xff00 & $diff) >> 8) + (0xff & $diff)) > self::$threshold) {
+					$diff = abs((($color1 >> 16) & 0xff) - (($color2 >> 16) & 0xff))
+							+ abs((($color1 >> 8) & 0xff) - (($color2 >> 8) & 0xff))
+							+ abs(($color1 & 0xff) - ($color2 & 0xff));
+
+					if ($diff > self::$threshold) {
 						$delta++;
 						imagesetpixel($mask, $x, $y, $red);
 					}
 				}
 			}
-
-			imagedestroy($target);
 
 			if ($delta !== 0) {
 				$result['match'] = false;
@@ -263,9 +252,6 @@ class CImageHelper {
 				$result['ref'] = self::getImageString($reference);
 				$result['diff'] = self::getImageString($mask);
 			}
-
-			imagedestroy($reference);
-			imagedestroy($mask);
 		}
 		catch (Exception $e) {
 			$result['match'] = false;

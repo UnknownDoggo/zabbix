@@ -1,29 +1,27 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 #include "zbxtrends.h"
 #include "trends.h"
 
-#include "common.h"
 #include "zbxalgo.h"
-#include "log.h"
 #include "zbxmutexs.h"
 #include "zbxshmem.h"
+#include "zbxnum.h"
+#include "zbxstr.h"
+#include "zbxtime.h"
+
+#define TFC_RECENT_CUTOFF SEC_PER_DAY
 
 typedef struct
 {
@@ -37,6 +35,7 @@ typedef struct
 	zbx_uint32_t		next;		/* index of the next LRU list or unused entry */
 	zbx_uint32_t		prev_value;	/* index of the previous value list */
 	zbx_uint32_t		next_value;	/* index of the next value list */
+	time_t			last_accessed;	/* the last time the entry was accessed */
 }
 zbx_tfc_data_t;
 
@@ -51,6 +50,7 @@ typedef struct
 {
 	zbx_hashset_t	index;
 	zbx_tfc_slot_t	*slots;
+	size_t		slots_size;
 	zbx_uint32_t	slots_num;
 	zbx_uint32_t	free_slot;
 	zbx_uint32_t	free_head;
@@ -59,6 +59,14 @@ typedef struct
 	zbx_uint64_t	hits;
 	zbx_uint64_t	misses;
 	zbx_uint64_t	items_num;
+	zbx_uint64_t	conf_size;
+	zbx_uint32_t	lru_recent_cutoff;	/* Index of the farthest node from the tail the value of  */
+						/* "last_accessed" of which is still within the last */
+						/* TFC_RECENT_CUTOFF seconds. */
+						/* Or UINT32_MAX if such node does not exist. */
+	zbx_uint64_t	recent_entry_num;
+	time_t		last_ts;
+	int		use_clock_gettime;
 }
 zbx_tfc_t;
 
@@ -99,7 +107,7 @@ static zbx_tfc_slot_t	*tfc_alloc_slot(void)
 	if (UINT32_MAX == cache->free_head)
 	{
 		THIS_SHOULD_NEVER_HAPPEN;
-		exit(EXIT_FAILURE);
+		zbx_exit(EXIT_FAILURE);
 	}
 
 	index = cache->free_head;
@@ -170,13 +178,44 @@ static void	*tfc_realloc_func(void *old, size_t size)
 
 static void	tfc_free_func(void *ptr)
 {
-	if (ptr >= (void *)cache->slots && ptr < (void *)(cache->slots + cache->slots_num))
+	if (ptr >= (void *)cache->slots && (char *)ptr < (char *)cache->slots + cache->slots_size)
 	{
 		tfc_free_slot(ptr);
 		return;
 	}
 
 	__tfc_shmem_free_func(ptr);
+}
+
+static time_t	tfc_get_time_now(void)
+{
+	if (SUCCEED == cache->use_clock_gettime)
+	{
+		struct timespec	tp;
+
+		if (0 == clock_gettime(CLOCK_MONOTONIC, &tp))
+			cache->last_ts = tp.tv_sec;
+	}
+	else
+	{
+		time_t	now = time(NULL);
+
+		cache->last_ts = MAX(cache->last_ts, now);
+	}
+
+	return cache->last_ts;
+}
+
+static void	tfc_lru_update_recent_cutoff(void)
+{
+	time_t	time_now = tfc_get_time_now();
+
+	while (UINT32_MAX != cache->lru_recent_cutoff &&
+			time_now - cache->slots[cache->lru_recent_cutoff].data.last_accessed > TFC_RECENT_CUTOFF)
+	{
+		cache->recent_entry_num--;
+		cache->lru_recent_cutoff = cache->slots[cache->lru_recent_cutoff].data.next;
+	}
 }
 
 /******************************************************************************
@@ -199,6 +238,14 @@ static void	tfc_lru_append(zbx_tfc_data_t *data)
 		cache->lru_head = index;
 
 	cache->lru_tail = index;
+
+	data->last_accessed = tfc_get_time_now();
+
+	cache->recent_entry_num++;
+	if (UINT32_MAX == cache->lru_recent_cutoff)
+		cache->lru_recent_cutoff = index;
+
+	tfc_lru_update_recent_cutoff();
 }
 
 /******************************************************************************
@@ -208,6 +255,16 @@ static void	tfc_lru_append(zbx_tfc_data_t *data)
  ******************************************************************************/
 static void	tfc_lru_remove(zbx_tfc_data_t *data)
 {
+	if (UINT32_MAX != cache->lru_recent_cutoff)
+	{
+		zbx_uint32_t	index = tfc_data_slot_index(data);
+		if (data->last_accessed >= cache->slots[cache->lru_recent_cutoff].data.last_accessed)
+			cache->recent_entry_num--;
+
+		if (index == cache->lru_recent_cutoff)
+			cache->lru_recent_cutoff = data->next;
+	}
+
 	if (UINT32_MAX != data->prev)
 		cache->slots[data->prev].data.next = data->next;
 	else
@@ -217,6 +274,8 @@ static void	tfc_lru_remove(zbx_tfc_data_t *data)
 		cache->slots[data->next].data.prev = data->prev;
 	else
 		cache->lru_tail = data->prev;
+
+	tfc_lru_update_recent_cutoff();
 }
 
 /******************************************************************************
@@ -282,7 +341,7 @@ static void	tfc_reserve_slot(void)
 		if (UINT32_MAX == cache->lru_head)
 		{
 			THIS_SHOULD_NEVER_HAPPEN;
-			exit(1);
+			zbx_exit(EXIT_FAILURE);
 		}
 
 		tfc_free_data(&cache->slots[cache->lru_head].data);
@@ -300,14 +359,25 @@ static zbx_tfc_data_t	*tfc_index_add(zbx_tfc_data_t *data_local)
 
 	if (NULL == (data = (zbx_tfc_data_t *)zbx_hashset_insert(&cache->index, data_local, sizeof(zbx_tfc_data_t))))
 	{
-		cache->slots_num = cache->index.num_data;
+		if (cache->slots_num != (zbx_uint32_t)cache->index.num_data)
+		{
+			zabbix_log(LOG_LEVEL_WARNING, "estimated trends function cache slot count %u for " ZBX_FS_UI64 " bytes was "
+					"too large, setting it to %d", cache->slots_num, cache->conf_size,
+					cache->index.num_data);
+
+			/* force slot limit to current hashset size and remove all free slots */
+			cache->slots_num = cache->index.num_data;
+			cache->free_slot = cache->slots_num;
+			cache->free_head = UINT32_MAX;
+		}
+
 		tfc_reserve_slot();
 
 		if (NULL == (data = (zbx_tfc_data_t *)zbx_hashset_insert(&cache->index, data_local,
 				sizeof(zbx_tfc_data_t))))
 		{
 			THIS_SHOULD_NEVER_HAPPEN;
-			exit(EXIT_FAILURE);
+			zbx_exit(EXIT_FAILURE);
 		}
 	}
 
@@ -373,8 +443,9 @@ static const char	*tfc_state_str(zbx_trend_state_t state)
  ******************************************************************************/
 int	zbx_tfc_init(zbx_uint64_t cache_size, char **error)
 {
-	zbx_uint64_t	size_reserved, size_actual;
+	zbx_uint64_t	size_actual, size_entry;
 	int		ret = FAIL;
+	struct timespec	tp;
 
 	if (0 == cache_size)
 	{
@@ -387,8 +458,6 @@ int	zbx_tfc_init(zbx_uint64_t cache_size, char **error)
 	if (SUCCEED != zbx_mutex_create(&tfc_lock, ZBX_MUTEX_TREND_FUNC, error))
 		goto out;
 
-	size_reserved = zbx_shmem_required_size(1, "trend function cache size", "TrendFunctionCacheSize");
-
 	if (SUCCEED != zbx_shmem_create(&tfc_mem, cache_size, "trend function cache size",
 			"TrendFunctionCacheSize", 1, error))
 	{
@@ -397,23 +466,30 @@ int	zbx_tfc_init(zbx_uint64_t cache_size, char **error)
 
 	cache =  (zbx_tfc_t *)__tfc_shmem_realloc_func(NULL, sizeof(zbx_tfc_t));
 
-	size_actual = cache_size;
-	/* (8 + 8) * 3 - overhead for 3 allocations */
-	size_actual -= size_reserved + sizeof(zbx_tfc_t) + (8 + 8) * 3;
+	cache->conf_size = cache_size;
 
-	/* 5/4 - reversing critical load factor which is accounted for when inserting new hashset entry */
-	/* but ignored when creating hashset with the specified size                                    */
-	cache->slots_num = size_actual / (16 * 5 / 4 + sizeof(zbx_tfc_slot_t));
+	/* reserve space for hashset slot and entry array allocations */
+	size_actual = tfc_mem->free_size - (2 * 8) * 2;
+	size_entry = sizeof(zbx_tfc_slot_t) + ZBX_HASHSET_ENTRY_OFFSET;
+
+	/* Estimate the slot limit so that the hashset slot and entry arrays will */
+	/* fit the remaining cache memory. The number of hashset slots must be    */
+	/* 5/4 of hashset entries (critical load factor).                         */
+	cache->slots_num = size_actual / (sizeof(void *) * 5 / 4 + size_entry);
 
 	zabbix_log(LOG_LEVEL_DEBUG, "%s(): slots:%u", __func__, cache->slots_num);
 
-	zbx_hashset_create_ext(&cache->index, cache->slots_num, tfc_hash_func, tfc_compare_func,
+	/* add +4 to compensate for possible rounding errors when checking if hashset */
+	/* should be resized and applying critical load factor '4 / 5'                */
+	zbx_hashset_create_ext(&cache->index, cache->slots_num * 5 / 4 + 4, tfc_hash_func, tfc_compare_func,
 			NULL, tfc_malloc_func, tfc_realloc_func, tfc_free_func);
 
 	cache->lru_head = UINT32_MAX;
 	cache->lru_tail = UINT32_MAX;
 
-	cache->slots = (zbx_tfc_slot_t *)__tfc_shmem_malloc_func(NULL, sizeof(zbx_tfc_slot_t) * cache->slots_num);
+	/* reserve the rest of memory for hashset entries */
+	cache->slots_size = tfc_mem->free_size - (2 * 8);
+	cache->slots = (zbx_tfc_slot_t *)__tfc_shmem_malloc_func(NULL, cache->slots_size);
 
 	cache->free_head = UINT32_MAX;
 	cache->free_slot = 0;
@@ -421,6 +497,22 @@ int	zbx_tfc_init(zbx_uint64_t cache_size, char **error)
 	cache->hits = 0;
 	cache->misses = 0;
 	cache->items_num = 0;
+
+	cache->recent_entry_num = 0;
+	cache->lru_recent_cutoff = UINT32_MAX;
+
+	if (0 == clock_gettime(CLOCK_MONOTONIC, &tp))
+	{
+		cache->last_ts = tp.tv_sec;
+		cache->use_clock_gettime = SUCCEED;
+	}
+	else
+	{
+		zabbix_log(LOG_LEVEL_WARNING, "clock_gettime(CLOCK_MONOTONIC) failed (%s), falling back to time(NULL)",
+				zbx_strerror(errno));
+		cache->last_ts = 0;
+		cache->use_clock_gettime = FAIL;
+	}
 
 	ret = SUCCEED;
 out:
@@ -460,7 +552,7 @@ void	zbx_tfc_destroy(void)
  *               FAIL - no cached item value of the function over the range   *
  *                                                                            *
  ******************************************************************************/
-int	zbx_tfc_get_value(zbx_uint64_t itemid, int start, int end, zbx_trend_function_t function, double *value,
+int	zbx_tfc_get_value(zbx_uint64_t itemid, time_t start, time_t end, zbx_trend_function_t function, double *value,
 		zbx_trend_state_t *state)
 {
 	zbx_tfc_data_t	*data, data_local;
@@ -474,9 +566,9 @@ int	zbx_tfc_get_value(zbx_uint64_t itemid, int start, int end, zbx_trend_functio
 		struct tm	tm_start, tm_end;
 
 		ts_time = start;
-		localtime_r(&ts_time, &tm_start);
+		tm_start = *zbx_localtime(&ts_time, NULL);
 		ts_time = end;
-		localtime_r(&ts_time, &tm_end);
+		tm_end = *zbx_localtime(&ts_time, NULL);
 
 		zabbix_log(LOG_LEVEL_DEBUG, "In %s() itemid:" ZBX_FS_UI64 " %s(%04d.%02d.%02d/%02d,"
 				" %04d.%02d.%02d/%02d)", __func__, itemid, tfc_function_str(function),
@@ -539,7 +631,7 @@ int	zbx_tfc_get_value(zbx_uint64_t itemid, int start, int end, zbx_trend_functio
  *             state    - [IN] the state to cache                             *
  *                                                                            *
  ******************************************************************************/
-void	zbx_tfc_put_value(zbx_uint64_t itemid, int start, int end, zbx_trend_function_t function, double value,
+void	zbx_tfc_put_value(zbx_uint64_t itemid, time_t start, time_t end, zbx_trend_function_t function, double value,
 		zbx_trend_state_t state)
 {
 	zbx_tfc_data_t	*data, data_local, *root;
@@ -554,9 +646,10 @@ void	zbx_tfc_put_value(zbx_uint64_t itemid, int start, int end, zbx_trend_functi
 		char		buf[ZBX_MAX_DOUBLE_LEN + 1];
 
 		ts_time = start;
-		localtime_r(&ts_time, &tm_start);
+		tm_start = *zbx_localtime(&ts_time, NULL);
+
 		ts_time = end;
-		localtime_r(&ts_time, &tm_end);
+		tm_end = *zbx_localtime(&ts_time, NULL);
 
 		if (state == ZBX_TREND_STATE_NODATA)
 			zbx_strlcpy(buf, "none", sizeof(buf));
@@ -664,6 +757,10 @@ int	zbx_tfc_get_stats(zbx_tfc_stats_t *stats, char **error)
 	stats->misses = cache->misses;
 	stats->items_num = cache->items_num;
 	stats->requests_num = cache->index.num_data - cache->items_num;
+	stats->slots_num = cache->slots_num;
+
+	tfc_lru_update_recent_cutoff();
+	stats->recent_entry_num = cache->recent_entry_num;
 
 	UNLOCK_CACHE;
 

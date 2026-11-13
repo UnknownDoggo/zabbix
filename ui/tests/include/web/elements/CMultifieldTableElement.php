@@ -1,26 +1,21 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/../CElement.php';
+require_once __DIR__.'/../CElement.php';
 
 use \Facebook\WebDriver\Exception\UnrecognizedExceptionException;
 use \Facebook\WebDriver\Exception\ElementNotInteractableException;
@@ -37,7 +32,8 @@ class CMultifieldTableElement extends CTableElement {
 	 */
 	protected $selectors = [
 		'header' => 'xpath:./thead/tr/th',
-		'row' => 'xpath:./tbody/tr[contains(@class, "form_row") or contains(@class, "pairRow") or contains(@class, "editable_table_row")]',
+		'row' => 'xpath:./tbody/tr[contains(@class, "form_row") or contains(@class, "pairRow") or'.
+			' contains(@class, "editable_table_row") or contains(@id, "url-row")]',
 		'column' => 'xpath:./td'
 	];
 
@@ -129,6 +125,9 @@ class CMultifieldTableElement extends CTableElement {
 	 * [ tag            ] [ value             ]
 	 * Should be defined as follows (array keys match table headers):
 	 * ['Name' => 'tag', 'Value' => 'value']
+	 *
+	 * In case if selectors need to be specified for tables with headings, mapping keys also should match table header:
+	 * ['Name' => ['selector' => 'xpath:./input[@id="name"]'], 'Value' => ['selector' => 'xpath:./input[@id="value"]']]
 	 *
 	 * Be advised that when mapping is not set, multifield operations are slower and fields are indexed by indices (for
 	 * tables without headers) or by header text (for tables with headers).
@@ -331,7 +330,7 @@ class CMultifieldTableElement extends CTableElement {
 	 */
 	public function addRow($values) {
 		$rows = $this->getRows()->count();
-		$this->query('button:Add')->one()->click();
+		$this->query('button:Add')->one()->hoverMouse()->click();
 
 		// Wait until new table row appears.
 		$this->query('xpath:.//'.CXPathHelper::fromSelector($this->selectors['row']).'['.($rows + 1).']')->waitUntilPresent();
@@ -461,7 +460,7 @@ class CMultifieldTableElement extends CTableElement {
 	 *        This will add row "tag4:4", will update row with index 1 to "new tag2:new 2", will remove rows by index 2
 	 *        and rows by tag name "tag1".
 	 *
-	 * @param array $data    data array to be set.
+	 * @param array	$data	data array to be set.
 	 *
 	 * @throws Exception
 	 *
@@ -472,7 +471,7 @@ class CMultifieldTableElement extends CTableElement {
 			$data = [$data];
 		}
 
-		// If the first row  already presents in multifield table no need to press Add.
+		// If the first row is already present in multifield table, then there is no need to press Add button.
 		$rows = $this->getRows()->count();
 		if (count($data) >= 1 && CTestArrayHelper::get($data[0], 'action') === null && $rows >= 1) {
 			if ($this->mapping === null) {

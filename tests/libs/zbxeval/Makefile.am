@@ -1,3 +1,5 @@
+include ../Makefile.include
+
 if SERVER
 SERVER_tests = \
 	zbx_eval_parse_expression \
@@ -8,101 +10,55 @@ SERVER_tests = \
 	zbx_eval_get_constant \
 	zbx_eval_prepare_filter \
 	zbx_eval_get_group_filter \
-	zbx_eval_parse_query
-endif
+	zbx_eval_parse_query \
+	zbx_eval_get_functionids \
+	zbx_eval_get_functionids_ordered \
+	zbx_eval_check_timer_functions \
+	zbx_eval_extract_item_refs \
+	zbx_eval_replace_functionid \
+	zbx_eval_copy \
+	zbx_eval_format_function_error \
+	zbx_get_serialized_expression_functionids \
+	zbx_eval_deserialize_dyn \
+	zbx_eval_substitute_macros \
+	zbx_eval_query_subtitute_user_macros \
+	zbx_eval_calc_kurtosis \
+	zbx_eval_calc_mad \
+	zbx_eval_calc_skewness \
+	zbx_eval_calc_stddevpop \
+	zbx_eval_calc_stddevsamp \
+	zbx_eval_calc_sumofsquares \
+	zbx_eval_calc_varpop \
+	zbx_eval_calc_varsamp \
+	zbx_eval_calc_avg \
+	zbx_eval_calc_min \
+	zbx_eval_calc_max \
+	zbx_eval_calc_sum \
+	zbx_eval_variant_to_value_type
 
 noinst_PROGRAMS = $(SERVER_tests)
 
-if SERVER
 COMMON_SRC_FILES = \
-	../../zbxmocktest.h
+	../../zbxmocktest.h \
+	../../zbxmockvariant.c \
+	../../zbxmockvariant.h
 
-COMMON_LIB_FILES = \
-	$(top_srcdir)/src/zabbix_server/alerter/libzbxalerter.a \
-	$(top_srcdir)/src/zabbix_server/dbsyncer/libzbxdbsyncer.a \
-	$(top_srcdir)/src/zabbix_server/dbconfig/libzbxdbconfig.a \
-	$(top_srcdir)/src/zabbix_server/discoverer/libzbxdiscoverer.a \
-	$(top_srcdir)/src/zabbix_server/pinger/libzbxpinger.a \
-	$(top_srcdir)/src/zabbix_server/poller/libzbxpoller.a \
-	$(top_srcdir)/src/zabbix_server/housekeeper/libzbxhousekeeper.a \
-	$(top_srcdir)/src/zabbix_server/timer/libzbxtimer.a \
-	$(top_srcdir)/src/zabbix_server/trapper/libzbxtrapper.a \
-	$(top_srcdir)/src/zabbix_server/snmptrapper/libzbxsnmptrapper.a \
-	$(top_srcdir)/src/zabbix_server/httppoller/libzbxhttppoller.a \
-	$(top_srcdir)/src/zabbix_server/escalator/libzbxescalator.a \
-	$(top_srcdir)/src/zabbix_server/proxypoller/libzbxproxypoller.a \
-	$(top_srcdir)/src/zabbix_server/selfmon/libzbxselfmon.a \
-	$(top_srcdir)/src/zabbix_server/vmware/libzbxvmware.a \
-	$(top_srcdir)/src/zabbix_server/taskmanager/libzbxtaskmanager.a \
-	$(top_srcdir)/src/zabbix_server/ipmi/libipmi.a \
-	$(top_srcdir)/src/zabbix_server/odbc/libzbxodbc.a \
-	$(top_srcdir)/src/zabbix_server/scripts/libzbxscripts.a \
-	$(top_srcdir)/src/zabbix_server/preprocessor/libpreprocessor.a \
-	$(top_srcdir)/src/libs/zbxserver/libzbxserver.a \
-	$(top_srcdir)/src/libs/zbxdbcache/libzbxdbcache.a \
-	$(top_srcdir)/src/libs/zbxeval/libzbxeval.a \
-	$(top_srcdir)/src/libs/zbxserialize/libzbxserialize.a \
-	$(top_srcdir)/src/libs/zbxtrends/libzbxtrends.a \
-	$(top_srcdir)/src/libs/zbxsysinfo/libzbxserversysinfo.a \
-	$(top_srcdir)/src/libs/zbxsysinfo/common/libcommonsysinfo.a \
-	$(top_srcdir)/src/libs/zbxsysinfo/simple/libsimplesysinfo.a \
-	$(top_srcdir)/src/libs/zbxshmem/libzbxshmem.a \
-	$(top_srcdir)/src/libs/zbxself/libzbxself.a \
-	$(top_srcdir)/src/libs/zbxalgo/libzbxalgo.a \
-	$(top_srcdir)/src/libs/zbxconf/libzbxconf.a \
-	$(top_srcdir)/src/libs/zbxmedia/libzbxmedia.a \
-	$(top_srcdir)/src/libs/zbxserver/libzbxserver.a \
-	$(top_srcdir)/src/zabbix_server/availability/libavailability.a \
-	$(top_srcdir)/src/libs/zbxavailability/libzbxavailability.a \
-	$(top_srcdir)/src/libs/zbxipcservice/libzbxipcservice.a \
-	$(top_srcdir)/src/libs/zbxcommon/libzbxcommon.a \
-	$(top_srcdir)/src/libs/zbxnix/libzbxnix.a \
-	$(top_srcdir)/src/libs/zbxcrypto/libzbxcrypto.a \
-	$(top_srcdir)/src/libs/zbxcomms/libzbxcomms.a \
-	$(top_srcdir)/src/libs/zbxcompress/libzbxcompress.a \
-	$(top_srcdir)/src/libs/zbxcommon/libzbxcommon.a \
-	$(top_srcdir)/src/libs/zbxcrypto/libzbxcrypto.a \
-	$(top_srcdir)/src/libs/zbxcommshigh/libzbxcommshigh.a \
-	$(top_srcdir)/src/libs/zbxjson/libzbxjson.a \
-	$(top_srcdir)/src/libs/zbxvariant/libzbxvariant.a \
-	$(top_srcdir)/src/libs/zbxregexp/libzbxregexp.a \
-	$(top_srcdir)/src/libs/zbxhttp/libzbxhttp.a \
-	$(top_srcdir)/src/libs/zbxipcservice/libzbxipcservice.a \
-	$(top_srcdir)/src/libs/zbxexec/libzbxexec.a \
-	$(top_srcdir)/src/libs/zbxicmpping/libzbxicmpping.a \
-	$(top_srcdir)/src/libs/zbxdbupgrade/libzbxdbupgrade.a \
-	$(top_srcdir)/src/libs/zbxdbhigh/libzbxdbhigh.a \
-	$(top_srcdir)/src/libs/zbxdb/libzbxdb.a \
-	$(top_srcdir)/src/libs/zbxmodules/libzbxmodules.a \
-	$(top_srcdir)/src/libs/zbxtasks/libzbxtasks.a \
-	$(top_srcdir)/src/libs/zbxlog/libzbxlog.a \
-	$(top_srcdir)/src/libs/zbxthreads/libzbxthreads.a \
-	$(top_srcdir)/src/libs/zbxmutexs/libzbxmutexs.a \
-	$(top_srcdir)/src/libs/zbxconf/libzbxconf.a \
-	$(top_srcdir)/src/libs/zbxhistory/libzbxhistory.a \
-	$(top_srcdir)/src/zabbix_server/libzbxserver.a \
-	$(top_srcdir)/tests/libzbxmocktest.a \
-	$(top_srcdir)/tests/libzbxmockdata.a \
-	$(top_srcdir)/src/libs/zbxalgo/libzbxalgo.a \
-	$(top_srcdir)/src/libs/zbxdbhigh/libzbxdbhigh.a \
-	$(top_srcdir)/src/libs/zbxvault/libzbxvault.a \
-	$(top_builddir)/src/libs/zbxcyberark/libzbxcyberark.a \
-	$(top_builddir)/src/libs/zbxhashicorp/libzbxhashicorp.a \
-	$(top_builddir)/src/libs/zbxkvs/libzbxkvs.a \
-	$(top_srcdir)/src/libs/zbxhttp/libzbxhttp.a
+EVAL_LIBS = \
+	$(SERVER_GROUPED_LIBS) \
+	$(MOCK_DATA_DEPS) \
+	$(MOCK_TEST_DEPS)
 
-COMMON_COMPILER_FLAGS = -I@top_srcdir@/tests
+COMMON_COMPILER_FLAGS = -I@top_srcdir@/tests $(CMOCKA_CFLAGS) $(YAML_CFLAGS) $(TLS_CFLAGS)
 
 zbx_eval_parse_expression_SOURCES = \
 	zbx_eval_parse_expression.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_parse_expression_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_parse_expression_LDADD = $(EVAL_LIBS)
 
 zbx_eval_parse_expression_LDADD += @SERVER_LIBS@
 
-zbx_eval_parse_expression_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_parse_expression_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_parse_expression_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -110,12 +66,11 @@ zbx_eval_parse_expression_CFLAGS = $(COMMON_COMPILER_FLAGS)
 zbx_eval_serialize_SOURCES = \
 	zbx_eval_serialize.c
 
-zbx_eval_serialize_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_serialize_LDADD = $(EVAL_LIBS)
 
 zbx_eval_serialize_LDADD += @SERVER_LIBS@
 
-zbx_eval_serialize_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_serialize_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_serialize_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -124,12 +79,11 @@ zbx_eval_compose_expression_SOURCES = \
 	zbx_eval_compose_expression.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_compose_expression_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_compose_expression_LDADD = $(EVAL_LIBS)
 
 zbx_eval_compose_expression_LDADD += @SERVER_LIBS@
 
-zbx_eval_compose_expression_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_compose_expression_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_compose_expression_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -138,12 +92,11 @@ zbx_eval_execute_SOURCES = \
 	zbx_eval_execute.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_execute_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_execute_LDADD = $(EVAL_LIBS)
 
 zbx_eval_execute_LDADD += @SERVER_LIBS@
 
-zbx_eval_execute_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_execute_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_execute_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -152,12 +105,11 @@ zbx_eval_execute_ext_SOURCES = \
 	zbx_eval_execute_ext.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_execute_ext_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_execute_ext_LDADD = $(EVAL_LIBS)
 
 zbx_eval_execute_ext_LDADD += @SERVER_LIBS@
 
-zbx_eval_execute_ext_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_execute_ext_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_execute_ext_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -166,12 +118,11 @@ zbx_eval_get_constant_SOURCES = \
 	zbx_eval_get_constant.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_get_constant_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_get_constant_LDADD = $(EVAL_LIBS)
 
 zbx_eval_get_constant_LDADD += @SERVER_LIBS@
 
-zbx_eval_get_constant_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_get_constant_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_get_constant_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -180,12 +131,11 @@ zbx_eval_prepare_filter_SOURCES = \
 	zbx_eval_prepare_filter.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_prepare_filter_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_prepare_filter_LDADD = $(EVAL_LIBS)
 
 zbx_eval_prepare_filter_LDADD += @SERVER_LIBS@
 
-zbx_eval_prepare_filter_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_prepare_filter_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_prepare_filter_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -194,12 +144,11 @@ zbx_eval_get_group_filter_SOURCES = \
 	zbx_eval_get_group_filter.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_get_group_filter_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_get_group_filter_LDADD = $(EVAL_LIBS)
 
 zbx_eval_get_group_filter_LDADD += @SERVER_LIBS@
 
-zbx_eval_get_group_filter_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_get_group_filter_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_get_group_filter_CFLAGS = $(COMMON_COMPILER_FLAGS)
 
@@ -208,13 +157,349 @@ zbx_eval_parse_query_SOURCES = \
 	zbx_eval_parse_query.c \
 	mock_eval.c mock_eval.h
 
-zbx_eval_parse_query_LDADD = \
-	$(COMMON_LIB_FILES)
+zbx_eval_parse_query_LDADD = $(EVAL_LIBS)
 
 zbx_eval_parse_query_LDADD += @SERVER_LIBS@
 
-zbx_eval_parse_query_LDFLAGS = @SERVER_LDFLAGS@
+zbx_eval_parse_query_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
 
 zbx_eval_parse_query_CFLAGS = $(COMMON_COMPILER_FLAGS)
-endif
 
+#zbx_eval_get_functionids
+
+zbx_eval_get_functionids_SOURCES = \
+	zbx_eval_get_functionids.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_get_functionids_LDADD = $(EVAL_LIBS)
+
+zbx_eval_get_functionids_LDADD += @SERVER_LIBS@
+
+zbx_eval_get_functionids_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_get_functionids_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_get_functionids_ordered
+
+zbx_eval_get_functionids_ordered_SOURCES = \
+	zbx_eval_get_functionids_ordered.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_get_functionids_ordered_LDADD = $(EVAL_LIBS)
+
+zbx_eval_get_functionids_ordered_LDADD += @SERVER_LIBS@
+
+zbx_eval_get_functionids_ordered_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_get_functionids_ordered_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_check_timer_functions
+
+zbx_eval_check_timer_functions_SOURCES = \
+	zbx_eval_check_timer_functions.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_check_timer_functions_LDADD = $(EVAL_LIBS)
+
+zbx_eval_check_timer_functions_LDADD += @SERVER_LIBS@
+
+zbx_eval_check_timer_functions_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_check_timer_functions_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_extract_item_refs
+
+zbx_eval_extract_item_refs_SOURCES = \
+	zbx_eval_extract_item_refs.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_extract_item_refs_LDADD = $(EVAL_LIBS)
+
+zbx_eval_extract_item_refs_LDADD += @SERVER_LIBS@
+
+zbx_eval_extract_item_refs_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_extract_item_refs_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_replace_functionid
+
+zbx_eval_replace_functionid_SOURCES = \
+	zbx_eval_replace_functionid.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_replace_functionid_LDADD = $(EVAL_LIBS)
+
+zbx_eval_replace_functionid_LDADD += @SERVER_LIBS@
+
+zbx_eval_replace_functionid_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_replace_functionid_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_copy
+
+zbx_eval_copy_SOURCES = \
+	zbx_eval_copy.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_copy_LDADD = $(EVAL_LIBS)
+
+zbx_eval_copy_LDADD += @SERVER_LIBS@
+
+zbx_eval_copy_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_copy_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_format_function_error
+
+zbx_eval_format_function_error_SOURCES = \
+	zbx_eval_format_function_error.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_format_function_error_LDADD = $(EVAL_LIBS)
+
+zbx_eval_format_function_error_LDADD += @SERVER_LIBS@
+
+zbx_eval_format_function_error_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_format_function_error_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_get_serialized_expression_functionids
+
+zbx_get_serialized_expression_functionids_SOURCES = \
+	zbx_get_serialized_expression_functionids.c \
+	mock_eval.c mock_eval.h
+
+zbx_get_serialized_expression_functionids_LDADD = $(EVAL_LIBS)
+
+zbx_get_serialized_expression_functionids_LDADD += @SERVER_LIBS@
+
+zbx_get_serialized_expression_functionids_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_get_serialized_expression_functionids_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_deserialize_dyn
+
+zbx_eval_deserialize_dyn_SOURCES = \
+	zbx_eval_deserialize_dyn.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_deserialize_dyn_LDADD = $(EVAL_LIBS)
+
+zbx_eval_deserialize_dyn_LDADD += @SERVER_LIBS@
+
+zbx_eval_deserialize_dyn_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_deserialize_dyn_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_substitute_macros
+
+zbx_eval_substitute_macros_SOURCES = \
+	zbx_eval_substitute_macros.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_substitute_macros_LDADD = $(EVAL_LIBS)
+
+zbx_eval_substitute_macros_LDADD += @SERVER_LIBS@
+
+zbx_eval_substitute_macros_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_substitute_macros_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_query_subtitute_user_macros
+
+zbx_eval_query_subtitute_user_macros_SOURCES = \
+	zbx_eval_query_subtitute_user_macros.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_query_subtitute_user_macros_LDADD = $(EVAL_LIBS)
+
+zbx_eval_query_subtitute_user_macros_LDADD += @SERVER_LIBS@
+
+zbx_eval_query_subtitute_user_macros_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_query_subtitute_user_macros_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_kurtosis
+
+zbx_eval_calc_kurtosis_SOURCES = \
+	zbx_eval_calc_kurtosis.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_kurtosis_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_kurtosis_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_kurtosis_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_kurtosis_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_mad
+
+zbx_eval_calc_mad_SOURCES = \
+	zbx_eval_calc_mad.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_mad_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_mad_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_mad_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_mad_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_skewness
+
+zbx_eval_calc_skewness_SOURCES = \
+	zbx_eval_calc_skewness.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_skewness_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_skewness_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_skewness_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_skewness_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_stddevpop
+
+zbx_eval_calc_stddevpop_SOURCES = \
+	zbx_eval_calc_stddevpop.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_stddevpop_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_stddevpop_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_stddevpop_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_stddevpop_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_stddevsamp
+
+zbx_eval_calc_stddevsamp_SOURCES = \
+	zbx_eval_calc_stddevsamp.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_stddevsamp_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_stddevsamp_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_stddevsamp_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_stddevsamp_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_sumofsquares
+
+zbx_eval_calc_sumofsquares_SOURCES = \
+	zbx_eval_calc_sumofsquares.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_sumofsquares_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_sumofsquares_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_sumofsquares_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_sumofsquares_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_varpop
+
+zbx_eval_calc_varpop_SOURCES = \
+	zbx_eval_calc_varpop.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_varpop_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_varpop_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_varpop_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_varpop_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_varsamp
+
+zbx_eval_calc_varsamp_SOURCES = \
+	zbx_eval_calc_varsamp.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_varsamp_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_varsamp_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_varsamp_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_varsamp_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_avg
+
+zbx_eval_calc_avg_SOURCES = \
+	zbx_eval_calc_avg.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_avg_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_avg_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_avg_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_avg_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_min
+
+zbx_eval_calc_min_SOURCES = \
+	zbx_eval_calc_min.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_min_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_min_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_min_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_min_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_max
+
+zbx_eval_calc_max_SOURCES = \
+	zbx_eval_calc_max.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_max_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_max_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_max_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_max_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_calc_sum
+
+zbx_eval_calc_sum_SOURCES = \
+	zbx_eval_calc_sum.c \
+	mock_eval.c mock_eval.h
+
+zbx_eval_calc_sum_LDADD = $(EVAL_LIBS)
+
+zbx_eval_calc_sum_LDADD += @SERVER_LIBS@
+
+zbx_eval_calc_sum_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+zbx_eval_calc_sum_CFLAGS = $(COMMON_COMPILER_FLAGS)
+
+#zbx_eval_variant_to_value_type
+
+zbx_eval_variant_to_value_type_SOURCES = \
+	zbx_eval_variant_to_value_type.c \
+	mock_eval.c mock_eval.h \
+	$(COMMON_SRC_FILES)
+
+zbx_eval_variant_to_value_type_LDADD = \
+	$(EVAL_LIBS)
+
+zbx_eval_variant_to_value_type_LDADD += @SERVER_LIBS@
+
+zbx_eval_variant_to_value_type_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS)
+
+zbx_eval_variant_to_value_type_CFLAGS = $(COMMON_COMPILER_FLAGS)
+endif

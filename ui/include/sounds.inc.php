@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -61,24 +56,29 @@ function getMessageSettings() {
 		'sounds.'.TRIGGER_SEVERITY_AVERAGE => 'alarm_average.mp3',
 		'sounds.'.TRIGGER_SEVERITY_HIGH => 'alarm_high.mp3',
 		'sounds.'.TRIGGER_SEVERITY_DISASTER => 'alarm_disaster.mp3',
-		'show_suppressed' => 0
+		'show_suppressed' => 0,
+		'snoozed.eventid' => 0
 	];
 
 	$dbProfiles = DBselect(
-		'SELECT p.idx,p.source,p.value_str'.
+		'SELECT p.idx,p.source,p.value_id,p.value_str,type'.
 		' FROM profiles p'.
 		' WHERE p.userid='.CWebUser::$data['userid'].
 			' AND '.dbConditionString('p.idx', ['web.messages'])
 	);
+
 	while ($profile = DBfetch($dbProfiles)) {
-		$messages[$profile['source']] = $profile['value_str'];
+		$messages[$profile['source']] = $profile['type'] == PROFILE_TYPE_ID
+			? $profile['value_id']
+			: $profile['value_str'];
 	}
 
 	if ($messages['triggers.severities'] === null) {
 		$messages['triggers.severities'] = $defSeverities;
 	}
 	else {
-		$messages['triggers.severities'] = unserialize($messages['triggers.severities']);
+		$selected = json_decode($messages['triggers.severities'], true) ?: [];
+		$messages['triggers.severities'] = array_fill_keys($selected, 1);
 	}
 
 	return $messages;
@@ -89,19 +89,21 @@ function updateMessageSettings($messages) {
 		$messages['enabled'] = 0;
 	}
 	if (isset($messages['triggers.severities'])) {
-		$messages['triggers.severities'] = serialize(array_filter($messages['triggers.severities'], function($v) {
-			return $v == 1;
-		}));
+		$selected = array_filter($messages['triggers.severities'], function($v) {
+			return $v == TRIGGER_SEVERITY_ON;
+		});
+		$messages['triggers.severities'] = json_encode(array_keys($selected));
 	}
 
 	$dbProfiles = DBselect(
-		'SELECT p.profileid,p.idx,p.source,p.value_str'.
+		'SELECT p.profileid,p.idx,p.source,p.value_id,p.value_str,type'.
 		' FROM profiles p'.
 		' WHERE p.userid='.CWebUser::$data['userid'].
 			' AND '.dbConditionString('p.idx', ['web.messages'])
 	);
+
 	while ($profile = DBfetch($dbProfiles)) {
-		$profile['value'] = $profile['value_str'];
+		$profile['value'] = $profile['type'] == PROFILE_TYPE_ID ? $profile['value_id'] : $profile['value_str'];
 		$dbMessages[$profile['source']] = $profile;
 	}
 
@@ -119,9 +121,15 @@ function updateMessageSettings($messages) {
 			'userid' => CWebUser::$data['userid'],
 			'idx' => 'web.messages',
 			'source' => $key,
-			'value_str' =>  $value,
-			'type' => PROFILE_TYPE_STR
+			'type' => $key === 'snoozed.eventid' ? PROFILE_TYPE_ID : PROFILE_TYPE_STR
 		];
+
+		if ($values['type'] == PROFILE_TYPE_ID) {
+			$values['value_id'] = $value;
+		}
+		else {
+			$values['value_str'] = $value;
+		}
 
 		if (!isset($dbMessages[$key])) {
 			$inserts[] = $values;

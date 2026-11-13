@@ -1,29 +1,27 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CLegacyWebTest.php';
-require_once dirname(__FILE__).'/../../../include/items.inc.php';
-require_once dirname(__FILE__).'/../../../include/classes/api/services/CItemGeneral.php';
-require_once dirname(__FILE__).'/../../../include/classes/api/services/CItem.php';
 
-use Facebook\WebDriver\WebDriverBy;
+use Facebook\WebDriver\Exception\ElementClickInterceptedException;
+use Facebook\WebDriver\Exception\NoSuchElementException;
+
+require_once __DIR__.'/../../include/CLegacyWebTest.php';
+require_once __DIR__.'/../../../include/items.inc.php';
+require_once __DIR__.'/../../../include/classes/api/services/CItemGeneral.php';
+require_once __DIR__.'/../../../include/classes/api/services/CItem.php';
+require_once __DIR__.'/../behaviors/CMessageBehavior.php';
 
 /**
  * @backup items
@@ -32,6 +30,19 @@ use Facebook\WebDriver\WebDriverBy;
  * @ignoreBrowserErrors
  */
 class testFormItem extends CLegacyWebTest {
+
+	/**
+	 * Attach MessageBehavior and TableBehavior to the test.
+	 *
+	 * @return array
+	 */
+	public function getBehaviors() {
+		return [
+			CMessageBehavior::class,
+			CTableBehavior::class,
+			CDatatableBehavior::class
+		];
+	}
 
 	/**
 	 * The name of the test host created in the test data set.
@@ -169,6 +180,12 @@ class testFormItem extends CLegacyWebTest {
 				['type' => 'Calculated', 'host' => 'Simple form test host']
 			],
 			[
+				['type' => 'Script', 'host' => 'Simple form test host']
+			],
+			[
+				['type' => 'Browser', 'host' => 'Simple form test host']
+			],
+			[
 				['type' => 'Zabbix agent', 'template' => 'Inheritance test template']
 			],
 			[
@@ -181,7 +198,7 @@ class testFormItem extends CLegacyWebTest {
 			[
 				[
 					'type' => 'Zabbix agent',
-					'template' => 'Template inheritance test host',
+					'host' => 'Template inheritance test host',
 					'key' => 'test-inheritance-item1'
 				]
 			],
@@ -310,12 +327,21 @@ class testFormItem extends CLegacyWebTest {
 				['type' => 'Calculated', 'template' => 'Inheritance test template']
 			],
 			[
+				['type' => 'Script', 'template' => 'Inheritance test template']
+			],
+			[
+				['type' => 'Browser', 'template' => 'Inheritance test template']
+			],
+			[
 				[
 					'host' => 'Template inheritance test host',
 					'hostTemplate' => 'Inheritance test template',
 					'key' => 'test-inheritance-item-preprocessing',
 					'preprocessing' => true
 				]
+			],
+			[
+				['type' => 'Dependent item', 'value_type' => 'Numeric (unsigned)', 'host' => 'Simple form test host']
 			]
 		];
 	}
@@ -351,14 +377,20 @@ class testFormItem extends CLegacyWebTest {
 				$templateid = $template_info['templateid'];
 		}
 
-		$this->zbxTestLogin(
-			'items.php?form='.(isset($itemid) ? 'update' : 'create').
-			'&hostid='.$hostid.(isset($itemid) ? '&itemid='.$itemid : '').'&context='.$context
-		);
+		$this->page->login()->open('zabbix.php?action=item.list&filter_set=1&filter_hostids%5B0%5D='.$hostid.'&context='.$context);
+		$this->page->assertTitle('Configuration of items');
+		$this->page->assertHeader('Items');
 
-		$this->zbxTestCheckTitle('Configuration of items');
-		$this->zbxTestCheckHeader('Items');
-		$form = $this->query('id:item-form')->asForm()->waitUntilVisible()->one();
+		$this->query(isset($itemid)
+			? 'link:'.CDBHelper::getValue('SELECT name from items WHERE itemid='.$itemid)
+			: 'button:Create item'
+		)->one()->click();
+
+		$dialog = COverlayDialogElement::find()->one()->waitUntilReady();
+		$this->page->assertTitle('Configuration of items');
+		$this->assertEquals(isset($itemid) ? 'Item' : 'New item', $dialog->getTitle());
+		$form = $dialog->asForm();
+		$dialog_footer = $dialog->getFooter();
 
 		if (isset($templateid)) {
 			$this->zbxTestTextPresent('Parent items');
@@ -370,18 +402,20 @@ class testFormItem extends CLegacyWebTest {
 			$this->zbxTestTextNotPresent('Parent items');
 		}
 
-		$this->zbxTestTextPresent('Name');
-		$this->zbxTestAssertVisibleId('name');
-		$this->zbxTestAssertAttribute("//input[@id='name']", 'maxlength', 255);
-		$this->zbxTestAssertAttribute("//input[@id='name']", 'autofocus');
+		$this->assertTrue($form->getField('Name')->isDisplayed());
+		$this->assertEquals(255, $form->getField('Name')->getAttribute('maxlength'));
+		$this->assertEquals('true', $form->getField('Name')->getAttribute('autofocus'));
+
 		if (isset($templateid)) {
-			$this->zbxTestAssertAttribute("//input[@id='name']", 'readonly');
+			$this->assertEquals('true', $form->getField('Name')->getAttribute('readonly'));
 		}
 
-		$this->zbxTestTextPresent('Type');
+		$this->assertTrue($form->getField('Type')->isDisplayed());
+		$type_field = $form->getField('Type')->asDropdown();
+
 		if (!isset($templateid)) {
-			$this->zbxTestAssertVisibleId('type');
-			$this->zbxTestDropdownHasOptions('type', [
+			$options = $type_field->getOptions()->asText();
+			$this->assertEquals($options, [
 				'Zabbix agent',
 				'Zabbix agent (active)',
 				'Simple check',
@@ -391,35 +425,38 @@ class testFormItem extends CLegacyWebTest {
 				'Zabbix trapper',
 				'External check',
 				'Database monitor',
+				'HTTP agent',
 				'IPMI agent',
 				'SSH agent',
 				'TELNET agent',
 				'JMX agent',
-				'Calculated'
+				'Calculated',
+				'Dependent item',
+				'Script',
+				'Browser',
+				'Telemetry query'
 			]);
 			if (isset($data['type'])) {
-				$this->zbxTestDropdownSelect('type', $data['type']);
+				$type_field->select($data['type']);
 				$type = $data['type'];
 			}
 			else {
-				$type = $this->zbxTestGetSelectedLabel('type');
+				$type = $type_field->getText();
 			}
 		}
 		else {
-			$this->zbxTestAssertVisibleId('type');
-			$this->zbxTestAssertAttribute("//z-select[@id='type']", 'readonly');
-
-			$type = $this->zbxTestGetSelectedLabel('type');
+			$this->assertEquals('true', $form->getField('Type')->getAttribute('readonly'));
+			$type = $type_field->getText();
 		}
 
-		$this->zbxTestTextPresent('Key');
-		$this->zbxTestAssertVisibleId('key');
-		$this->zbxTestAssertAttribute("//input[@id='key']", 'maxlength', 2048);
+		$this->assertTrue($form->getField('Key')->isDisplayed());
+		$this->assertEquals(2048, $form->getField('Key')->getAttribute('maxlength'));
+
 		if (!isset($templateid)) {
-			$this->zbxTestAssertElementPresentId('keyButton');
+			$this->assertTrue($form->query('xpath://button[@class="js-select-key btn-grey"]')->one()->isDisplayed());
 		}
 		else {
-			$this->zbxTestAssertAttribute("//input[@id='key']", 'readonly');
+			$this->assertEquals('true', $form->getField('Key')->getAttribute('readonly'));
 		}
 
 		if ($type == 'Database monitor' && !isset($itemid)) {
@@ -427,7 +464,7 @@ class testFormItem extends CLegacyWebTest {
 		}
 
 		if ($type == 'SSH agent' && !isset($itemid)) {
-			$this->zbxTestAssertElementValue('key', 'ssh.run[<unique short description>,<ip>,<port>,<encoding>]');
+			$this->zbxTestAssertElementValue('key', 'ssh.run[<unique short description>,<ip>,<port>,<encoding>,<ssh options>,<subsystem>]');
 		}
 
 		if ($type == 'TELNET agent' && !isset($itemid)) {
@@ -436,59 +473,56 @@ class testFormItem extends CLegacyWebTest {
 
 		if ($type == 'JMX agent' && !isset($itemid)) {
 			$this->zbxTestAssertElementValue('key', '');
-			$this->zbxTestAssertElementNotPresentXpath("//button[@id='keyButton'][@disabled]");
+			$this->assertTrue($dialog->query('button:Select')->one()->isEnabled());
 		}
 
 		if (isset($templateid)) {
-			$value_type = $this->zbxTestGetSelectedLabel('value_type');
+			$value_type = $form->getField('Type of information')->asDropdown()->getText();
 		}
 		elseif (isset($data['value_type'])) {
-			$this->zbxTestDropdownSelect('value_type', $data['value_type']);
+			$form->getField('Type of information')->asDropdown()->select($data['value_type']);
 			$value_type = $data['value_type'];
 		}
 		else {
-			$value_type = $this->zbxTestGetSelectedLabel('value_type');
+			$value_type = $form->getField('Type of information')->asDropdown()->getText();
 		}
 
 		if ($type == 'SSH agent') {
 			if (isset($data['authtype'])) {
-				$this->zbxTestDropdownSelect('authtype', $data['authtype']);
+				$form->getField('Authentication method')->asDropdown()->select($data['authtype']);
 				$authtype = $data['authtype'];
 			}
 			else {
-				$authtype = $this->zbxTestGetSelectedLabel('authtype');
+				$authtype = $form->getField('Authentication method')->asDropdown()->getText();
 			}
 		}
 
 		if ($type == 'Database monitor') {
-			$this->zbxTestTextPresent('SQL query');
-			$this->zbxTestAssertVisibleId('params_ap');
-			$this->zbxTestAssertAttribute("//textarea[@id='params_ap']", 'rows', 7);
+			$this->assertTrue($form->getField('SQL query')->isDisplayed());
+			$this->assertEquals(7, $form->getField('SQL query')->getAttribute('rows'));
 			$this->zbxTestAssertElementValue('params_ap', '');
 		}
 		else {
-			$this->zbxTestTextNotPresent('Additional parameters');
-			$this->zbxTestAssertNotVisibleId('params_ap');
+			$this->assertFalse($form->query('id:js-item-sql-query-label')->one()->isDisplayed());
+			$this->assertFalse($form->query('id:params_ap')->one()->isDisplayed());
 		}
 
 		if ($type == 'SSH agent' || $type == 'TELNET agent' ) {
-			$this->zbxTestTextPresent('Executed script');
-			$this->zbxTestAssertVisibleId('params_es');
-			$this->zbxTestAssertAttribute("//textarea[@id='params_es']", 'rows', 7);
+			$this->assertTrue($form->getField('Executed script')->isDisplayed());
+			$this->assertEquals(7, $form->getField('Executed script')->getAttribute('rows'));
 		}
 		else {
-			$this->zbxTestTextNotVisible('Executed script');
-			$this->zbxTestAssertNotVisibleId('params_es');
+			$this->assertFalse($form->query('id:js-item-executed-script-label')->one()->isDisplayed());
+			$this->assertFalse($form->query('id:params_es')->one()->isDisplayed());
 		}
 
 		if ($type == 'Calculated') {
-			$this->zbxTestTextPresent('Formula');
-			$this->zbxTestAssertVisibleId('params_f');
-			$this->zbxTestAssertAttribute("//textarea[@id='params_f']", 'rows', 7);
+			$this->assertTrue($form->getField('Formula')->isDisplayed());
+			$this->assertEquals(7, $form->getField('Formula')->getAttribute('rows'));
 		}
 		else {
-			$this->zbxTestTextNotVisible('Formula');
-			$this->zbxTestAssertNotVisibleId('params_f');
+			$this->assertFalse($form->query('id:js-item-formula-label')->one()->isDisplayed());
+			$this->assertFalse($form->query('id:params_f')->one()->isDisplayed());
 		}
 
 		if ($status != HOST_STATUS_TEMPLATE) {
@@ -498,13 +532,13 @@ class testFormItem extends CLegacyWebTest {
 				case INTERFACE_TYPE_SNMP :
 				case INTERFACE_TYPE_JMX :
 				case INTERFACE_TYPE_IPMI :
-				case INTERFACE_TYPE_ANY :
-					$this->zbxTestTextPresent('Host interface');
+				case INTERFACE_TYPE_OPT :
+					$this->assertTrue($form->query('id:js-item-interface-label')->one()->isDisplayed());
 					$dbInterfaces = DBfetchArray(DBselect(
 						'SELECT type,ip,port'.
 						' FROM interface'.
 						' WHERE hostid='.$hostid.
-							($interfaceType == INTERFACE_TYPE_ANY ? '' : ' AND type='.$interfaceType)
+							($interfaceType === INTERFACE_TYPE_OPT ? '' : ' AND type='.$interfaceType)
 					));
 					if ($dbInterfaces != null) {
 						foreach ($dbInterfaces as $host_interface) {
@@ -514,84 +548,128 @@ class testFormItem extends CLegacyWebTest {
 					}
 					else {
 						$this->zbxTestTextPresent('No interface found');
-						$this->zbxTestAssertNotVisibleId('interface-select');
+						$this->assertFalse($form->query('id:interface-select')->one()->isDisplayed());
 					}
 					break;
 				default:
 					$this->zbxTestTextNotVisible(['Host interface', 'No interface found']);
-					$this->zbxTestAssertNotVisibleId('interface-select');
+					$this->assertFalse($form->query('id:interface-select')->one()->isDisplayed());
 					break;
 			}
 		}
 
 		if ($type == 'IPMI agent') {
-			$this->zbxTestTextPresent('IPMI sensor');
-			$this->zbxTestAssertVisibleId('ipmi_sensor');
-			$this->zbxTestAssertAttribute("//input[@id='ipmi_sensor']", 'maxlength', 128);
+			$this->assertTrue($form->getField('IPMI sensor')->isDisplayed());
+			$this->assertEquals(128, $form->getField('IPMI sensor')->getAttribute('maxlength'));
 		}
 		else {
 			$this->zbxTestTextNotVisible('IPMI sensor');
-			$this->zbxTestAssertNotVisibleId('ipmi_sensor');
+			$this->assertFalse($form->getField('IPMI sensor')->isDisplayed());
 		}
 
 		if ($type == 'SSH agent') {
-			$this->zbxTestTextPresent('Authentication method');
-			$this->zbxTestAssertVisibleId('authtype');
-			$this->zbxTestDropdownHasOptions('authtype', ['Password', 'Public key']);
+			$this->assertTrue($form->query('id:authtype')->one()->isDisplayed());
+			$this->assertEquals(['Password', 'Public key'], $form->getField('Authentication method')->asDropdown()
+					->getOptions()->asText()
+			);
 		}
 		else {
-			$this->zbxTestTextNotVisible('Authentication method');
-			$this->zbxTestAssertNotVisibleId('authtype');
+			$this->assertFalse($form->query('id:authtype')->one()->isDisplayed());
+			$this->assertFalse($form->query('id:js-item-authtype-label')->one()->isDisplayed());
 		}
 
-		if ($type == 'SSH agent' || $type == 'TELNET agent' || $type == 'JMX agent' || $type == 'Simple check' || $type == 'Database monitor') {
-			$this->zbxTestTextPresent('User name');
-			$this->zbxTestAssertVisibleId('username');
-			$this->zbxTestAssertAttribute("//input[@id='username']", 'maxlength', 64);
+		if ($type == 'SSH agent' || $type == 'TELNET agent' || $type == 'JMX agent' || $type == 'Simple check'
+				|| $type == 'Database monitor') {
+			$this->assertTrue($form->getField('User name')->isDisplayed());
+			$this->assertEquals(255, $form->getField('User name')->getAttribute('maxlength'));
 
 			if (isset($authtype) && $authtype == 'Public key') {
-				$this->zbxTestTextPresent('Key passphrase');
+				$this->assertTrue($form->getField('Key passphrase')->isDisplayed());
+				$this->assertEquals(255, $form->getField('Key passphrase')->getAttribute('maxlength'));
+				$this->assertFalse($form->query('name:password')->one()->isDisplayed());
 			}
 			else {
-				$this->zbxTestTextPresent('Password');
+				$this->assertTrue($form->getField('Password')->isDisplayed());
+				$this->assertEquals(255, $form->getField('Password')->getAttribute('maxlength'));
 			}
-			$this->zbxTestAssertVisibleId('password');
-			$this->zbxTestAssertAttribute("//input[@id='password']", 'maxlength', 64);
 		}
 		else {
-			$this->zbxTestTextNotVisible(['User name', 'Password', 'Key passphrase']);
-			$this->zbxTestAssertNotVisibleId('username');
-			$this->zbxTestAssertNotVisibleId('password');
+			$this->assertFalse($form->query('id', ['username', 'password'])->one()->isDisplayed());
 		}
 
 		if	(isset($authtype) && $authtype == 'Public key') {
-			$this->zbxTestTextPresent('Public key file');
-			$this->zbxTestAssertVisibleId('publickey');
-			$this->zbxTestAssertAttribute("//input[@id='publickey']", 'maxlength', 64);
-
-			$this->zbxTestTextPresent('Private key file');
-			$this->zbxTestAssertVisibleId('privatekey');
-			$this->zbxTestAssertAttribute("//input[@id='privatekey']", 'maxlength', 64);
+			$this->assertTrue($form->query('id', ['publickey', 'privatekey'])->one()->isDisplayed());
+			$this->assertEquals(64, $form->getField('Public key file')->getAttribute('maxlength'));
+			$this->assertEquals(64, $form->getField('Private key file')->getAttribute('maxlength'));
 		}
 		else {
-			$this->zbxTestTextNotVisible('Public key file');
-			$this->zbxTestAssertNotVisibleId('publickey');
-
-			$this->zbxTestTextNotVisible('Private key file');
-			$this->zbxTestAssertNotVisibleId('publickey');
+			$this->assertFalse($form->query('id', ['publickey', 'privatekey'])->one()->isDisplayed());
 		}
 
 		if	($type === 'SNMP agent') {
-			$this->zbxTestTextPresent('SNMP OID');
-			$this->zbxTestAssertVisibleId('snmp_oid');
-			$this->zbxTestAssertAttribute("//input[@id='snmp_oid']", 'maxlength', 512);
+			$this->assertTrue($form->getField('SNMP OID')->isDisplayed());
+			$this->assertEquals(512, $form->getField('SNMP OID')->getAttribute('maxlength'));
 			if (!isset($itemid)) {
-				$this->zbxTestAssertAttribute("//input[@id='snmp_oid']", 'placeholder', '[IF-MIB::]ifInOctets.1');
+				$this->assertEquals('walk[OID1,OID2,...]', $form->getField('SNMP OID')->getAttribute('placeholder'));
 			}
+
+			//Check hintbox.
+			$hint_text = "Field requirements:".
+				"\nwalk[OID1,OID2,...] - to retrieve a subtree".
+				"\nget[OID] - to retrieve a single value".
+				"\nOID - (legacy) to retrieve a single value synchronously, optionally combined with other values";
+
+			$form->getLabel('SNMP OID')->query('xpath:./button[@data-hintbox]')->one()->click();
+			$hint = $this->query('xpath://div[@data-hintboxid]')->waitUntilPresent();
+			$this->assertEquals($hint_text, $hint->one()->getText());
+			$hint->one()->query('xpath:.//button[@class="btn-overlay-close"]')->one()->click();
+			$hint->waitUntilNotPresent();
 		}
 		else {
-			$this->zbxTestTextNotVisible('SNMP OID');
-			$this->zbxTestAssertNotVisibleId('snmp_oid');
+			$this->assertFalse($form->getField('SNMP OID')->isDisplayed());
+		}
+
+		if (in_array($type, ['Script', 'Browser'])) {
+			// Check parameters table layout.
+			$parameters_table = $form->getField('Parameters')->asTable();
+			$this->assertSame(['Name', 'Value', ''], $parameters_table->getHeadersText());
+
+			$this->assertEquals(['Remove', 'Add'], $parameters_table->query('tag:button')->all()
+					->filter(CElementFilter::CLICKABLE)->asText()
+			);
+
+			foreach(['parameters[0][name]' => 255, 'parameters[0][value]' => 2048] as $input_name => $maxlength) {
+				$input = $parameters_table->query('name', $input_name)->one();
+				$this->assertEquals($maxlength, $input->getAttribute('maxlength'));
+				$this->assertEquals('', $input->getValue());
+			}
+
+			// Check Script field.
+			$script_values = [
+				'Script' => '',
+				'Browser' => "var browser = new Browser(Browser.chromeOptions());\n\n".
+						"try {\n".
+						" browser.navigate(\"https://example.com\");\n".
+						" browser.collectPerfEntries();\n".
+						"}\n".
+						"finally {\n".
+						" return JSON.stringify(browser.getResult());\n".
+						"}"
+			];
+
+			$this->assertTrue($form->isRequired('Script'));
+			$script_field = $form->getField('Script');
+			$this->assertEquals('script', $script_field->query('tag:span')->one()->getAttribute('data-placeholder'));
+
+			$script_dialog = $script_field->edit();
+			$this->assertEquals('JavaScript', $script_dialog->getTitle());
+			$script_input = $script_dialog->query('xpath:.//textarea')->one();
+
+			foreach (['placeholder' => 'return value', 'maxlength' => 65535] as $attribute => $value) {
+				$this->assertEquals($value, $script_input->getAttribute($attribute));
+			}
+			$this->assertEquals($script_values[$type], $script_input->getText());
+			$script_dialog->close();
 		}
 
 		switch ($type) {
@@ -607,101 +685,94 @@ class testFormItem extends CLegacyWebTest {
 			case 'TELNET agent':
 			case 'JMX agent':
 			case 'Calculated':
-				$this->zbxTestTextPresent('Update interval');
-				$this->zbxTestAssertVisibleId('delay');
-				$this->zbxTestAssertAttribute("//input[@id='delay']", 'maxlength', 255);
+			case 'Script':
+			case 'Browser':
+				$this->assertTrue($form->getField('Update interval')->isDisplayed());
+				$this->assertEquals(255, $form->getField('Update interval')->getAttribute('maxlength'));
 				if (!isset($itemid)) {
-					$this->zbxTestAssertElementValue('delay', '1m');
+					$form->checkValue(['Update interval' => '1m']);
 				}
 				break;
 			default:
-				$this->zbxTestTextNotVisible('Update interval');
-				$this->zbxTestAssertNotVisibleId('delay');
+				$this->assertFalse($form->getField('Update interval')->isDisplayed());
 		}
 
-		$this->zbxTestTextPresent('Type of information');
-		if (!isset($templateid)) {
-			$this->zbxTestAssertVisibleId('value_type');
-			$this->zbxTestDropdownHasOptions('value_type', [
-				'Numeric (unsigned)',
-				'Numeric (float)',
-				'Character',
-				'Log',
-				'Text'
-			]);
+		$value_types = ($type === 'Dependent item') ?
+				['Numeric (unsigned)', 'Numeric (float)', 'Character', 'Log', 'Text', 'Binary', 'JSON']
+				: (($type === 'Calculated')
+					? ['Numeric (unsigned)', 'Numeric (float)', 'Character', 'Log', 'Text']
+					: ['Numeric (unsigned)', 'Numeric (float)', 'Character', 'Log', 'Text', 'JSON']
+				);
 
-			foreach (['Numeric (unsigned)', 'Numeric (float)', 'Character', 'Log', 'Text'] as $info_type) {
+		if (isset($templateid)) {
+			$this->assertEquals('true', $form->getField('Type of information')->getAttribute('readonly'));
+		}
+		else {
+			$this->assertEquals($value_types, $form->getField('Type of information')->asDropdown()->getOptions()->asText());
+
+			foreach ($value_types as $info_type) {
 				$this->zbxTestIsEnabled('//*[@id="value_type"]//li[text()='.CXPathHelper::escapeQuotes($info_type).']');
 			}
 		}
-		else {
-			$this->zbxTestAssertVisibleId('value_type');
-			$this->zbxTestAssertAttribute("//z-select[@id='value_type']", 'readonly');
-		}
 
 		if ($value_type === 'Numeric (float)' || ($value_type == 'Numeric (unsigned)')) {
-			$this->zbxTestTextPresent('Units');
-			$this->zbxTestAssertVisibleId('units');
-			$this->zbxTestAssertAttribute("//input[@id='units']", 'maxlength', 255);
+			$this->assertTrue($form->getField('Units')->isDisplayed());
+			$this->assertEquals(255, $form->getField('Units')->getAttribute('maxlength'));
 			if(isset($templateid)) {
-				$this->zbxTestAssertAttribute("//input[@id='units']", 'readonly');
+				$this->assertEquals('true', $form->getField('Units')->getAttribute('readonly'));
 			}
 		}
 		else {
-			$this->zbxTestTextNotVisible('Units');
-			$this->zbxTestAssertNotVisibleId('units');
+			$this->assertFalse($form->getField('Units')->isDisplayed());
 		}
 
-		// Custom intervals isn't visible for type 'SNMP trap' and 'Zabbix trapper'
-		if ($type === 'SNMP trap' || $type === 'Zabbix trapper') {
-			$this->zbxTestTextNotVisible(['Custom intervals', 'Interval', 'Period']);
-			$this->zbxTestAssertNotVisibleId('delayFlexTable');
-
-			$this->zbxTestTextNotVisible(['Flexible', 'Scheduling']);
-			$this->zbxTestAssertNotVisibleId('delay_flex_0_delay');
-			$this->zbxTestAssertNotVisibleId('delay_flex_0_period');
-			$this->zbxTestAssertNotVisibleId('interval_add');
+		// Custom intervals field isn't visible for some item types.
+		if (in_array($type, ['SNMP trap', 'Zabbix trapper', 'Dependent item'])) {
+			$this->assertFalse($form->getField('Custom intervals')->isDisplayed());
+			$this->assertFalse($form->query("xpath://div[@id='js-item-flex-intervals-field']//button[@class='btn-link element-table-add']")
+					->one()->isDisplayed());
 		}
 		else {
 			$this->zbxTestTextPresent(['Custom intervals', 'Interval',  'Period', 'Action']);
-			$this->zbxTestAssertVisibleId('delayFlexTable');
-
+			$this->assertTrue($form->getField('Custom intervals')->isDisplayed());
 			$this->zbxTestTextPresent(['Flexible', 'Scheduling', 'Update interval']);
-			$this->zbxTestAssertVisibleId('delay_flex_0_delay');
-			$this->zbxTestAssertAttribute("//input[@id='delay_flex_0_delay']", 'maxlength', 255);
-			$this->zbxTestAssertAttribute("//input[@id='delay_flex_0_delay']", 'placeholder', '50s');
+			$this->assertEquals(255, $form->getField('id:delay_flex_0_delay')->getAttribute('maxlength'));
+			$this->assertEquals('50s', $form->getField('id:delay_flex_0_delay')->getAttribute('placeholder'));
 
-			$this->zbxTestAssertVisibleId('delay_flex_0_period');
-			$this->zbxTestAssertAttribute("//input[@id='delay_flex_0_period']", 'maxlength', 255);
-			$this->zbxTestAssertAttribute("//input[@id='delay_flex_0_period']", 'placeholder', '1-7,00:00-24:00');
-			$this->zbxTestAssertVisibleId('interval_add');
+			$this->assertEquals(255, $form->getField('id:delay_flex_0_period')->getAttribute('maxlength'));
+			$this->assertEquals('1-7,00:00-24:00', $form->getField('id:delay_flex_0_period')
+					->getAttribute('placeholder')
+			);
+
+			$this->assertTrue($form->query("xpath://div[@id='js-item-flex-intervals-field']//button[@class='btn-link element-table-add']")
+					->one()->isClickable()
+			);
 		}
 
-		$this->zbxTestTextPresent('History storage period');
-		$this->zbxTestAssertVisibleId('history');
-		$this->zbxTestAssertAttribute("//input[@id='history']", 'maxlength', 255);
+		$this->assertTrue($form->getField('History')->isDisplayed());
+		$this->assertEquals(255, $form->getField('History')->getAttribute('maxlength'));
+
 		if (!isset($itemid)) {
-			$this->zbxTestAssertElementValue('history', '90d');
+			$this->zbxTestAssertElementValue('history', '31d');
 		}
 
 		if ($value_type == 'Numeric (unsigned)' || $value_type == 'Numeric (float)') {
-			$this->zbxTestTextPresent('Trend storage period');
-			$this->zbxTestAssertVisibleId('trends');
-			$this->zbxTestAssertAttribute("//input[@id='trends']", 'maxlength', 255);
+			$this->assertTrue($form->getField('Trends')->isDisplayed());
+			$this->assertEquals(255, $form->getField('Trends')->getAttribute('maxlength'));
 			if (!isset($itemid)) {
-				$this->zbxTestAssertElementValue('trends', '365d');
+				$this->assertEquals('365d', $form->getField('Trends')->getValue());
 			}
 		}
 		else {
-			$this->zbxTestTextNotVisible('Trend storage period');
-			$this->zbxTestAssertNotVisibleId('trends');
+			$this->assertFalse($form->getField('Trends')->isDisplayed());
 		}
 
 		if ($value_type == 'Numeric (float)' || $value_type == 'Numeric (unsigned)' || $value_type == 'Character') {
 			$this->zbxTestTextPresent('Value mapping');
-			$valuemap_field = $this->query('name:itemForm')->asForm()->one()->getField('Value mapping');
+			$valuemap_field = $form->getField('Value mapping');
+			$this->assertTrue($valuemap_field->isDisplayed());
 			if (!isset($templateid)) {
-				$this->assertEquals([], $valuemap_field->getValue());
+				$this->assertEquals('', $valuemap_field->getValue());
 
 				$db_valuemap = [];
 				$valuemap_result = DBselect('SELECT name FROM valuemap WHERE hostid='.$host_info['hostid']);
@@ -713,7 +784,7 @@ class testFormItem extends CLegacyWebTest {
 						' ORDER BY vm.name, m.sortorder');
 
 				$valuemap_field->edit();
-				$valuemap_overlay = COverlayDialogElement::find()->one()->waitUntilReady();
+				$valuemap_overlay = COverlayDialogElement::find()->all()->last()->waitUntilReady();
 				if ($db_valuemap !== []) {
 					$this->assertEquals('Value mapping', $valuemap_overlay->getTitle());
 					$valuemap_table = $valuemap_overlay->query('class:list-table')->one()->asTable();
@@ -748,9 +819,9 @@ class testFormItem extends CLegacyWebTest {
 					}
 				}
 				else {
-					$this->assertEquals('No data found.', $valuemap_overlay->query('class:nothing-to-show')->one()->getText());
+					$this->assertEquals('No data found', $valuemap_overlay->query('class:nothing-to-show')->one()->getText());
 				}
-				$valuemap_overlay->close();
+				$valuemap_overlay->getFooter()->query('button:Cancel')->one()->click();
 			}
 			else {
 				$this->assertTrue($valuemap_field->isValid());
@@ -758,151 +829,144 @@ class testFormItem extends CLegacyWebTest {
 			}
 		}
 		else {
-			$this->assertFalse($this->query('xpath://label[text()="Value mapping"]')->one()->isDisplayed());
+			$this->assertFalse($form->getField('Value mapping')->isDisplayed());
 		}
 
 		if ($type == 'Zabbix trapper') {
-			$this->zbxTestTextPresent('Allowed hosts');
-			$this->zbxTestAssertVisibleId('trapper_hosts');
-			$this->zbxTestAssertAttribute("//input[@id='trapper_hosts']", 'maxlength', 255);
+			$this->assertTrue($form->getField('Allowed hosts')->isDisplayed());
+			$this->assertEquals(255, $form->getField('Allowed hosts')->getAttribute('maxlength'));
 		}
 		else {
-			$this->zbxTestTextNotVisible('Allowed hosts');
-			$this->zbxTestAssertNotVisibleId('trapper_hosts');
+			$this->assertFalse($form->getField('Allowed hosts')->isDisplayed());
 		}
 
 		if ($value_type == 'Log') {
-			$this->zbxTestTextPresent('Log time format');
-			$this->zbxTestAssertVisibleId('logtimefmt');
-			$this->zbxTestAssertAttribute("//input[@id='logtimefmt']", 'maxlength', 64);
+			$this->assertTrue($form->getField('Log time format')->isDisplayed());
+			$this->assertEquals(64, $form->getField('Log time format')->getAttribute('maxlength'));
 		}
 		else {
-			$this->zbxTestTextNotVisible('Log time format');
-			$this->zbxTestAssertNotVisibleId('logtimefmt');
+			$this->assertFalse($form->getField('Log time format')->isDisplayed());
 		}
 
 		$this->zbxTestTextNotPresent(['Applications', 'New application']);
 
 		if ($value_type != 'Log') {
 			$this->zbxTestTextPresent('Populates host inventory field');
-			$this->zbxTestDropdownHasOptions('inventory_link', [
-				'-None-',
-				'Type',
-				'Type (Full details)',
-				'Name',
-				'Alias',
-				'OS',
-				'OS (Full details)',
-				'OS (Short)',
-				'Serial number A',
-				'Serial number B',
-				'Tag',
-				'Asset tag',
-				'MAC address A',
-				'MAC address B',
-				'Hardware',
-				'Hardware (Full details)',
-				'Software',
-				'Software (Full details)',
-				'Software application A',
-				'Software application B',
-				'Software application C',
-				'Software application D',
-				'Software application E',
-				'Contact',
-				'Location',
-				'Location latitude',
-				'Location longitude',
-				'Notes',
-				'Chassis',
-				'Model',
-				'HW architecture',
-				'Vendor',
-				'Contract number',
-				'Installer name',
-				'Deployment status',
-				'URL A',
-				'URL B',
-				'URL C',
-				'Host networks',
-				'Host subnet mask',
-				'Host router',
-				'OOB IP address',
-				'OOB subnet mask',
-				'OOB router',
-				'Date HW purchased',
-				'Date HW installed',
-				'Date HW maintenance expires',
-				'Date HW decommissioned',
-				'Site address A',
-				'Site address B',
-				'Site address C',
-				'Site city',
-				'Site state / province',
-				'Site country',
-				'Site ZIP / postal',
-				'Site rack location',
-				'Site notes',
-				'Primary POC name',
-				'Primary POC email',
-				'Primary POC phone A',
-				'Primary POC phone B',
-				'Primary POC cell',
-				'Primary POC screen name',
-				'Primary POC notes',
-				'Secondary POC name',
-				'Secondary POC email',
-				'Secondary POC phone A',
-				'Secondary POC phone B',
-				'Secondary POC cell',
-				'Secondary POC screen name',
-				'Secondary POC notes'
-			]);
-			$this->zbxTestDropdownAssertSelected('inventory_link', '-None-');
+			$host_inventory = $form->getField('Populates host inventory field')->asDropdown();
+			$this->assertEquals($host_inventory->getOptions()->asText(), [
+					'-None-',
+					'Type',
+					'Type (Full details)',
+					'Name',
+					'Alias',
+					'OS',
+					'OS (Full details)',
+					'OS (Short)',
+					'Serial number A',
+					'Serial number B',
+					'Tag',
+					'Asset tag',
+					'MAC address A',
+					'MAC address B',
+					'Hardware',
+					'Hardware (Full details)',
+					'Software',
+					'Software (Full details)',
+					'Software application A',
+					'Software application B',
+					'Software application C',
+					'Software application D',
+					'Software application E',
+					'Contact',
+					'Location',
+					'Location latitude',
+					'Location longitude',
+					'Notes',
+					'Chassis',
+					'Model',
+					'HW architecture',
+					'Vendor',
+					'Contract number',
+					'Installer name',
+					'Deployment status',
+					'URL A',
+					'URL B',
+					'URL C',
+					'Host networks',
+					'Host subnet mask',
+					'Host router',
+					'OOB IP address',
+					'OOB subnet mask',
+					'OOB router',
+					'Date HW purchased',
+					'Date HW installed',
+					'Date HW maintenance expires',
+					'Date HW decommissioned',
+					'Site address A',
+					'Site address B',
+					'Site address C',
+					'Site city',
+					'Site state / province',
+					'Site country',
+					'Site ZIP / postal',
+					'Site rack location',
+					'Site notes',
+					'Primary POC name',
+					'Primary POC email',
+					'Primary POC phone A',
+					'Primary POC phone B',
+					'Primary POC cell',
+					'Primary POC screen name',
+					'Primary POC notes',
+					'Secondary POC name',
+					'Secondary POC email',
+					'Secondary POC phone A',
+					'Secondary POC phone B',
+					'Secondary POC cell',
+					'Secondary POC screen name',
+					'Secondary POC notes'
+				]);
+			$this->assertEquals('-None-', $host_inventory->getText());
 		}
 
-		$this->zbxTestTextPresent('Description');
-		$this->zbxTestAssertVisibleId('description');
-		$this->zbxTestAssertAttribute("//textarea[@id='description']", 'rows', 7);
-
-		$this->zbxTestTextPresent('Enabled');
-		$this->zbxTestAssertElementPresentId('status');
-		$this->assertTrue($this->zbxTestCheckboxSelected('status'));
-
-		$this->zbxTestAssertVisibleId('cancel');
-		$this->zbxTestAssertElementText("//button[@id='cancel']", 'Cancel');
+		$this->assertTrue($form->getField('Description')->isDisplayed());
+		$this->assertEquals(7, $form->getField('Description')->getAttribute('rows'));
+		$this->assertTrue($form->getField('Enabled')->asCheckbox()->isSelected());
+		$this->assertEquals('Cancel', $dialog_footer->query('button:Cancel')->one()->getText());
 
 		if (isset($itemid)) {
-			$this->zbxTestAssertVisibleId('clone');
-			$this->zbxTestAssertElementValue('clone', 'Clone');
+			$this->assertTrue($dialog_footer->query('button:Clone')->one()->isClickable());
 		}
 		else {
-			$this->zbxTestAssertElementNotPresentId('clone');
+			$this->assertEquals(0, $dialog_footer->query('button:Clone')->all()->filter(CElementFilter::CLICKABLE)
+					->count()
+			);
 		}
 
 		if (isset($itemid) && $status != HOST_STATUS_TEMPLATE) {
-			$this->zbxTestAssertVisibleId('del_history');
-			$this->zbxTestAssertElementValue('del_history', 'Clear history and trends');
+			$this->assertTrue($dialog_footer->query('button:Clear history and trends')->one()->isClickable());
 		}
 		else {
-			$this->zbxTestAssertElementNotPresentId('del_history');
+			$this->assertEquals(0, $dialog_footer->query('button:Clear history and trends')->all()
+					->filter(CElementFilter::CLICKABLE)->count()
+			);
 		}
 
 		if ((isset($itemid) && !isset($templateid))) {
-			$this->zbxTestAssertVisibleId('delete');
-			$this->zbxTestAssertElementValue('delete', 'Delete');
-			$this->zbxTestAssertVisibleId('update');
-			$this->zbxTestAssertElementValue('update', 'Update');
+			$this->assertTrue($dialog_footer->query('button:Delete')->one()->isClickable());
+			$this->assertTrue($dialog_footer->query('button:Update')->one()->isClickable());
 		}
 		elseif (isset($templateid)) {
-			$this->zbxTestAssertElementPresentXpath("//button[@id='delete'][@disabled]");
+			$this->assertFalse($dialog_footer->query('button:Delete')->one()->isEnabled());
 		}
 		else {
-			$this->zbxTestAssertElementNotPresentId('delete');
+			$this->assertEquals(0, $dialog_footer->query('button:Delete')->all()->filter(CElementFilter::CLICKABLE)
+					->count()
+			);
 		}
 
 		if (isset($templateid) && array_key_exists('preprocessing', $data)) {
-			$this->zbxTestTabSwitch('Preprocessing');
+			$form->selectTab('Preprocessing');
 			$dbResult = DBselect('SELECT * FROM item_preproc WHERE itemid='.$itemid);
 			$itemsPreproc = DBfetchArray($dbResult);
 			foreach ($itemsPreproc as $itemPreproc) {
@@ -910,21 +974,29 @@ class testFormItem extends CLegacyWebTest {
 				$preprocessing_type = get_preprocessing_types($itemPreproc['type'], false,
 					CItem::SUPPORTED_PREPROCESSING_TYPES
 				);
-				$this->zbxTestAssertAttribute("//z-select[@id='preprocessing_".($itemPreproc['step']-1)."_type']", 'readonly');
-				$this->zbxTestDropdownAssertSelected("preprocessing_".($itemPreproc['step']-1)."_type", $preprocessing_type);
+				$this->zbxTestAssertAttribute('//z-select[@id="preprocessing_'.($itemPreproc['step']-1).'_type"]', 'readonly');
+				$this->zbxTestDropdownAssertSelected('preprocessing_'.($itemPreproc['step']-1).'_type', $preprocessing_type);
 				if ((1 <= $itemPreproc['type']) && ($itemPreproc['type'] <= 4)) {
-					$this->zbxTestAssertAttribute("//input[@id='preprocessing_".($itemPreproc['step']-1)."_params_0']", 'readonly');
-					$this->zbxTestAssertElementValue("preprocessing_".($itemPreproc['step']-1)."_params_0", $itemPreproc['params']);
+					$this->zbxTestAssertAttribute('//z-textarea-flexible[@id="preprocessing_'.($itemPreproc['step']-1).
+							'_params_0"]', 'readonly'
+					);
+					$this->zbxTestAssertElementValue('preprocessing_'.($itemPreproc['step']-1).'_params_0', $itemPreproc['params']);
 				}
 				elseif ($itemPreproc['type'] == 5) {
 					$reg_exp = preg_split("/\n/", $itemPreproc['params']);
-					$this->zbxTestAssertAttribute("//input[@id='preprocessing_".($itemPreproc['step']-1)."_params_0']", 'readonly');
-					$this->zbxTestAssertAttribute("//input[@id='preprocessing_".($itemPreproc['step']-1)."_params_1']", 'readonly');
-					$this->zbxTestAssertElementValue("preprocessing_".($itemPreproc['step']-1)."_params_0", $reg_exp[0]);
-					$this->zbxTestAssertElementValue("preprocessing_".($itemPreproc['step']-1)."_params_1", $reg_exp[1]);
+					$this->zbxTestAssertAttribute('//z-textarea-flexible[@id="preprocessing_'.($itemPreproc['step']-1).
+							'_params_0"]', 'readonly'
+					);
+					$this->zbxTestAssertAttribute('//z-textarea-flexible[@id="preprocessing_'.($itemPreproc['step']-1).
+							'_params_1"]', 'readonly'
+					);
+					$this->zbxTestAssertElementValue('preprocessing_'.($itemPreproc['step']-1).'_params_0', $reg_exp[0]);
+					$this->zbxTestAssertElementValue('preprocessing_'.($itemPreproc['step']-1).'_params_1', $reg_exp[1]);
 				}
 			}
 		}
+
+		$dialog->close();
 	}
 
 	// Returns update data
@@ -943,13 +1015,18 @@ class testFormItem extends CLegacyWebTest {
 		// Open hosts page.
 		$this->zbxTestLogin(self::HOST_LIST_PAGE);
 		// Find filter form and filter necessary host.
+		$table = $this->getDatatable();
+		// Clean Name field first, added for more stable local tests.
+		$this->query('name:zbx_filter')->asForm()->waitUntilReady()->one()->fill(['Name' => '']);
+		// Fill Name field with host name.
 		$this->query('name:zbx_filter')->asForm()->waitUntilReady()->one()->fill(['Name' => $this->host]);
 		$this->query('button:Apply')->one()->waitUntilClickable()->click();
+		$table->waitUntilReloaded();
 		// Find Items link in host row and click it.
-		$this->query('xpath://table[@class="list-table"]')->asTable()->one()->findRow('Name', $this->host)
+		$this->query('class:datatable')->asDatatable()->one()->findRow('Name', $this->host)
 				->getColumn('Items')->query('link:Items')->one()->click();
 		$this->zbxTestClickLinkTextWait($name);
-		$this->zbxTestClickWait('update');
+		COverlayDialogElement::find()->one()->waitUntilReady()->getFooter()->query('button:Update')->one()->click();
 		$this->zbxTestCheckTitle('Configuration of items');
 		$this->zbxTestWaitUntilMessageTextPresent('msg-good', 'Item updated');
 		$this->zbxTestTextPresent($name);
@@ -961,6 +1038,7 @@ class testFormItem extends CLegacyWebTest {
 	// Returns create data
 	public static function create() {
 		return [
+			// #0.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -970,80 +1048,86 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// Duplicate item
+			// #1 Duplicate item.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Checksum of $1',
 					'key' => 'vfs.file.cksum[/sbin/shutdown]',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Item with key "vfs.file.cksum[/sbin/shutdown]" already exists on'
+					'inline_errors' => [
+						'Key' => 'This object already exists.'
 					]
 				]
 			],
-			// Item name is missing
+			// #2 Item name is missing.
 			[
 				[
 					'expected' => TEST_BAD,
 					'key' =>'item-name-missing',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "Name": cannot be empty.'
+					'inline_errors' => [
+						'Name' => 'This field cannot be empty.'
 					]
 				]
 			],
-			// Item key is missing
+			// #3 Item key is missing.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item name',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "Key": cannot be empty.'
+					'inline_errors' => [
+						'Key' => 'This field cannot be empty.'
 					]
 				]
 			],
-			// Empty timedelay
+			// #4 Empty delay.
+			[
+				[
+					'expected' => TEST_BAD,
+					'name' => 'Item delay',
+					'key' => 'item-delay-test',
+					'delay' => '',
+					'inline_errors' => [
+						'Update interval' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #5 Zero in delay.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item delay',
 					'key' => 'item-delay-test',
 					'delay' => 0,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Item will not be refreshed. Specified update interval requires having at least one either flexible or scheduling interval.'
+					'inline_errors' => [
+						'Update interval' => 'This field cannot be set to "0" without defining custom intervals.'
 					]
 				]
 			],
-			// Incorrect timedelay
+			// #6 Incorrect timedelay.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item delay',
 					'key' => 'item-delay-test',
 					'delay' => '-30',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Field "Update interval" is not correct: a time unit is expected'
+					'inline_errors' => [
+						'Update interval' => 'A time unit is expected.'
 					]
 				]
 			],
-			// Incorrect timedelay
+			// #7 Incorrect timedelay.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item delay',
 					'key' => 'item-delay-test',
 					'delay' => 86401,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Item will not be refreshed. Update interval should be between 1s and 1d. Also Scheduled/Flexible intervals can be used.'
+					'inline_errors' => [
+						'Update interval' => 'Value must be between 0 and 86400s (1d).'
 					]
 				]
 			],
-			// Empty time flex period
+			// #8 Empty time flex period.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1052,13 +1136,12 @@ class testFormItem extends CLegacyWebTest {
 					'flexPeriod' => [
 						['flexDelay' => 50, 'flexTime' => '']
 					],
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Invalid interval "".'
+					'inline_errors' => [
+						'id:delay_flex_0_period' => 'Period: This field cannot be empty.'
 					]
 				]
 			],
-			// Incorrect flex period
+			// #9 Incorrect flex period.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1067,13 +1150,12 @@ class testFormItem extends CLegacyWebTest {
 					'flexPeriod' => [
 						['flexDelay' => 50, 'flexTime' => '1-11,00:00-24:00']
 					],
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Invalid interval "1-11,00:00-24:00".'
+					'inline_errors' => [
+						'id:delay_flex_0_period' => 'Period: Invalid period.'
 					]
 				]
 			],
-			// Incorrect flex period
+			// #10 Incorrect flex period.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1082,13 +1164,12 @@ class testFormItem extends CLegacyWebTest {
 					'flexPeriod' => [
 						['flexDelay' => 50, 'flexTime' => '1-7,00:00-25:00']
 					],
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Invalid interval "1-7,00:00-25:00".'
+					'inline_errors' => [
+						'id:delay_flex_0_period' => 'Period: Invalid period.'
 					]
 				]
 			],
-			// Incorrect flex period
+			// #11 Incorrect flex period.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1097,13 +1178,12 @@ class testFormItem extends CLegacyWebTest {
 					'flexPeriod' => [
 						['flexDelay' => 50, 'flexTime' => '1-7,24:00-00:00']
 					],
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Invalid interval "1-7,24:00-00:00".'
+					'inline_errors' => [
+						'id:delay_flex_0_period' => 'Period: Invalid period.'
 					]
 				]
 			],
-			// Incorrect flex period
+			// #12 Incorrect flex period.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1112,13 +1192,12 @@ class testFormItem extends CLegacyWebTest {
 					'flexPeriod' => [
 						['flexDelay' => 50, 'flexTime' => '1,00:00-24:00;2,00:00-24:00']
 					],
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Invalid interval "1,00:00-24:00;2,00:00-24:00".'
+					'inline_errors' => [
+						'id:delay_flex_0_period' => 'Period: Invalid period.'
 					]
 				]
 			],
-			// Multiple flex periods
+			// #13 Multiple flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1132,7 +1211,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #14 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1149,11 +1228,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #15 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1170,7 +1249,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #16 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1188,11 +1267,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": must have at least one interval greater than 0.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #17 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1207,7 +1286,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// Delay combined with flex periods
+			// #18 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1219,11 +1298,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #19 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1235,7 +1314,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #20 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1247,7 +1326,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #21 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1258,11 +1337,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #22 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1273,7 +1352,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #23 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1287,11 +1366,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #24 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1305,11 +1384,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #25 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1321,11 +1400,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #26 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1337,11 +1416,11 @@ class testFormItem extends CLegacyWebTest {
 					],
 					'error_msg' => 'Cannot add item',
 					'errors' => [
-						'Item will not be refreshed. Please enter a correct update interval.'
+						'Invalid parameter "/1/delay": non-active intervals cannot fill the entire time.'
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #27 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1365,7 +1444,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #28 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1377,7 +1456,7 @@ class testFormItem extends CLegacyWebTest {
 					]
 				]
 			],
-			// Delay combined with flex periods
+			// #29 Delay combined with flex periods.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1393,7 +1472,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// Seven flexfields - save OK
+			// #30 Seven flexfields - save OK.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1412,110 +1491,103 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// History
+			// #31 History.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item history',
 					'key' => 'item-history-empty',
 					'history' => ' ',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "history": a time unit is expected.'
+					'inline_errors' => [
+						'id:history' => 'This field cannot be empty.'
 					]
 				]
 			],
-			// History
+			// #32 History.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item history',
 					'key' => 'item-history-test',
 					'history' => 3599,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "history": value must be one of 0, 3600-788400000.'
+					'inline_errors' => [
+						'id:history' => 'Value must be between 3600s (1h) and 788400000s (9125d).'
 					]
 				]
 			],
-			// History
+			// #33 History.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item history',
 					'key' => 'item-history-test',
 					'history' => 788400001,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "history": value must be one of 0, 3600-788400000.'
+					'inline_errors' => [
+						'id:history' => 'Value must be between 3600s (1h) and 788400000s (9125d).'
 					]
 				]
 			],
-			// History
+			// #34 History.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item history',
 					'key' => 'item-history-test',
 					'history' => '-1',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "history": a time unit is expected.'
+					'inline_errors' => [
+						'id:history' => 'A time unit is expected.'
 					]
 				]
 			],
-			// Trends
+			// #35 Trends.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item trends',
 					'key' => 'item-trends-empty',
 					'trends' => ' ',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "trends": a time unit is expected.'
+					'inline_errors' => [
+						'id:trends' => 'This field cannot be empty.'
 					]
 				]
 			],
-			// Trends
+			// #36 Trends.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item trends',
 					'key' => 'item-trends-test',
 					'trends' => '-1',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "trends": a time unit is expected.'
+					'inline_errors' => [
+						'id:trends' => 'A time unit is expected.'
 					]
 				]
 			],
-			// Trends
+			// #37 Trends.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item trends',
 					'key' => 'item-trends-test',
 					'trends' => 788400001,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "trends": value must be one of 0, 86400-788400000.'
+					'inline_errors' => [
+						'id:trends' => 'Value must be between 86400s (1d) and 788400000s (9125d).'
 					]
 				]
 			],
-			// Trends
+			// #38 Trends.
 			[
 				[
 					'expected' => TEST_BAD,
 					'name' => 'Item trends',
 					'key' => 'item-trends-test',
 					'trends' => 86399,
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "trends": value must be one of 0, 86400-788400000.'
+					'inline_errors' => [
+						'id:trends' => 'Value must be between 86400s (1d) and 788400000s (9125d).'
 					]
 				]
 			],
+			// #39.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1525,7 +1597,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// List of all item types
+			// #40 List of all item types.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1536,7 +1608,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// Update and custom intervals are hidden if item key is mqtt.get
+			// #41 Update and custom intervals are hidden if item key is mqtt.get.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1547,6 +1619,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #42.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1557,16 +1630,20 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #43.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'type' => 'Simple check',
 					'name' => 'Simple check',
 					'key' => 'item-simple-check',
+					'username' => 'username-test',
+					'password' => 'password-test',
 					'dbCheck' => true,
 					'formCheck' => true
 				]
 			],
+			// #44.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1578,6 +1655,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #45.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1587,6 +1665,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #46.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1597,6 +1676,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #47.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1607,6 +1687,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #48.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1618,6 +1699,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #49.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1629,6 +1711,45 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #50.
+			[
+				[
+					'expected' => TEST_GOOD,
+					'type' => 'Zabbix trapper',
+					'name' => 'Zabbix trapper with IPv6 in allowed hosts field',
+					'key' => 'item-zabbix-trapper-ipv6',
+					'allowed_hosts' => '2001:db8:85a3::8a2e:370:7334',
+					'dbCheck' => true,
+					'formCheck' => true
+				]
+			],
+			// #51.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Zabbix trapper',
+					'name' => 'Zabbix trapper with invalid delimiter in allowed hosts field',
+					'key' => 'item-zabbix-trapper-incorrect-ip',
+					'allowed_hosts' => 'localhost;127.0.0.1',
+					'inline_errors' => [
+						'Allowed hosts' => 'Incorrect address starting from ";127.0.0.1".'
+					]
+				]
+			],
+			// #52.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Zabbix trapper',
+					'name' => 'Zabbix trapper with empty delimiter in allowed hosts field',
+					'key' => 'item-zabbix-trapper-multiple-spaces-ip',
+					'allowed_hosts' => 'localhost    dd',
+					'inline_errors' => [
+						'Allowed hosts' => 'Incorrect address starting from "dd".'
+					]
+				]
+			],
+			// #53.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1639,17 +1760,21 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #54.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'type' => 'Database monitor',
 					'name' => 'Database monitor',
 					'key' => 'item-database-monitor',
+					'username' => 'username-test',
+					'password' => 'password-test',
 					'params_ap' => 'query',
 					'dbCheck' => true,
 					'formCheck' => true
 				]
 			],
+			// #55.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1661,7 +1786,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
-			// IPMI sensor is optional if item key is ipmi.get
+			// #56 IPMI sensor is optional if item key is ipmi.get.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1672,6 +1797,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #57.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1684,6 +1810,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #58.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1696,18 +1823,95 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #59.
+			[
+				[
+					'expected' => TEST_GOOD,
+					'type' => 'Script',
+					'name' => 'Script item',
+					'key' => 'script.item',
+					'script' => 'zabbix',
+					'dbCheck' => true,
+					'formCheck' => true
+				]
+			],
+			// #60.
+			[
+				[
+					'expected' => TEST_GOOD,
+					'type' => 'Browser',
+					'name' => 'Default browser item',
+					'key' => 'default.browser.item',
+					'dbCheck' => true,
+					'formCheck' => true
+				]
+			],
+			// #61.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Script',
+					'name' => 'Empty script',
+					'key' => 'empty.script',
+					'script' => '',
+					'inline_errors' => [
+						'id:script' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #62.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Browser',
+					'name' => 'Browser item - empty script',
+					'key' => 'empty.script.browser.item',
+					'script' => '',
+					'inline_errors' => [
+						'id:browser_script' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #63.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Script',
+					'name' => 'Empty parameter name - script item',
+					'key' => 'empty.parameter.script.item',
+					'script' => 'script',
+					'params_value' => 'value',
+					'inline_errors' => [
+						'name:parameters[0][name]' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #64.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Browser',
+					'name' => 'Empty parameter name - browser item',
+					'key' => 'empty.param.name.browser.item',
+					'params_value' => 'value',
+					'inline_errors' => [
+						'name:parameters[0][name]' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #65.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'IPMI agent',
 					'name' => 'IPMI agent error',
 					'key' => 'item-ipmi-agent-error',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Incorrect value for field "ipmi_sensor": cannot be empty.'
+					'inline_errors' => [
+						'IPMI sensor' => 'This field cannot be empty.'
 					]
 				]
 			],
+			// #66.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1719,42 +1923,73 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #67.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'SSH agent',
 					'name' => 'SSH agent error',
 					'key' => 'item-ssh-agent-error',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "User name": cannot be empty.',
-						'Incorrect value for field "Executed script": cannot be empty.'
+					'inline_errors' => [
+						'User name' => 'This field cannot be empty.',
+						'Executed script' => 'This field cannot be empty.'
+
 					]
 				]
 			],
+			// #68.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'TELNET agent',
-					'name' => 'TELNET agent error',
-					'key' => 'item-telnet-agent-error',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "User name": cannot be empty.',
-						'Incorrect value for field "Executed script": cannot be empty.'
+					'name' => 'TELNET agent with empty executed script',
+					'key' => 'item-telnet-agent-empty-script',
+					'inline_errors' => [
+						'User name' => 'This field cannot be empty.',
+						'Executed script' => 'This field cannot be empty.'
 					]
 				]
 			],
+			// #69.
 			[
 				[
 					'expected' => TEST_GOOD,
 					'type' => 'JMX agent',
-					'name' => 'JMX agent',
-					'key' => 'item-jmx-agent',
+					'name' => 'JMX agent with filled username and password',
+					'key' => 'item-jmx-agent-with-username-password',
+					'username' => 'test_username',
+					'password' => 'test_password',
 					'dbCheck' => true,
 					'formCheck' => true
 				]
 			],
+			// #70.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'JMX agent',
+					'name' => 'JMX agent with filled username and empty password',
+					'key' => 'item-jmx-agent-with-empty-password',
+					'username' => 'test',
+					'inline_errors' => [
+						'Password' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #71.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'JMX agent',
+					'name' => 'JMX agent with filled password and empty username',
+					'key' => 'item-jmx-agent-with-empty-username',
+					'password' => 'test',
+					'inline_errors' => [
+						'Password' => 'Both username and password should be either present or empty.'
+					]
+				]
+			],
+			// #72.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1766,6 +2001,7 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #73.
 			[
 				[
 					'expected' => TEST_GOOD,
@@ -1777,32 +2013,42 @@ class testFormItem extends CLegacyWebTest {
 					'formCheck' => true
 				]
 			],
+			// #75.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'Calculated',
 					'name' => 'Calculated',
 					'key' => 'item-calculated',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "Formula": cannot be empty.'
+					'inline_errors' => [
+						'Formula' => 'This field cannot be empty.'
 					]
 				]
 			],
-			// Default
+			// #76 Default.
+			[
+				[
+					'expected' => TEST_BAD,
+					'type' => 'Database monitor',
+					'name' => 'Empty SQL query',
+					'inline_errors' => [
+						'SQL query' => 'This field cannot be empty.'
+					]
+				]
+			],
+			// #77 Default.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'Database monitor',
 					'name' => 'Database monitor',
 					'params_ap' => 'query',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Check the key, please. Default example was passed.'
+					'inline_errors' => [
+						'Key' => 'Check the key, please. Default example was passed.'
 					]
 				]
 			],
-			// Default
+			// #78 Default.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1810,13 +2056,12 @@ class testFormItem extends CLegacyWebTest {
 					'name' => 'SSH agent',
 					'username' => 'zabbix',
 					'params_es' => 'script to be executed',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Check the key, please. Default example was passed.'
+					'inline_errors' => [
+						'Key' => 'Check the key, please. Default example was passed.'
 					]
 				]
 			],
-			// Default
+			// #79 Default.
 			[
 				[
 					'expected' => TEST_BAD,
@@ -1824,22 +2069,20 @@ class testFormItem extends CLegacyWebTest {
 					'name' => 'TELNET agent',
 					'username' => 'zabbix',
 					'params_es' => 'script to be executed',
-					'error_msg' => 'Cannot add item',
-					'errors' => [
-						'Check the key, please. Default example was passed.'
+					'inline_errors' => [
+						'Key' => 'Check the key, please. Default example was passed.'
 					]
 				]
 			],
-			// Default
+			// #80 Default.
 			[
 				[
 					'expected' => TEST_BAD,
 					'type' => 'JMX agent',
 					'name' => 'JMX agent',
 					'username' => 'zabbix',
-					'error_msg' => 'Page received incorrect data',
-					'errors' => [
-						'Incorrect value for field "Key": cannot be empty.'
+					'inline_errors' => [
+						'Key' => 'This field cannot be empty.'
 					]
 				]
 			]
@@ -1857,6 +2100,8 @@ class testFormItem extends CLegacyWebTest {
 
 		$this->zbxTestContentControlButtonClickTextWait('Create item');
 		$this->zbxTestCheckTitle('Configuration of items');
+		$dialog = COverlayDialogElement::find()->one()->waitUntilReady();
+		$form = $dialog->asForm();
 
 		if (isset($data['type'])) {
 			$this->zbxTestDropdownSelect('type', $data['type']);
@@ -1867,26 +2112,38 @@ class testFormItem extends CLegacyWebTest {
 		}
 
 		if (isset($data['name'])) {
-			$this->zbxTestInputType('name', $data['name']);
+			$form->getField('Name')->fill($data['name']);
 		}
-		$name = $this->zbxTestGetValue("//input[@id='name']");
+		$name = $this->zbxTestGetValue("//z-textarea-flexible[@id='name']");
 
 		if (isset($data['key'])) {
-			$this->zbxTestInputType('key', $data['key']);
+			$form->getField('Key')->fill($data['key']);
 		}
-		$key = $this->zbxTestGetValue("//input[@id='key']");
+		$key = $this->zbxTestGetValue("//z-textarea-flexible[@id='key']");
 
 		if (isset($data['username'])) {
-			$this->zbxTestInputType('username', $data['username']);
+			$form->getField('User name')->fill($data['username']);
+		}
+
+		if (isset($data['password'])) {
+			$form->getField('Password')->fill($data['password']);
 		}
 
 		if (isset($data['ipmi_sensor'])) {
-			$this->zbxTestInputType('ipmi_sensor', $data['ipmi_sensor']);
-			$ipmi_sensor = $this->zbxTestGetValue("//input[@id='ipmi_sensor']");
+			$form->getField('IPMI sensor')->fill($data['ipmi_sensor']);
+			$ipmi_sensor = $this->zbxTestGetValue("//z-textarea-flexible[@id='ipmi_sensor']");
+		}
+
+		if (isset($data['script'])) {
+			$form->getField('Script')->fill($data['script']);
+		}
+
+		if (isset($data['params_value'])) {
+			$form->getField('name:parameters[0][value]')->fill($data['params_value']);
 		}
 
 		if (isset($data['allowed_hosts'])) {
-			$this->zbxTestInputType('trapper_hosts', $data['allowed_hosts']);
+			$form->getField('Allowed hosts')->fill($data['allowed_hosts']);
 		}
 
 		if (isset($data['params_f'])) {
@@ -1905,25 +2162,22 @@ class testFormItem extends CLegacyWebTest {
 			$this->zbxTestInputTypeOverwrite('delay', $data['delay']);
 		}
 
-		if (array_key_exists('master_item',$data))	{
+		if (array_key_exists('master_item',$data)) {
 			$this->zbxTestClickButtonMultiselect('master_itemid');
-			$this->zbxTestLaunchOverlayDialog('Items');
-			$this->zbxTestClickLinkTextWait($data['master_item']);
+			$master_overlay = COverlayDialogElement::find()->all()->last()->waitUntilReady();
+			$this->assertEquals('Items', $master_overlay->getTitle());
+			$master_overlay->query('link:'.$data['master_item'])->one()->click();
 		}
 
-		if (array_key_exists('snmp_oid', $data))	{
-			$this->zbxTestInputTypeOverwrite('snmp_oid', $data['snmp_oid']);
+		if (array_key_exists('snmp_oid', $data)) {
+			$form->getField('SNMP OID')->fill($data['snmp_oid']);
 		}
 
 		// Check hidden update and custom interval for mqtt.get key.
 		if (CTestArrayHelper::get($data, 'type') === 'Zabbix agent (active)'
 				&& substr(CTestArrayHelper::get($data, 'key'), 0, 8) === 'mqtt.get') {
-			$this->zbxTestTextNotVisible('Update interval');
-			$this->zbxTestAssertNotVisibleId('js-item-delay-label');
-			$this->zbxTestAssertNotVisibleId('js-item-delay-field');
-			$this->zbxTestTextNotVisible('Custom intervals');
-			$this->zbxTestAssertNotVisibleId('js-item-flex-intervals-label');
-			$this->zbxTestAssertNotVisibleId('js-item-flex-intervals-field');
+			$this->assertFalse($form->getField('Update interval')->isDisplayed());
+			$this->assertFalse($form->getField('Custom intervals')->isDisplayed());
 		}
 
 		$itemFlexFlag = true;
@@ -1937,13 +2191,23 @@ class testFormItem extends CLegacyWebTest {
 					$this->zbxTestInputType('delay_flex_'.$itemCount.'_delay', $period['flexDelay']);
 				}
 				$itemCount ++;
-				$this->zbxTestClickWait('interval_add');
+
+				$add = $form->getFieldContainer('Custom intervals')->query('button:Add')->one();
+				// TODO: sometimes inline validation error appears simultaneously and intercepts the "Add" button click.
+				try {
+					$add->click();
+					$this->query('id', 'delay_flex_'.$itemCount.'_delay')->one();
+				}
+				catch (NoSuchElementException | ElementClickInterceptedException $e) {
+					$add->click();
+				}
 
 				$this->zbxTestAssertVisibleId('delay_flex_'.$itemCount.'_delay');
 				$this->zbxTestAssertVisibleId('delay_flex_'.$itemCount.'_period');
 
 				if (isset($period['remove'])) {
-					$this->zbxTestClick('delay_flex_'.($itemCount-1).'_remove');
+					$form->query("xpath://table[@id='delay-flex-table']/tbody/tr[1]/td[4]/button")
+							->one()->click();
 				}
 			}
 		}
@@ -1974,24 +2238,33 @@ class testFormItem extends CLegacyWebTest {
 
 		$value_type = $this->zbxTestGetSelectedLabel('value_type');
 		if ($itemFlexFlag == true) {
-			$this->zbxTestClickWait('add');
+			$dialog->getFooter()->query('button:Add')->one()->click();
 			$expected = $data['expected'];
 			switch ($expected) {
 				case TEST_GOOD:
+					COverlayDialogElement::ensureNotPresent();
 					$this->zbxTestCheckTitle('Configuration of items');
 					$this->zbxTestWaitUntilMessageTextPresent('msg-good', 'Item added');
 					break;
 
 				case TEST_BAD:
 					$this->zbxTestCheckTitle('Configuration of items');
-					$this->zbxTestWaitUntilMessageTextPresent('msg-bad', $data['error_msg']);
-					foreach ($data['errors'] as $msg) {
-						$this->zbxTestTextPresent($msg);
+
+					if (array_key_exists('inline_errors', $data)) {
+						$dialog->waitUntilReady();
+						$this->assertInlineError($form, $data['inline_errors']);
 					}
+					else {
+						$this->assertMessage(TEST_BAD, $data['error_msg'], $data['errors']);
+					}
+
 					$this->zbxTestTextPresent(['Host', 'Name', 'Key']);
+
 					if (isset($data['formula'])) {
 						$this->zbxTestAssertElementValue('formula', $data['formulaValue']);
 					}
+
+					$dialog->close();
 					break;
 				}
 			}
@@ -2023,10 +2296,14 @@ class testFormItem extends CLegacyWebTest {
 			}
 		}
 		if (isset($data['formCheck'])) {
-			$this->zbxTestClickXpath("//form[@name='items']//a[text()='$name']");
-			$this->zbxTestWaitUntilElementVisible(WebDriverBy::id('name'));
-			$this->zbxTestAssertElementValue('name', $name);
-			$this->zbxTestAssertElementValue('key', $key);
+			$this->query('class:btn-overlay-close')->one()->click();
+			$this->page->waitUntilReady();
+			$this->query('xpath://form[@name="item_list"]/table[@class="list-table"]')->asTable()->one()
+					->query('link', $name)->one()->click();
+			$dialog_check = COverlayDialogElement::find()->one()->waitUntilReady();
+			$check_form = $dialog_check->asForm();
+			$this->assertEquals($name, $check_form->getField('Name')->getValue());
+			$this->assertEquals($key, $check_form->getField('Key')->getValue());
 			$this->zbxTestAssertElementPresentXpath("//z-select[@id='type']//li[text()='$type']");
 			switch ($type) {
 				case 'Zabbix agent':
@@ -2044,20 +2321,12 @@ class testFormItem extends CLegacyWebTest {
 					$this->zbxTestAssertNotVisibleId('interfaceid');
 					// Check hidden update and custom interval for mqtt.get key.
 					if (substr(CTestArrayHelper::get($data, 'key'), 0, 8) === 'mqtt.get') {
-						$this->zbxTestTextNotVisible('Update interval');
-						$this->zbxTestAssertNotVisibleId('js-item-delay-label');
-						$this->zbxTestAssertNotVisibleId('js-item-delay-field');
-						$this->zbxTestTextNotVisible('Custom intervals');
-						$this->zbxTestAssertNotVisibleId('js-item-flex-intervals-label');
-						$this->zbxTestAssertNotVisibleId('js-item-flex-intervals-field');
+						$this->assertFalse($form->getField('Update interval')->isDisplayed());
+						$this->assertFalse($form->getField('Custom intervals')->isDisplayed());
 					}
 					else {
-						$this->zbxTestTextVisible('Update interval');
-						$this->zbxTestAssertVisibleId('js-item-delay-label');
-						$this->zbxTestAssertVisibleId('js-item-delay-field');
-						$this->zbxTestTextVisible('Custom intervals');
-						$this->zbxTestAssertVisibleId('js-item-flex-intervals-label');
-						$this->zbxTestAssertVisibleId('js-item-flex-intervals-field');
+						$this->assertTrue($form->getField('Update interval')->isDisplayed());
+						$this->assertTrue($form->getField('Custom intervals')->isDisplayed());
 					}
 					break;
 				default:
@@ -2066,31 +2335,43 @@ class testFormItem extends CLegacyWebTest {
 			$this->zbxTestAssertElementPresentXpath("//z-select[@id='value_type']//li[text()='$value_type']");
 
 			// "Execute now" button availability
-			if (in_array($type, ['Zabbix agent', 'Simple check', 'SNMP agent', 'Zabbix internal', 'External check',
-					'Database monitor', 'IPMI agent', 'SSH agent', 'TELNET agent', 'JMX agent', 'Calculated',
-					'Dependent item'])) {
-				$this->zbxTestClickButtonText('Execute now');
-				$this->zbxTestWaitUntilMessageTextPresent('msg-good', 'Request sent successfully');
+			if (in_array($type, ['Zabbix agent (active)', 'SNMP trap', 'Zabbix trapper'])) {
+				$this->assertFalse($dialog_check->getFooter()->query('button:Execute now')->one()->isClickable());
 			}
 			else {
-				$this->zbxTestAssertElementPresentXpath("//button[text()='Execute now'][@disabled]");
+				$dialog_check->getFooter()->query('button:Execute now')->one()->click();
+				$this->assertMessage(TEST_GOOD, 'Request sent successfully');
 			}
 
 			if (isset($data['ipmi_sensor'])) {
-				$ipmiValue = $this->zbxTestGetValue("//input[@id='ipmi_sensor']");
+				$ipmiValue = $this->zbxTestGetValue("//z-textarea-flexible[@id='ipmi_sensor']");
 				$this->assertEquals($ipmi_sensor, $ipmiValue);
 			}
+
+			if (isset($data['allowed_hosts'])) {
+				$check_form->checkValue(['Allowed hosts' => $data['allowed_hosts']]);
+			}
+
+			if (isset($data['username'])) {
+				$check_form->checkValue(['User name' => $data['username']]);
+			}
+
+			if (isset($data['password'])) {
+				$check_form->checkValue(['Password' => $data['password']]);
+			}
+
+			$dialog_check->close();
 		}
 	}
 
 	public function testFormItem_HousekeeperUpdate() {
-		$this->zbxTestLogin('zabbix.php?action=gui.edit');
-		$this->query('id:page-title-general')->asPopupButton()->one()->select('Housekeeping');
+		$this->zbxTestLogin('zabbix.php?action=housekeeping.edit');
 
 		$this->zbxTestCheckboxSelect('hk_history_global', false);
 		$this->zbxTestCheckboxSelect('hk_trends_global', false);
 
-		$this->zbxTestClickWait('update');
+		$this->zbxTestClickButton('Update');
+		$this->assertMessage(TEST_GOOD, 'Configuration updated');
 
 		$this->zbxTestOpen(self::HOST_LIST_PAGE);
 		$this->filterEntriesAndOpenItems();
@@ -2098,8 +2379,7 @@ class testFormItem extends CLegacyWebTest {
 		$this->zbxTestAssertElementNotPresentId('history_mode_hint');
 		$this->zbxTestAssertElementNotPresentId('trends_mode_hint');
 
-		$this->zbxTestOpen('zabbix.php?action=gui.edit');
-		$this->query('id:page-title-general')->asPopupButton()->one()->select('Housekeeping');
+		$this->zbxTestOpen('zabbix.php?action=housekeeping.edit');
 
 		$this->zbxTestCheckboxSelect('hk_history_global');
 		$this->zbxTestInputType('hk_history', '99d');
@@ -2107,19 +2387,25 @@ class testFormItem extends CLegacyWebTest {
 		$this->zbxTestCheckboxSelect('hk_trends_global');
 		$this->zbxTestInputType('hk_trends', '455d');
 
-		$this->zbxTestClickWait('update');
+		$this->zbxTestClickButton('Update');
+		$this->assertMessage(TEST_GOOD, 'Configuration updated');
 
 		$this->zbxTestOpen(self::HOST_LIST_PAGE);
 		$this->filterEntriesAndOpenItems();
 		$this->zbxTestClickLinkTextWait($this->item);
+		$dialog = COverlayDialogElement::find()->waitUntilReady()->one();
+		$form = $dialog->asForm();
+		$form->getLabel('History')->query('xpath:span[@class="js-history-hint"]/button')->one()->click();
+		$this->zbxTestAssertElementText('//div[contains(@class, "hintbox-static")]',
+				'Overridden by global housekeeping settings (99d)'
+		);
+		$form->getLabel('Trends')->query('xpath:span[@class="js-trends-hint"]/button')->one()->click();
+		$this->zbxTestAssertElementText('//div[contains(@class, "hintbox-static")][2]',
+				'Overridden by global housekeeping settings (455d)'
+		);
+		$dialog->close();
 
-		$this->zbxTestClickWait('history_mode_hint');
-		$this->zbxTestAssertElementText("//div[@class='overlay-dialogue']", 'Overridden by global housekeeping settings (99d)');
-		$this->zbxTestClickWait('trends_mode_hint');
-		$this->zbxTestAssertElementText("//div[@class='overlay-dialogue'][2]", 'Overridden by global housekeeping settings (455d)');
-
-		$this->zbxTestOpen('zabbix.php?action=gui.edit');
-		$this->query('id:page-title-general')->asPopupButton()->one()->select('Housekeeping');
+		$this->zbxTestOpen('zabbix.php?action=housekeeping.edit');
 
 		$this->zbxTestInputType('hk_history', 90);
 		$this->zbxTestCheckboxSelect('hk_history_global', false);
@@ -2127,7 +2413,8 @@ class testFormItem extends CLegacyWebTest {
 		$this->zbxTestInputType('hk_trends', 365);
 		$this->zbxTestCheckboxSelect('hk_trends_global', false);
 
-		$this->zbxTestClickWait('update');
+		$this->zbxTestClickButton('Update');
+		$this->assertMessage(TEST_GOOD, 'Configuration updated');
 
 		$this->zbxTestOpen(self::HOST_LIST_PAGE);
 		$this->filterEntriesAndOpenItems();
@@ -2141,8 +2428,8 @@ class testFormItem extends CLegacyWebTest {
 	private function filterEntriesAndOpenItems() {
 		$form = $this->query('name:zbx_filter')->asForm()->waitUntilReady()->one();
 		$form->fill(['Name' => $this->host]);
+		$table = $this->query('class:datatable')->asDatatable()->one()->waitUntilReady();
 		$this->query('button:Apply')->one()->waitUntilClickable()->click();
-		$this->query('xpath://table[@class="list-table"]')->asTable()->one()->findRow('Name', $this->host)
-				->getColumn('Items')->query('link:Items')->one()->click();
+		$table->waitUntilReloaded()->findRow('Name', $this->host)->getColumn('Items')->query('link:Items')->one()->click();
 	}
 }

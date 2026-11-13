@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -39,22 +34,20 @@ class CEncryptHelper {
 	/**
 	 * Return session key.
 	 *
-	 * @return string|null
+	 * @return string
 	 */
-	private static function getKey(): ?string {
+	private static function getKey(): string {
 		if (!self::$key) {
 			// This if contain copy in CEncryptedCookieSession class.
-			if (CSettingsHelper::getGlobal(CSettingsHelper::SESSION_KEY) === '') {
+			if (CSettingsHelper::getPrivate(CSettingsHelper::SESSION_KEY) === '') {
 				self::$key = self::generateKey();
 
-				if (!self::updateKey(self::$key)) {
-					return null;
-				}
+				self::updateKey(self::$key);
 
 				return self::$key;
 			}
 
-			self::$key = CSettingsHelper::getGlobal(CSettingsHelper::SESSION_KEY);
+			self::$key = CSettingsHelper::getPrivate(CSettingsHelper::SESSION_KEY);
 		}
 
 		return self::$key;
@@ -80,9 +73,7 @@ class CEncryptHelper {
 	 * @return string
 	 */
 	public static function sign(string $data): string {
-		$key = self::getKey() ?? '';
-
-		return hash_hmac(self::SIGN_ALGO, $data, $key);
+		return hash_hmac(self::SIGN_ALGO, $data, self::getKey());
 	}
 
 	/**
@@ -98,16 +89,11 @@ class CEncryptHelper {
 	 * Update secret session key.
 	 *
 	 * @param string $key
-	 *
-	 * @return boolean
 	 */
-	public static function updateKey(string $key): bool {
-		$db_config = DB::select('config', ['output' => ['configid']])[0];
-
-		return DBexecute(
-			'UPDATE config'.
-			' SET session_key='.zbx_dbstr($key).
-			' WHERE '.dbConditionInt('configid', [$db_config['configid']])
-		);
+	public static function updateKey(string $key): void {
+		DB::update('settings', [
+			'values' => ['value_str' => $key],
+			'where' => ['name' => 'session_key']
+		]);
 	}
 }

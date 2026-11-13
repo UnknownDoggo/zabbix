@@ -3,27 +3,43 @@
 SHELL := cmd
 BUILDDIR := $(subst /,\,$(CURDIR))
 TOPDIR := $(BUILDDIR)\..\..
-OUTPUTDIR := output
+OUTPUTDIR := $(BUILDDIR)\output
 
 MODULEDIR = $(TOPDIR)\src\go
 TARGETDIR = $(TOPDIR)\src\go\cmd\zabbix_agent2
-TARGETPKG=zabbix.com/cmd/zabbix_agent2
+TARGETPKG=golang.zabbix.com/agent2/cmd/zabbix_agent2
 
 CC = gcc
+AR = ar
 WINDRES = windres.exe
 
 OBJS = \
+	$(OUTPUTDIR)\bincommon.o \
 	$(OUTPUTDIR)\threads.o \
+	$(OUTPUTDIR)\interval.o \
+	$(OUTPUTDIR)\num.o \
 	$(OUTPUTDIR)\str.o \
+	$(OUTPUTDIR)\common_str.o \
+	$(OUTPUTDIR)\common_log.o \
+	$(OUTPUTDIR)\components_strings_representations.o \
+	$(OUTPUTDIR)\libc_wrappers.o \
+	$(OUTPUTDIR)\param.o \
 	$(OUTPUTDIR)\misc.o \
 	$(OUTPUTDIR)\time.o \
+	$(OUTPUTDIR)\expr.o \
+	$(OUTPUTDIR)\host.o \
+	$(OUTPUTDIR)\macro.o \
+	$(OUTPUTDIR)\function.o \
+	$(OUTPUTDIR)\token.o \
 	$(OUTPUTDIR)\fatal.o \
 	$(OUTPUTDIR)\disk.o \
+	$(OUTPUTDIR)\ip.o \
 	$(OUTPUTDIR)\iprange.o \
 	$(OUTPUTDIR)\zbxhash.o \
 	$(OUTPUTDIR)\md5.o \
 	$(OUTPUTDIR)\sysinfo.o \
 	$(OUTPUTDIR)\vector.o \
+	$(OUTPUTDIR)\hashset.o \
 	$(OUTPUTDIR)\zbxregexp.o \
 	$(OUTPUTDIR)\persistent_state.o \
 	$(OUTPUTDIR)\logfiles.o \
@@ -32,15 +48,15 @@ OBJS = \
 	$(OUTPUTDIR)\json.o \
 	$(OUTPUTDIR)\json_parser.o \
 	$(OUTPUTDIR)\jsonpath.o \
+	$(OUTPUTDIR)\jsonobj.o \
 	$(OUTPUTDIR)\sha256crypt.o \
 	$(OUTPUTDIR)\variant.o \
-	$(OUTPUTDIR)\sysinfo_system.o \
-	$(OUTPUTDIR)\sysinfo_dns.o \
-	$(OUTPUTDIR)\sysinfo_file.o \
-	$(OUTPUTDIR)\sysinfo_dir.o \
 	$(OUTPUTDIR)\sysinfo_alias.o \
 	$(OUTPUTDIR)\eventlog.o \
-	$(TARGETDIR)\resource.syso
+	$(OUTPUTDIR)\process_eventslog.o \
+	$(OUTPUTDIR)\process_eventslog6.o \
+	$(OUTPUTDIR)\symbols.o \
+	$(OUTPUTDIR)\win32_file.o
 
 CFLAGS := $(CFLAGS) -O2 -g -DHAVE_STDINT_H=1 -DZBX_BUILD_AGENT2=1  -DHAVE_THREAD_LOCAL=1 \
 	-I$(TOPDIR)\build\win32\include\common -I$(TOPDIR)\build\mingw -I$(TOPDIR)\include -I$(TOPDIR)\include\common
@@ -76,12 +92,6 @@ ifneq ("$(OPENSSL)", "")
 	endif
 endif
 
-ifneq ("$(PCRE)", "")
-	CFLAGS := $(CFLAGS) -DPCRE_STATIC -I$(PCRE)\include -DHAVE_PCRE_H=1
-	LDFLAGS := $(LDFLAGS) -L$(PCRE)\lib
-	TAGS := $(TAGS) pcre
-endif
-
 ifneq ("$(PCRE2)", "")
 	CFLAGS := $(CFLAGS) -DPCRE2_STATIC -I$(PCRE2)\include -DHAVE_PCRE2_H=1
 	LDFLAGS := $(LDFLAGS) -L$(PCRE2)\lib
@@ -91,7 +101,7 @@ endif
 CGO_CFLAGS += $(CFLAGS)
 CGO_LDFLAGS += $(LDFLAGS)
 
-PKG=zabbix.com/pkg/version
+PKG=golang.zabbix.com/agent2/pkg/version
 
 GOLDFLAGS = -X $(PKG).compileOs=windows
 GOLDFLAGS += -X $(PKG).compileArch=$(GOARCH)
@@ -100,22 +110,70 @@ GOLDFLAGS += -X main.applicationName=zabbix_agent2
 
 all: $(TARGETBIN)
 
+$(OUTPUTDIR)\bincommon.o: $(TOPDIR)\src\libs\zbxbincommon\bincommon.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
 $(OUTPUTDIR)\misc.o: $(TOPDIR)\src\libs\zbxcommon\misc.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\iprange.o: $(TOPDIR)\src\libs\zbxcommon\iprange.c
+$(OUTPUTDIR)\ip.o: $(TOPDIR)\src\libs\zbxip\ip.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\str.o: $(TOPDIR)\src\libs\zbxcommon\str.c
+$(OUTPUTDIR)\iprange.o: $(TOPDIR)\src\libs\zbxip\iprange.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\file.o: $(TOPDIR)\src\libs\zbxcommon\file.c
+$(OUTPUTDIR)\num.o: $(TOPDIR)\src\libs\zbxnum\num.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\time.o: $(TOPDIR)\src\libs\zbxcommon\time.c
+$(OUTPUTDIR)\str.o: $(TOPDIR)\src\libs\zbxstr\str.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\tls_version.o: $(TOPDIR)\src\libs\zbxcrypto\tls_version.c
+$(OUTPUTDIR)\common_str.o: $(TOPDIR)\src\libs\zbxcommon\common_str.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\common_log.o: $(TOPDIR)\src\libs\zbxcommon\common_log.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\file.o: $(TOPDIR)\src\libs\zbxfile\file.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\symbols.o: $(TOPDIR)\src\libs\zbxwin32\symbols.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\win32_file.o: $(TOPDIR)\src\libs\zbxfile\win32\win32_file.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\time.o: $(TOPDIR)\src\libs\zbxtime\time.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\expr.o: $(TOPDIR)\src\libs\zbxexpr\expr.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\host.o: $(TOPDIR)\src\libs\zbxexpr\host.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\macro.o: $(TOPDIR)\src\libs\zbxexpr\macro.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\function.o: $(TOPDIR)\src\libs\zbxexpr\function.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\interval.o: $(TOPDIR)\src\libs\zbxexpr\interval.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\token.o: $(TOPDIR)\src\libs\zbxexpr\token.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\components_strings_representations.o: $(TOPDIR)\src\libs\zbxcommon\components_strings_representations.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\libc_wrappers.o: $(TOPDIR)\src\libs\zbxcommon\libc_wrappers.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\param.o: $(TOPDIR)\src\libs\zbxparam\param.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\tls_version.o: $(TOPDIR)\src\libs\zbxcomms\tls_version.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
 $(OUTPUTDIR)\fatal.o: $(TOPDIR)\src\libs\zbxwin32\fatal.c
@@ -139,7 +197,10 @@ $(OUTPUTDIR)\json_parser.o: $(TOPDIR)\src\libs\zbxjson\json_parser.c
 $(OUTPUTDIR)\jsonpath.o: $(TOPDIR)\src\libs\zbxjson\jsonpath.c
 	$(CC) $(CFLAGS) -DUNICODE -DWITH_COMMON_METRICS -c $^ -o $@
 
-$(OUTPUTDIR)\sha256crypt.o: $(TOPDIR)\src\libs\zbxcrypto\sha256crypt.c
+$(OUTPUTDIR)\jsonobj.o: $(TOPDIR)\src\libs\zbxjson\jsonobj.c
+	$(CC) $(CFLAGS) -DUNICODE -DWITH_COMMON_METRICS -c $^ -o $@
+
+$(OUTPUTDIR)\sha256crypt.o: $(TOPDIR)\src\libs\zbxhash\sha256crypt.c
 	$(CC) $(CFLAGS) -DUNICODE -DWITH_COMMON_METRICS -c $^ -o $@
 
 $(OUTPUTDIR)\variant.o: $(TOPDIR)\src\libs\zbxvariant\variant.c
@@ -151,22 +212,16 @@ $(OUTPUTDIR)\json.o: $(TOPDIR)\src\libs\zbxjson\json.c
 $(OUTPUTDIR)\sysinfo.o: $(TOPDIR)\src\libs\zbxsysinfo\sysinfo.c
 	$(CC) $(CFLAGS) -DUNICODE -DWITH_COMMON_METRICS -c $^ -o $@
 
-$(OUTPUTDIR)\sysinfo_system.o: $(TOPDIR)\src\libs\zbxsysinfo\common\system.c
-	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
-
-$(OUTPUTDIR)\sysinfo_dns.o: $(TOPDIR)\src\libs\zbxsysinfo\common\dns.c
-	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
-
-$(OUTPUTDIR)\sysinfo_file.o: $(TOPDIR)\src\libs\zbxsysinfo\common\file.c
-	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
-
-$(OUTPUTDIR)\sysinfo_dir.o: $(TOPDIR)\src\libs\zbxsysinfo\common\dir.c
-	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
-
 $(OUTPUTDIR)\sysinfo_alias.o: $(TOPDIR)\src\libs\zbxsysinfo\alias\alias.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
 $(OUTPUTDIR)\vector.o: $(TOPDIR)\src\libs\zbxalgo\vector.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\hashset.o: $(TOPDIR)\src\libs\zbxalgo\hashset.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\version.o: $(TOPDIR)\src\libs\zbxversion\version.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
 $(OUTPUTDIR)\algodefs.o: $(TOPDIR)\src\libs\zbxalgo\algodefs.c
@@ -175,22 +230,34 @@ $(OUTPUTDIR)\algodefs.o: $(TOPDIR)\src\libs\zbxalgo\algodefs.c
 $(OUTPUTDIR)\zbxregexp.o: $(TOPDIR)\src\libs\zbxregexp\zbxregexp.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
+$(OUTPUTDIR)\active_checks.o: $(TOPDIR)\src\zabbix_agent\active_checks\active_checks.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\eventlog.o: $(TOPDIR)\src\zabbix_agent\active_checks\eventlog_win32\eventlog.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\process_eventslog.o: $(TOPDIR)\src\zabbix_agent\active_checks\eventlog_win32\process_eventslog.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
+$(OUTPUTDIR)\process_eventslog6.o: $(TOPDIR)\src\zabbix_agent\active_checks\eventlog_win32\process_eventslog6.c
+	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
+
 $(OUTPUTDIR)\persistent_state.o: $(TOPDIR)\src\zabbix_agent\logfiles\persistent_state.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
 $(OUTPUTDIR)\logfiles.o: $(TOPDIR)\src\zabbix_agent\logfiles\logfiles.c
 	$(CC) $(CFLAGS) -DUNICODE -c $^ -o $@
 
-$(OUTPUTDIR)\eventlog.o: $(TOPDIR)\src\zabbix_agent\eventlog.c
-	$(CC) $(CFLAGS) -DUNICODE -c $^ -I$(TOPDIR)\go\win64 -o $@
-
 $(TARGETDIR)\resource.syso: $(TOPDIR)\build\win32\project\resource.rc
 	$(WINDRES) $^ $(RFLAGS) -D _WINDOWS -D ZABBIX_AGENT2 -o $@
 
+$(OUTPUTDIR)\libagent.a: $(OBJS)
+	$(AR) rcs $@ $^
+
 .FORCE:
-$(TARGETBIN): $(OBJS) .FORCE
+$(TARGETBIN): $(OBJS) $(OUTPUTDIR)\libagent.a $(TARGETDIR)\resource.syso .FORCE
 	set CGO_CFLAGS=$(CGO_CFLAGS)
-	set CGO_LDFLAGS=$(CGO_LDFLAGS)
+	set CGO_LDFLAGS=$(CGO_LDFLAGS) $(OUTPUTDIR)\libagent.a
 	set GOARCH=$(GOARCH)
 	set CGO_ENABLED=1
 
@@ -202,8 +269,8 @@ $(TARGETBIN): $(OBJS) .FORCE
 	set GOLDFLAGS=%GOLDFLAGS% -X $(PKG).compileTime=%BUILD_TIME%
 	cd $(MODULEDIR)
 
-	go build -tags "$(TAGS)" -ldflags="%GOLDFLAGS%" -o $(TARGETBIN) zabbix.com/cmd/zabbix_agent2
+	go build -tags "$(TAGS)" -ldflags="%GOLDFLAGS%" -o $(TARGETBIN) golang.zabbix.com/agent2/cmd/zabbix_agent2
 
 clean:
 	go clean -cache
-	del $(TOPDIR)\include\common\config.h "$(TARGETBIN)" $(OUTPUTDIR)\*.o $(TARGETDIR)\*.syso 2>NUL
+	del $(TOPDIR)\include\common\config.h "$(TARGETBIN)" $(OUTPUTDIR)\*.o $(OUTPUTDIR)\*.a $(TARGETDIR)\*.syso 2>NUL

@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -54,9 +49,7 @@ $hintbox_tile_url = makeHelpIcon([
 	]))->addClass(ZBX_STYLE_LIST_DASHED)
 ]);
 
-$hintbox_attribution = makeHelpIcon(
-	_('Tile provider attribution data displayed in a small text box on the map.')
-);
+$warning_attribution = makeWarningIcon(_('Tile provider attribution data displayed in a small text box on the map.'));
 
 $hintbox_max_zoom = makeHelpIcon(_('Maximum zoom level of the map.'));
 
@@ -76,30 +69,27 @@ $form_grid = (new CFormGrid())
 	->addItem([
 		(new CLabel([_('Tile URL'), $hintbox_tile_url], 'geomaps_tile_url'))->setAsteriskMark(),
 		new CFormField(
-			(new CTextBox('geomaps_tile_url', $data['geomaps_tile_url'], false,
-				DB::getFieldLength('config', 'geomaps_tile_url'))
-			)
+			(new CTextAreaFlexible('geomaps_tile_url', $data['geomaps_tile_url']))
 				->setWidth(ZBX_TEXTAREA_BIG_WIDTH)
+				->setMaxlength(CSettingsSchema::getFieldLength('geomaps_tile_url'))
 				->setReadonly($data['geomaps_tile_provider'] !== '')
 				->setAriaRequired()
 		)
 	])
 	->addItem([
-		new CLabel([_('Attribution'), $hintbox_attribution], 'geomaps_attribution'),
-		new CFormField(
+		(new CLabel([_('Attribution text'), $warning_attribution], 'geomaps_attribution'))
+			->addClass($data['geomaps_tile_provider'] !== '' ? ZBX_STYLE_DISPLAY_NONE : null),
+		(new CFormField(
 			(new CTextArea('geomaps_attribution', $data['geomaps_attribution']))
 				->addClass(ZBX_STYLE_MONOSPACE_FONT)
 				->setWidth(ZBX_TEXTAREA_BIG_WIDTH)
-				->setReadonly($data['geomaps_tile_provider'] !== '')
-				->setMaxLength(DB::getFieldLength('config', 'geomaps_attribution'))
-		)
+				->setMaxLength(CSettingsSchema::getFieldLength('geomaps_attribution'))
+		))->addClass($data['geomaps_tile_provider'] !== '' ? ZBX_STYLE_DISPLAY_NONE : null)
 	])
 	->addItem([
 		(new CLabel([_('Max zoom level'), $hintbox_max_zoom], 'geomaps_max_zoom'))->setAsteriskMark(),
 		new CFormField(
-			(new CTextBox('geomaps_max_zoom', $data['geomaps_max_zoom'], false,
-				DB::getFieldLength('config', 'geomaps_max_zoom'))
-			)
+			(new CNumericBox('geomaps_max_zoom', $data['geomaps_max_zoom'], 2, false, false))
 				->setWidth(ZBX_TEXTAREA_TINY_WIDTH)
 				->setReadonly($data['geomaps_tile_provider'] !== '')
 				->setAriaRequired()
@@ -107,23 +97,19 @@ $form_grid = (new CFormGrid())
 	]);
 
 $form = (new CForm())
+	->addItem((new CVar(CSRF_TOKEN_NAME, CCsrfTokenHelper::get('geomaps')))->removeId())
 	->setId('geomaps-form')
 	->setName('geomaps-form')
-	->setAction(
-		(new CUrl('zabbix.php'))
-			->setArgument('action', 'geomaps.update')
-			->getUrl()
-	)
-	->setAttribute('aria-labeledby', ZBX_STYLE_PAGE_TITLE)
+	->setAttribute('aria-labelledby', CHtmlPage::PAGE_TITLE_ID)
 	->addItem(
 		(new CTabView())
 			->addTab('geomaps_tab', _('Geographical maps'), $form_grid)
 			->setFooter(makeFormFooter(
-				new CSubmit('update', _('Update'))
+				(new CSubmit('', _('Update')))->addClass('js-submit')
 			))
 	);
 
-(new CWidget())
+(new CHtmlPage())
 	->setTitle(_('Geographical maps'))
 	->setTitleSubmenu(getAdministrationGeneralSubmenu())
 	->setDocUrl(CDocHelper::getUrl(CDocHelper::ADMINISTRATION_GEOMAPS_EDIT))
@@ -131,7 +117,8 @@ $form = (new CForm())
 	->show();
 
 (new CScriptTag(
-	'view.init('. json_encode([
+	'view.init('.json_encode([
+		'rules' => $data['js_validation_rules'],
 		'tile_providers' => $data['tile_providers']
 	]).');'
 ))

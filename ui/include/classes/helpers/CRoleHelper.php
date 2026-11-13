@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -30,6 +25,9 @@ class CRoleHelper {
 	public const UI_MONITORING_LATEST_DATA = 'ui.monitoring.latest_data';
 	public const UI_MONITORING_MAPS = 'ui.monitoring.maps';
 	public const UI_MONITORING_DISCOVERY = 'ui.monitoring.discovery';
+	public const UI_APM_TRACES = 'ui.apm.traces';
+	public const UI_APM_METRICS = 'ui.apm.metrics';
+	public const UI_APM_LOGS = 'ui.apm.logs';
 	public const UI_INVENTORY_OVERVIEW = 'ui.inventory.overview';
 	public const UI_INVENTORY_HOSTS = 'ui.inventory.hosts';
 	public const UI_REPORTS_SYSTEM_INFO = 'ui.reports.system_info';
@@ -40,25 +38,39 @@ class CRoleHelper {
 	public const UI_REPORTS_NOTIFICATIONS = 'ui.reports.notifications';
 	public const UI_REPORTS_SCHEDULED_REPORTS = 'ui.reports.scheduled_reports';
 	public const UI_SERVICES_SERVICES = 'ui.services.services';
-	public const UI_SERVICES_ACTIONS = 'ui.services.actions';
 	public const UI_SERVICES_SLA = 'ui.services.sla';
 	public const UI_SERVICES_SLA_REPORT = 'ui.services.sla_report';
+	public const UI_CONFIGURATION_TEMPLATE_GROUPS = 'ui.configuration.template_groups';
 	public const UI_CONFIGURATION_HOST_GROUPS = 'ui.configuration.host_groups';
 	public const UI_CONFIGURATION_TEMPLATES = 'ui.configuration.templates';
 	public const UI_CONFIGURATION_HOSTS = 'ui.configuration.hosts';
 	public const UI_CONFIGURATION_MAINTENANCE = 'ui.configuration.maintenance';
-	public const UI_CONFIGURATION_ACTIONS = 'ui.configuration.actions';
-	public const UI_CONFIGURATION_EVENT_CORRELATION = 'ui.configuration.event_correlation';
+	public const UI_CONFIGURATION_TRIGGER_ACTIONS =  'ui.configuration.trigger_actions';
+	public const UI_CONFIGURATION_SERVICE_ACTIONS = 'ui.configuration.service_actions';
+	public const UI_CONFIGURATION_DISCOVERY_ACTIONS =  'ui.configuration.discovery_actions';
+	public const UI_CONFIGURATION_AUTOREGISTRATION_ACTIONS =  'ui.configuration.autoregistration_actions';
+	public const UI_CONFIGURATION_INTERNAL_ACTIONS =  'ui.configuration.internal_actions';
+	public const UI_CONFIGURATION_CEPRULES = 'ui.configuration.ceprules';
 	public const UI_CONFIGURATION_DISCOVERY = 'ui.configuration.discovery';
 	public const UI_ADMINISTRATION_GENERAL = 'ui.administration.general';
+	public const UI_ADMINISTRATION_DATA_SOURCE = 'ui.administration.data_source';
+	public const UI_ADMINISTRATION_AUDIT_LOG = 'ui.administration.audit_log';
+	public const UI_ADMINISTRATION_HOUSEKEEPING = 'ui.administration.housekeeping';
+	public const UI_ADMINISTRATION_PROXY_GROUPS = 'ui.administration.proxy_groups';
 	public const UI_ADMINISTRATION_PROXIES = 'ui.administration.proxies';
+	public const UI_ADMINISTRATION_MACROS = 'ui.administration.macros';
 	public const UI_ADMINISTRATION_AUTHENTICATION = 'ui.administration.authentication';
 	public const UI_ADMINISTRATION_USER_GROUPS = 'ui.administration.user_groups';
 	public const UI_ADMINISTRATION_USER_ROLES = 'ui.administration.user_roles';
 	public const UI_ADMINISTRATION_USERS = 'ui.administration.users';
+	public const UI_ADMINISTRATION_API_TOKENS = 'ui.administration.api_tokens';
+	public const UI_ADMINISTRATION_LINKED_DEVICES = 'ui.administration.linked_devices';
 	public const UI_ADMINISTRATION_MEDIA_TYPES = 'ui.administration.media_types';
 	public const UI_ADMINISTRATION_SCRIPTS = 'ui.administration.scripts';
 	public const UI_ADMINISTRATION_QUEUE = 'ui.administration.queue';
+
+	public const PROFILE_REDIRECT_ENFORCE = 'profile.redirect.enforce';
+	public const PROFILE_REDIRECT_URL = 'profile.redirect.url';
 
 	public const ACTIONS_EDIT_DASHBOARDS = 'actions.edit_dashboards';
 	public const ACTIONS_EDIT_MAPS = 'actions.edit_maps';
@@ -66,18 +78,32 @@ class CRoleHelper {
 	public const ACTIONS_ADD_PROBLEM_COMMENTS = 'actions.add_problem_comments';
 	public const ACTIONS_CHANGE_SEVERITY = 'actions.change_severity';
 	public const ACTIONS_ACKNOWLEDGE_PROBLEMS = 'actions.acknowledge_problems';
+	public const ACTIONS_SUPPRESS_PROBLEMS = 'actions.suppress_problems';
 	public const ACTIONS_CLOSE_PROBLEMS = 'actions.close_problems';
 	public const ACTIONS_EXECUTE_SCRIPTS = 'actions.execute_scripts';
 	public const ACTIONS_MANAGE_API_TOKENS = 'actions.manage_api_tokens';
 	public const ACTIONS_MANAGE_SCHEDULED_REPORTS = 'actions.manage_scheduled_reports';
 	public const ACTIONS_MANAGE_SLA = 'actions.manage_sla';
 	public const ACTIONS_INVOKE_EXECUTE_NOW = 'actions.invoke_execute_now';
+	public const ACTIONS_CHANGE_PROBLEM_RANKING = 'actions.change_problem_ranking';
+	public const ACTIONS_EDIT_OWN_MEDIA = 'actions.edit_own_media';
+	public const ACTIONS_EDIT_USER_MEDIA = 'actions.edit_user_media';
+	public const ACTIONS_SELECT_SERVER_FOR_MONITORING = 'actions.select_server_for_monitoring';
 
+	public const DEVICES_ACCESS = 'devices.access';
+	public const DEVICES_ACTIONS_MANAGE_OWN = 'devices.actions.manage_own';
+	public const DEVICES_ACTIONS_MANAGE_USER = 'devices.actions.manage_user';
+	public const DEVICES_ACTIONS_DEFAULT_ACCESS = 'devices.actions.default_access';
+
+	public const UI_SECTION_DASHBOARDS = 'ui.dashboards';
 	public const UI_SECTION_MONITORING = 'ui.monitoring';
+	public const UI_SECTION_APM = 'ui.apm';
 	public const UI_SECTION_SERVICES = 'ui.services';
 	public const UI_SECTION_INVENTORY = 'ui.inventory';
 	public const UI_SECTION_REPORTS = 'ui.reports';
-	public const UI_SECTION_CONFIGURATION = 'ui.configuration';
+	public const UI_SECTION_DATA_COLLECTION = 'ui.data_collection';
+	public const UI_SECTION_ALERTS = 'ui.alerts';
+	public const UI_SECTION_USERS = 'ui.users';
 	public const UI_SECTION_ADMINISTRATION = 'ui.administration';
 
 	public const API_ANY_METHOD = '.*';
@@ -90,8 +116,6 @@ class CRoleHelper {
 	/**
 	 * Array for storing roles data (including rules) loaded from Role API object and converted to one format. The data
 	 * of specific role can be accessed in following way: self::roles[{role ID}].
-	 *
-	 * @static
 	 *
 	 * @var array
 	 */
@@ -114,16 +138,14 @@ class CRoleHelper {
 	/**
 	 * Checks the access of specific role to specific rule.
 	 *
-	 * @static
-	 *
 	 * @param string $rule_name  Name of the rule to check access for.
 	 * @param string $roleid     ID of the role where check of access is necessary to perform.
 	 *
-	 * @return bool  Returns true if role have access to specified rule, false - otherwise.
+	 * @return mixed  Returns value if role have access to specified rule, false - otherwise.
 	 *
 	 * @throws Exception
 	 */
-	public static function checkAccess(string $rule_name, string $roleid): bool {
+	public static function checkAccess(string $rule_name, string $roleid): mixed {
 		self::loadRoleRules($roleid);
 
 		if (!array_key_exists($rule_name, self::$roles[$roleid]['rules']) || $rule_name === 'api') {
@@ -134,10 +156,19 @@ class CRoleHelper {
 	}
 
 	/**
+	 * Returns mode for treating API methods: 0 - deny list; 1 - allow list.
+	 *
+	 * @throws Exception
+	 */
+	public static function getRoleApiListMode(string $roleid): int {
+		self::loadRoleRules($roleid);
+
+		return (int) self::$roles[$roleid]['rules']['api.mode'];
+	}
+
+	/**
 	 * Gets list of API methods (with wildcards if that exists) that are considered allowed or denied (depending on
 	 * API access mode) for specific role.
-	 *
-	 * @static
 	 *
 	 * @param string $roleid  Role ID.
 	 *
@@ -154,8 +185,6 @@ class CRoleHelper {
 	/**
 	 * Loads once all rules of specified Role API objects by ID and converts rule data to one format.
 	 *
-	 * @static
-	 *
 	 * @param string $roleid  Role ID.
 	 *
 	 * @throws Exception
@@ -165,10 +194,24 @@ class CRoleHelper {
 			return;
 		}
 
+		if (!$roleid) {
+			self::$roles[0] = [
+				'type' => USER_TYPE_ZABBIX_USER,
+				'rules' => [
+					'api' => [],
+					'api.access' => (bool) ZBX_ROLE_RULE_DISABLED,
+					'api.mode' => ZBX_ROLE_RULE_API_MODE_DENY
+				]
+			];
+
+			return;
+		}
+
 		$roles = API::Role()->get([
 			'output' => ['roleid', 'name', 'type'],
-			'selectRules' => ['ui', 'ui.default_access', 'modules', 'modules.default_access', 'api.access', 'api.mode',
-				'api', 'actions', 'actions.default_access'
+			'selectRules' => ['ui', 'ui.default_access', 'profile.redirect.enforce', 'profile.redirect.url', 'modules',
+				'modules.default_access', 'api.access', 'api.mode', 'api', 'actions', 'actions.default_access',
+				'devices.access', 'devices.actions', 'devices.actions.default_access'
 			],
 			'roleids' => $roleid
 		]);
@@ -181,11 +224,15 @@ class CRoleHelper {
 
 		$rules = [
 			'ui.default_access' => (bool) $role['rules']['ui.default_access'],
+			'profile.redirect.enforce' => (bool) $role['rules']['profile.redirect.enforce'],
+			'profile.redirect.url' => $role['rules']['profile.redirect.url'],
 			'modules.default_access' => (bool) $role['rules']['modules.default_access'],
 			'api.access' => (bool) $role['rules']['api.access'],
-			'api.mode' => (bool) $role['rules']['api.mode'],
+			'api.mode' => (int) $role['rules']['api.mode'],
 			'api' => $role['rules']['api'],
-			'actions.default_access' => (bool) $role['rules']['actions.default_access']
+			'actions.default_access' => (bool) $role['rules']['actions.default_access'],
+			'devices.access' => (bool) $role['rules']['devices.access'],
+			'devices.actions.default_access' => (bool) $role['rules']['devices.actions.default_access']
 		];
 
 		foreach ($role['rules']['ui'] as $rule) {
@@ -200,6 +247,10 @@ class CRoleHelper {
 			$rules['actions.'.$rule['name']] = (bool) $rule['status'];
 		}
 
+		foreach ($role['rules']['devices.actions'] as $rule) {
+			$rules['devices.actions.'.$rule['name']] = (bool) $rule['status'];
+		}
+
 		$role['type'] = (int) $role['type'];
 		$role['rules'] = $rules;
 
@@ -209,58 +260,70 @@ class CRoleHelper {
 	/**
 	 * Gets all available UI elements rules for specific user type.
 	 *
-	 * @static
-	 *
 	 * @param integer $user_type  User type.
 	 *
 	 * @return array  Returns the array of rule names for specified user type.
 	 */
 	public static function getUiElementsByUserType(int $user_type): array {
 		$rules = [
-			self::UI_INVENTORY_HOSTS,
-			self::UI_INVENTORY_OVERVIEW,
 			self::UI_MONITORING_DASHBOARD,
+			self::UI_MONITORING_PROBLEMS,
 			self::UI_MONITORING_HOSTS,
 			self::UI_MONITORING_LATEST_DATA,
 			self::UI_MONITORING_MAPS,
-			self::UI_MONITORING_PROBLEMS,
-			self::UI_REPORTS_AVAILABILITY_REPORT,
-			self::UI_REPORTS_TOP_TRIGGERS,
+			self::UI_APM_TRACES,
+			self::UI_APM_METRICS,
+			self::UI_APM_LOGS,
 			self::UI_SERVICES_SERVICES,
-			self::UI_SERVICES_SLA_REPORT
+			self::UI_SERVICES_SLA_REPORT,
+			self::UI_INVENTORY_OVERVIEW,
+			self::UI_INVENTORY_HOSTS,
+			self::UI_REPORTS_AVAILABILITY_REPORT,
+			self::UI_REPORTS_TOP_TRIGGERS
 		];
 
 		if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
 			$rules = array_merge($rules, [
-				self::UI_CONFIGURATION_ACTIONS,
-				self::UI_CONFIGURATION_DISCOVERY,
+				self::UI_MONITORING_DISCOVERY,
+				self::UI_SERVICES_SLA,
+				self::UI_REPORTS_SCHEDULED_REPORTS,
+				self::UI_REPORTS_SYSTEM_INFO,
+				self::UI_REPORTS_NOTIFICATIONS,
+				self::UI_CONFIGURATION_TEMPLATE_GROUPS,
 				self::UI_CONFIGURATION_HOST_GROUPS,
+				self::UI_CONFIGURATION_TEMPLATES,
 				self::UI_CONFIGURATION_HOSTS,
 				self::UI_CONFIGURATION_MAINTENANCE,
-				self::UI_CONFIGURATION_TEMPLATES,
-				self::UI_MONITORING_DISCOVERY,
-				self::UI_REPORTS_NOTIFICATIONS,
-				self::UI_REPORTS_SCHEDULED_REPORTS,
-				self::UI_SERVICES_ACTIONS,
-				self::UI_SERVICES_SLA
+				self::UI_CONFIGURATION_DISCOVERY,
+				self::UI_CONFIGURATION_TRIGGER_ACTIONS,
+				self::UI_CONFIGURATION_SERVICE_ACTIONS,
+				self::UI_CONFIGURATION_DISCOVERY_ACTIONS,
+				self::UI_CONFIGURATION_AUTOREGISTRATION_ACTIONS,
+				self::UI_CONFIGURATION_INTERNAL_ACTIONS
 			]);
 		}
 
 		if ($user_type === USER_TYPE_SUPER_ADMIN) {
 			$rules = array_merge($rules, [
-				self::UI_ADMINISTRATION_AUTHENTICATION,
-				self::UI_ADMINISTRATION_GENERAL,
+				self::UI_REPORTS_AUDIT,
+				self::UI_REPORTS_ACTION_LOG,
+				self::UI_CONFIGURATION_CEPRULES,
 				self::UI_ADMINISTRATION_MEDIA_TYPES,
-				self::UI_ADMINISTRATION_PROXIES,
-				self::UI_ADMINISTRATION_QUEUE,
 				self::UI_ADMINISTRATION_SCRIPTS,
 				self::UI_ADMINISTRATION_USER_GROUPS,
 				self::UI_ADMINISTRATION_USER_ROLES,
 				self::UI_ADMINISTRATION_USERS,
-				self::UI_CONFIGURATION_EVENT_CORRELATION,
-				self::UI_REPORTS_ACTION_LOG,
-				self::UI_REPORTS_AUDIT,
-				self::UI_REPORTS_SYSTEM_INFO
+				self::UI_ADMINISTRATION_API_TOKENS,
+				self::UI_ADMINISTRATION_AUTHENTICATION,
+				self::UI_ADMINISTRATION_LINKED_DEVICES,
+				self::UI_ADMINISTRATION_GENERAL,
+				self::UI_ADMINISTRATION_DATA_SOURCE,
+				self::UI_ADMINISTRATION_AUDIT_LOG,
+				self::UI_ADMINISTRATION_HOUSEKEEPING,
+				self::UI_ADMINISTRATION_PROXY_GROUPS,
+				self::UI_ADMINISTRATION_PROXIES,
+				self::UI_ADMINISTRATION_MACROS,
+				self::UI_ADMINISTRATION_QUEUE
 			]);
 		}
 
@@ -270,8 +333,6 @@ class CRoleHelper {
 	/**
 	 * Gets all available actions rules for specific user type.
 	 *
-	 * @static
-	 *
 	 * @param integer $user_type  User type.
 	 *
 	 * @return array  Returns the array of rule names for specified user type.
@@ -279,17 +340,34 @@ class CRoleHelper {
 	public static function getActionsByUserType(int $user_type): array {
 		$rules = [
 			self::ACTIONS_EDIT_DASHBOARDS, self::ACTIONS_EDIT_MAPS, self::ACTIONS_ACKNOWLEDGE_PROBLEMS,
-			self::ACTIONS_CLOSE_PROBLEMS, self::ACTIONS_CHANGE_SEVERITY, self::ACTIONS_ADD_PROBLEM_COMMENTS,
-			self::ACTIONS_EXECUTE_SCRIPTS, self::ACTIONS_MANAGE_API_TOKENS
+			self::ACTIONS_SUPPRESS_PROBLEMS, self::ACTIONS_CLOSE_PROBLEMS, self::ACTIONS_CHANGE_SEVERITY,
+			self::ACTIONS_ADD_PROBLEM_COMMENTS, self::ACTIONS_EXECUTE_SCRIPTS, self::ACTIONS_MANAGE_API_TOKENS
 		];
 
 		if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
 			$rules[] = self::ACTIONS_EDIT_MAINTENANCE;
 			$rules[] = self::ACTIONS_MANAGE_SCHEDULED_REPORTS;
 			$rules[] = self::ACTIONS_MANAGE_SLA;
+			$rules[] = self::ACTIONS_SELECT_SERVER_FOR_MONITORING;
 		}
 
-		$rules[] = self::ACTIONS_INVOKE_EXECUTE_NOW;
+		$rules = array_merge($rules, [self::ACTIONS_INVOKE_EXECUTE_NOW, self::ACTIONS_CHANGE_PROBLEM_RANKING,
+			self::ACTIONS_EDIT_OWN_MEDIA
+		]);
+
+		if ($user_type === USER_TYPE_SUPER_ADMIN) {
+			$rules[] = self::ACTIONS_EDIT_USER_MEDIA;
+		}
+
+		return $rules;
+	}
+
+	public static function getDeviceActionsByUserType(int $user_type): array {
+		$rules = [self::DEVICES_ACTIONS_MANAGE_OWN];
+
+		if ($user_type === USER_TYPE_SUPER_ADMIN) {
+			$rules[] = self::DEVICES_ACTIONS_MANAGE_USER;
+		}
 
 		return $rules;
 	}
@@ -297,26 +375,32 @@ class CRoleHelper {
 	/**
 	 * Gets labels of all available UI sections for specific user type in order as it need to display in UI.
 	 *
-	 * @static
-	 *
 	 * @param integer $user_type  User type.
 	 *
 	 * @return array  Returns the array where key of each element is UI section name and value is UI section label.
 	 */
 	public static function getUiSectionsLabels(int $user_type): array {
 		$sections = [
+			self::UI_SECTION_DASHBOARDS => _('Dashboards'),
 			self::UI_SECTION_MONITORING => _('Monitoring'),
+			self::UI_SECTION_APM => _('APM'),
 			self::UI_SECTION_SERVICES => _('Services'),
 			self::UI_SECTION_INVENTORY => _('Inventory'),
 			self::UI_SECTION_REPORTS => _('Reports')
 		];
 
 		if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
-			$sections += [self::UI_SECTION_CONFIGURATION => _('Configuration')];
+			$sections += [
+				self::UI_SECTION_DATA_COLLECTION => _('Data collection'),
+				self::UI_SECTION_ALERTS => _('Alerts')
+			];
 		}
 
 		if ($user_type === USER_TYPE_SUPER_ADMIN) {
-			$sections += [self::UI_SECTION_ADMINISTRATION => _('Administration')];
+			$sections += [
+				self::UI_SECTION_USERS => _('Users'),
+				self::UI_SECTION_ADMINISTRATION => _('Administration')
+			];
 		}
 
 		return $sections;
@@ -325,8 +409,6 @@ class CRoleHelper {
 	/**
 	 * Gets labels of all available rules for specific UI section and user type in order as it need to display in UI.
 	 *
-	 * @static
-	 *
 	 * @param string  $ui_section_name  UI section name.
 	 * @param integer $user_type        User type.
 	 *
@@ -334,9 +416,13 @@ class CRoleHelper {
 	 */
 	public static function getUiSectionRulesLabels(string $ui_section_name, int $user_type): array {
 		switch ($ui_section_name) {
+			case self::UI_SECTION_DASHBOARDS:
+				return [
+					self::UI_MONITORING_DASHBOARD => 'Dashboards'
+				];
+
 			case self::UI_SECTION_MONITORING:
 				$labels = [
-					self::UI_MONITORING_DASHBOARD => _('Dashboard'),
 					self::UI_MONITORING_PROBLEMS => _('Problems'),
 					self::UI_MONITORING_HOSTS => _('Hosts'),
 					self::UI_MONITORING_LATEST_DATA => _('Latest data'),
@@ -349,11 +435,15 @@ class CRoleHelper {
 
 				return $labels;
 
-			case self::UI_SECTION_SERVICES:
-				$labels = [
-					self::UI_SERVICES_SERVICES => _('Services'),
-					self::UI_SERVICES_ACTIONS => _('Service actions')
+			case self::UI_SECTION_APM:
+				return [
+					self::UI_APM_TRACES => _('Traces'),
+					self::UI_APM_METRICS => _('Metrics'),
+					self::UI_APM_LOGS => _('Logs')
 				];
+
+			case self::UI_SECTION_SERVICES:
+				$labels = [self::UI_SERVICES_SERVICES => _('Services')];
 
 				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
 					$labels += [self::UI_SERVICES_SLA => _('SLA')];
@@ -371,45 +461,48 @@ class CRoleHelper {
 			case self::UI_SECTION_REPORTS:
 				$labels = [];
 
-				if ($user_type === USER_TYPE_SUPER_ADMIN) {
-					$labels += [self::UI_REPORTS_SYSTEM_INFO => _('System information')];
+				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
+					$labels += [
+						self::UI_REPORTS_SYSTEM_INFO => _('System information'),
+						self::UI_REPORTS_SCHEDULED_REPORTS => _('Scheduled reports')
+					];
 				}
 
 				$labels += [
 					self::UI_REPORTS_AVAILABILITY_REPORT => _('Availability report'),
-					self::UI_REPORTS_TOP_TRIGGERS => _('Triggers top 100')
+					self::UI_REPORTS_TOP_TRIGGERS => _('Top 100 triggers')
 				];
 
 				if ($user_type === USER_TYPE_SUPER_ADMIN) {
 					$labels += [
-						self::UI_REPORTS_AUDIT => _('Audit'),
+						self::UI_REPORTS_AUDIT => _('Audit log'),
 						self::UI_REPORTS_ACTION_LOG => _('Action log')
 					];
 				}
 
 				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
 					$labels += [
-						self::UI_REPORTS_NOTIFICATIONS => _('Notifications'),
-						self::UI_REPORTS_SCHEDULED_REPORTS => _('Scheduled reports')
+						self::UI_REPORTS_NOTIFICATIONS => _('Notifications')
 					];
 				}
 
 				return $labels;
-			case self::UI_SECTION_CONFIGURATION:
+
+			case self::UI_SECTION_DATA_COLLECTION:
 				$labels = [];
 
 				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
 					$labels = [
+						self::UI_CONFIGURATION_TEMPLATE_GROUPS => _('Template groups'),
 						self::UI_CONFIGURATION_HOST_GROUPS => _('Host groups'),
 						self::UI_CONFIGURATION_TEMPLATES => _('Templates'),
 						self::UI_CONFIGURATION_HOSTS => _('Hosts'),
-						self::UI_CONFIGURATION_MAINTENANCE => _('Maintenance'),
-						self::UI_CONFIGURATION_ACTIONS => _('Actions')
+						self::UI_CONFIGURATION_MAINTENANCE => _('Maintenance')
 					];
 				}
 
 				if ($user_type === USER_TYPE_SUPER_ADMIN) {
-					$labels += [self::UI_CONFIGURATION_EVENT_CORRELATION => _('Event correlation')];
+					$labels += [self::UI_CONFIGURATION_CEPRULES => _('Event processing')];
 				}
 
 				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
@@ -417,19 +510,60 @@ class CRoleHelper {
 				}
 
 				return $labels;
+
+			case self::UI_SECTION_ALERTS:
+				$labels = [];
+
+				if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
+					$labels += [
+						self::UI_CONFIGURATION_TRIGGER_ACTIONS => _('Trigger actions'),
+						self::UI_CONFIGURATION_SERVICE_ACTIONS => _('Service actions'),
+						self::UI_CONFIGURATION_DISCOVERY_ACTIONS => _('Discovery actions'),
+						self::UI_CONFIGURATION_AUTOREGISTRATION_ACTIONS  => _('Autoregistration actions'),
+						self::UI_CONFIGURATION_INTERNAL_ACTIONS  => _('Internal actions')
+						];
+				}
+
+				if ($user_type === USER_TYPE_SUPER_ADMIN) {
+					$labels += [
+						self::UI_ADMINISTRATION_MEDIA_TYPES => _('Media types'),
+						self::UI_ADMINISTRATION_SCRIPTS => _('Scripts')
+					];
+				}
+
+				return $labels;
+
+			case self::UI_SECTION_USERS:
+				$labels = [];
+
+				if ($user_type === USER_TYPE_SUPER_ADMIN) {
+					$labels = [
+						self::UI_ADMINISTRATION_USER_GROUPS => _('User groups'),
+						self::UI_ADMINISTRATION_USER_ROLES => _('User roles'),
+						self::UI_ADMINISTRATION_USERS => _('Users'),
+						self::UI_ADMINISTRATION_API_TOKENS => _('API tokens'),
+						self::UI_ADMINISTRATION_AUTHENTICATION => _('Authentication')
+					];
+
+					if (CSettingsHelper::isMobileDevicesEnabled()) {
+						$labels[self::UI_ADMINISTRATION_LINKED_DEVICES] = _('Devices');
+					}
+				}
+
+				return $labels;
+
 			case self::UI_SECTION_ADMINISTRATION:
 				$labels = [];
 
 				if ($user_type === USER_TYPE_SUPER_ADMIN) {
 					$labels = [
 						self::UI_ADMINISTRATION_GENERAL => _('General'),
+						self::UI_ADMINISTRATION_DATA_SOURCE => _('Data source'),
+						self::UI_ADMINISTRATION_AUDIT_LOG => _('Audit log'),
+						self::UI_ADMINISTRATION_HOUSEKEEPING => _('Housekeeping'),
+						self::UI_ADMINISTRATION_PROXY_GROUPS => _('Proxy groups'),
 						self::UI_ADMINISTRATION_PROXIES => _('Proxies'),
-						self::UI_ADMINISTRATION_AUTHENTICATION => _('Authentication'),
-						self::UI_ADMINISTRATION_USER_GROUPS => _('User groups'),
-						self::UI_ADMINISTRATION_USER_ROLES => _('User roles'),
-						self::UI_ADMINISTRATION_USERS => _('Users'),
-						self::UI_ADMINISTRATION_MEDIA_TYPES => _('Media types'),
-						self::UI_ADMINISTRATION_SCRIPTS => _('Scripts'),
+						self::UI_ADMINISTRATION_MACROS => _('Macros'),
 						self::UI_ADMINISTRATION_QUEUE => _('Queue')
 					];
 				}
@@ -443,8 +577,6 @@ class CRoleHelper {
 	/**
 	 * Gets labels of all available actions rules for specific user type in order as it need to display on user roles
 	 * page.
-	 *
-	 * @static
 	 *
 	 * @param integer $user_type  User type.
 	 *
@@ -464,6 +596,7 @@ class CRoleHelper {
 			self::ACTIONS_ADD_PROBLEM_COMMENTS => _('Add problem comments'),
 			self::ACTIONS_CHANGE_SEVERITY => _('Change severity'),
 			self::ACTIONS_ACKNOWLEDGE_PROBLEMS => _('Acknowledge problems'),
+			self::ACTIONS_SUPPRESS_PROBLEMS => _('Suppress problems'),
 			self::ACTIONS_CLOSE_PROBLEMS => _('Close problems'),
 			self::ACTIONS_EXECUTE_SCRIPTS => _('Execute scripts'),
 			self::ACTIONS_MANAGE_API_TOKENS => _('Manage API tokens')
@@ -477,16 +610,41 @@ class CRoleHelper {
 		}
 
 		$labels += [
-			self::ACTIONS_INVOKE_EXECUTE_NOW => _('Invoke "Execute now" on read-only hosts')
+			self::ACTIONS_INVOKE_EXECUTE_NOW => _('Invoke "Execute now" on read-only hosts'),
+			self::ACTIONS_CHANGE_PROBLEM_RANKING => _('Change problem ranking'),
+			self::ACTIONS_EDIT_OWN_MEDIA => _('Create and edit own media')
 		];
+
+		if ($user_type === USER_TYPE_SUPER_ADMIN) {
+			$labels += [self::ACTIONS_EDIT_USER_MEDIA => _('Create and edit user media')];
+		}
+
+		if ($user_type === USER_TYPE_ZABBIX_ADMIN || $user_type === USER_TYPE_SUPER_ADMIN) {
+			$labels += [
+				self::ACTIONS_SELECT_SERVER_FOR_MONITORING => _('Select "Server" for monitoring and discovery')
+			];
+		}
+
+		return $labels;
+	}
+
+	public static function getDevicesActionsLabels(int $user_type): array {
+		$default_labels = [
+			self::DEVICES_ACTIONS_MANAGE_OWN => _('Manage own devices'),
+			self::DEVICES_ACTIONS_MANAGE_USER => _('Manage user devices')
+		];
+
+		$labels = [];
+
+		foreach (self::getDeviceActionsByUserType($user_type) as $action) {
+			$labels[$action] = $default_labels[$action];
+		}
 
 		return $labels;
 	}
 
 	/**
 	 * Returns a list of all API methods by user type or API methods available only for the given user type.
-	 *
-	 * @static
 	 *
 	 * @param int|null $user_type
 	 *
@@ -503,8 +661,6 @@ class CRoleHelper {
 	/**
 	 * Returns a list of API methods with masks for the given user type.
 	 *
-	 * @static
-	 *
 	 * @param int|null $user_type
 	 *
 	 * @return array
@@ -519,8 +675,6 @@ class CRoleHelper {
 
 	/**
 	 * Returns a list of API methods for each method mask for the given user type.
-	 *
-	 * @static
 	 *
 	 * @param int $user_type
 	 *
@@ -541,8 +695,6 @@ class CRoleHelper {
 
 	/**
 	 * Collects all API methods for all user types.
-	 *
-	 * @static
 	 */
 	private static function loadApiMethods(): void {
 		$api_methods = [
@@ -551,8 +703,13 @@ class CRoleHelper {
 			USER_TYPE_SUPER_ADMIN => []
 		];
 		$api_method_masks = $api_methods;
+		$allowed_api_services = CApiServiceFactory::API_SERVICES;
 
-		foreach (CApiServiceFactory::API_SERVICES as $service => $class_name) {
+		if (!CSettingsHelper::isMobileDevicesEnabled()) {
+			unset($allowed_api_services['device']);
+		}
+
+		foreach ($allowed_api_services as $service => $class_name) {
 			foreach (constant($class_name.'::ACCESS_RULES') as $method => $rules) {
 				if (array_key_exists('min_user_type', $rules)) {
 					switch ($rules['min_user_type']) {

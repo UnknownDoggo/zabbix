@@ -1,40 +1,28 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-package vfsdev
+package dev
 
 import (
 	"errors"
 	"sync"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/zbxerr"
 )
-
-// Plugin -
-type Plugin struct {
-	plugin.Base
-	devices map[string]*devUnit
-	mutex   sync.Mutex
-}
-
-var impl Plugin
 
 const (
 	maxInactivityPeriod = time.Hour * 3
@@ -53,7 +41,56 @@ const (
 	statTypeOPS
 )
 
+var (
+	errInvalidFirstParam  = errs.New("invalid first parameter")
+	errInvalidSecondParam = errs.New("invalid second parameter")
+	errInvalidThirdParam  = errs.New("invalid third parameter")
+	errInvalidNumParams   = errs.New("invalid number of parameters")
+)
+
+var impl Plugin
+
+// Plugin -
+type Plugin struct {
+	plugin.Base
+	devices map[string]*devUnit
+	mutex   sync.Mutex
+}
+
 type historyIndex int
+
+type devIO struct {
+	sectors    uint64
+	operations uint64
+}
+
+type devStats struct {
+	clock int64
+	rx    devIO
+	tx    devIO
+}
+
+type devUnit struct {
+	name       string
+	head, tail historyIndex
+	accessed   time.Time
+	history    [maxHistory]devStats
+}
+
+func init() {
+	impl.devices = make(map[string]*devUnit)
+
+	err := plugin.RegisterMetrics(
+		&impl, "VFSDev",
+		"vfs.dev.read", "Disk read statistics.",
+		"vfs.dev.write", "Disk write statistics.",
+		"vfs.dev.discovery", "List of block devices and their type. Used for low-level discovery.",
+		"vfs.dev.get", "List of block devices and their statistics as structured JSON. Used for low-level discovery.",
+	)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
+}
 
 func (h historyIndex) inc() historyIndex {
 	h++
@@ -77,24 +114,6 @@ func (h historyIndex) sub(value historyIndex) historyIndex {
 		h += maxHistory
 	}
 	return h
-}
-
-type devIO struct {
-	sectors    uint64
-	operations uint64
-}
-
-type devStats struct {
-	clock int64
-	rx    devIO
-	tx    devIO
-}
-
-type devUnit struct {
-	name       string
-	head, tail historyIndex
-	accessed   time.Time
-	history    [maxHistory]devStats
 }
 
 func (p *Plugin) Collect() (err error) {
@@ -124,7 +143,9 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 	case "vfs.dev.write":
 		mode = ioModeWrite
 	case "vfs.dev.discovery":
-		return p.getDiscovery()
+		return getDiscovery()
+	case "vfs.dev.get":
+		return vfsDevGet(params)
 	default:
 		return nil, plugin.UnsupportedMetricError
 	}
@@ -143,7 +164,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		case "avg15":
 			statRange = 60 * 15
 		default:
-			return nil, errors.New("Invalid third parameter.")
+			return nil, errInvalidThirdParam
 		}
 		fallthrough
 	case 2: // type parameter
@@ -157,7 +178,7 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		case "operations":
 			statType = statTypeOperations
 		default:
-			return nil, errors.New("Invalid second parameter.")
+			return nil, errInvalidSecondParam
 		}
 		fallthrough
 	case 1:
@@ -167,12 +188,12 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		}
 	case 0:
 	default:
-		return nil, errors.New("Too many parameters.")
+		return nil, zbxerr.ErrorTooManyParameters
 	}
 
 	if statType == statTypeSectors || statType == statTypeOperations {
 		if len(params) > 2 {
-			return nil, errors.New("Invalid number of parameters.")
+			return nil, errInvalidNumParams
 		}
 		var stats *devStats
 		if stats, err = p.getDeviceStats(devParam); err != nil {
@@ -239,12 +260,4 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		p.devices[devName] = &devUnit{name: devName, accessed: now}
 		return
 	}
-}
-
-func init() {
-	impl.devices = make(map[string]*devUnit)
-	plugin.RegisterMetrics(&impl, "VFSDev",
-		"vfs.dev.read", "Disk read statistics.",
-		"vfs.dev.write", "Disk write statistics.",
-		"vfs.dev.discovery", "List of block devices and their type. Used for low-level discovery.")
 }

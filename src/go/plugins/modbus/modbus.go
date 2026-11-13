@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 /*
@@ -26,16 +21,17 @@
 package modbus
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 
-	"encoding/binary"
-
-	"git.zabbix.com/ap/plugin-support/conf"
-	"git.zabbix.com/ap/plugin-support/plugin"
 	named "github.com/BurntSushi/locker"
 	"github.com/goburrow/modbus"
 	mblib "github.com/goburrow/modbus"
+	"golang.zabbix.com/sdk/conf"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
+	"golang.zabbix.com/sdk/plugin"
 )
 
 // Plugin -
@@ -44,7 +40,7 @@ type Plugin struct {
 	options PluginOptions
 }
 
-//Session struct
+// Session struct
 type Session struct {
 	// Endpoint is a connection string consisting of a protocol scheme, a host address and a port or seral port name and attributes.
 	Endpoint string `conf:"optional"`
@@ -52,21 +48,20 @@ type Session struct {
 	// SlaveID of modbus devices.
 	SlaveID string `conf:"optional"`
 
-	// Timeout of modbus devices.
-	Timeout int `conf:"optional"`
+	// Deprecated value.
+	LegacyTimeout int `conf:"name=Timeout,optional,range=1:30"`
 }
 
 // PluginOptions -
 type PluginOptions struct {
-	// Timeout is the maximum time for waiting when a request has to be done. Default value equals the global timeout.
-	Timeout int `conf:"optional,range=1:30"`
-
 	// Sessions stores pre-defined named sets of connections settings.
 	Sessions map[string]*Session `conf:"optional"`
 }
 
-type bits8 uint8
-type bits16 uint16
+type (
+	bits8  uint8
+	bits16 uint16
+)
 
 // Set of supported modbus connection types
 const (
@@ -142,13 +137,20 @@ const (
 var impl Plugin
 
 func init() {
-	plugin.RegisterMetrics(&impl, "Modbus",
-		"modbus.get", "Returns a JSON array of the requested values, usage: modbus.get[endpoint,<slave id>,<function>,<address>,<count>,<type>,<endianness>,<offset>].")
+	err := plugin.RegisterMetrics(
+		&impl,
+		"Modbus",
+		"modbus.get",
+		"Returns a JSON array of the requested values, usage: "+
+			"modbus.get[endpoint,<slave id>,<function>,<address>,<count>,<type>,<endianness>,<offset>].",
+	)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
 }
 
 // Export - main function of plugin
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (result interface{}, err error) {
-
 	if key != "modbus.get" {
 		return nil, plugin.UnsupportedMetricError
 	}
@@ -157,11 +159,11 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		return nil, fmt.Errorf("Invalid number of parameters:%d", len(params))
 	}
 
-	timeout := p.options.Timeout
+	timeout := ctx.Timeout()
 	session, ok := p.options.Sessions[params[0]]
 	if ok {
-		if session.Timeout > 0 {
-			timeout = session.Timeout
+		if ctx.LegacyTimeout() {
+			timeout = session.LegacyTimeout
 		}
 
 		if len(session.Endpoint) > 0 {
@@ -197,12 +199,8 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 // Configure implements the Configurator interface.
 // Initializes configuration structures.
 func (p *Plugin) Configure(global *plugin.GlobalOptions, options interface{}) {
-	if err := conf.Unmarshal(options, &p.options); err != nil {
+	if err := conf.UnmarshalStrict(options, &p.options); err != nil {
 		p.Errf("cannot unmarshal configuration options: %s", err)
-	}
-
-	if p.options.Timeout == 0 {
-		p.options.Timeout = global.Timeout
 	}
 }
 
@@ -214,17 +212,18 @@ func (p *Plugin) Validate(options interface{}) error {
 		err  error
 	)
 
-	if err = conf.Unmarshal(options, &opts); err != nil {
+	err = conf.UnmarshalStrict(options, &opts)
+	if err != nil {
 		return err
 	}
 
-	if opts.Timeout > 30 || opts.Timeout < 0 {
-		return fmt.Errorf("Unacceptable Timeout value:%d", opts.Timeout)
-	}
-
 	for _, s := range opts.Sessions {
-		if s.Timeout > 30 || s.Timeout < 0 {
-			return fmt.Errorf("Unacceptable session Timeout value:%d", s.Timeout)
+		if s.LegacyTimeout != 0 {
+			log.Debugf("config value 'Plugins.Modbus.Sessions.*.Timeout' is deprecated")
+		}
+		// this check should be safe to remove.
+		if s.LegacyTimeout > 30 || s.LegacyTimeout < 0 {
+			return errs.Errorf("Unacceptable session Timeout value:%d", s.LegacyTimeout)
 		}
 
 		var p mbParams

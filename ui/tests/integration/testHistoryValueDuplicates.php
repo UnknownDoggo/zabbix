@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once dirname(__FILE__).'/../include/CIntegrationTest.php';
@@ -40,7 +35,8 @@ class testHistoryValueDuplicates extends CIntegrationTest {
 			'name' => $item,
 			'key_' => $item,
 			'type' => ITEM_TYPE_TRAPPER,
-			'value_type' => $type
+			'value_type' => $type,
+			'trapper_hosts' => '{$TRAPPER.ALLOWED_HOSTS}'
 		]);
 		$this->assertArrayHasKey('itemids', $response['result']);
 		$this->assertEquals(1, count($response['result']['itemids']));
@@ -220,9 +216,19 @@ class testHistoryValueDuplicates extends CIntegrationTest {
 			$this->sendDataValues('sender', $sender_values1, self::COMPONENT_SERVER);
 			$this->sendDataValues('sender', $sender_values2, self::COMPONENT_SERVER);
 
-			$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, '[Z3008]', true, 5, 5);
-			$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, 'skipped', true, 5, 5);
+			/* timestamps are being adjusted in a batch  */
+			$this->sendDataValues('sender', $sender_values1, self::COMPONENT_SERVER);
+			$this->sendDataValues('sender', $sender_values2, self::COMPONENT_SERVER);
 
+			global $HISTORY_PROVIDERS;
+			$has_history_provider = isset($HISTORY_PROVIDERS);
+			if (!$has_history_provider)
+			{
+				$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, '[Z3008]', true, 5, 5);
+				$this->waitForLogLineToBePresent(self::COMPONENT_SERVER, 'skipped', true, 5, 5);
+			}
+
+			$expected_count = $has_history_provider ? 16 : 8;
 			$response = $this->callUntilDataIsPresent('history.get', [
 				'history' => $d['value_type'],
 				'itemids' => [
@@ -230,8 +236,10 @@ class testHistoryValueDuplicates extends CIntegrationTest {
 					$d['items'][1]['itemid']
 				],
 				'sortfield' => 'itemid'
-			], 5, 5);
-			$this->assertEquals(6, count($response['result']));
+			], 5, 5, function ($response) use ($expected_count) {
+				return count($response['result']) === $expected_count;
+			});
+			$this->assertEquals($expected_count, count($response['result']));
 		}
 
 		return true;

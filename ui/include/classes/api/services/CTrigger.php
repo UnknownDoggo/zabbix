@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -28,14 +23,17 @@ class CTrigger extends CTriggerGeneral {
 		'get' => ['min_user_type' => USER_TYPE_ZABBIX_USER],
 		'create' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
 		'update' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'delete' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'adddependencies' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN],
-		'deletedependencies' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN]
+		'delete' => ['min_user_type' => USER_TYPE_ZABBIX_ADMIN]
 	];
 
 	protected $tableName = 'triggers';
 	protected $tableAlias = 't';
 	protected $sortColumns = ['triggerid', 'description', 'status', 'priority', 'lastchange', 'hostname'];
+
+	public const OUTPUT_FIELDS = ['triggerid', 'expression', 'description', 'url', 'status', 'value', 'priority',
+		'lastchange', 'comments', 'error', 'templateid', 'type', 'state', 'flags', 'recovery_mode',
+		'recovery_expression', 'correlation_mode', 'correlation_tag', 'manual_close', 'opdata', 'event_name', 'url_name'
+	];
 
 	/**
 	 * Get Triggers data.
@@ -45,6 +43,7 @@ class CTrigger extends CTriggerGeneral {
 	 * @param array $options['hostids']
 	 * @param array $options['groupids']
 	 * @param array $options['triggerids']
+	 * @param array $options['maintenanceids']
 	 * @param array $options['status']
 	 * @param bool  $options['editable']
 	 * @param array $options['count']
@@ -59,7 +58,7 @@ class CTrigger extends CTriggerGeneral {
 
 		$sqlParts = [
 			'select'	=> ['triggers' => 't.triggerid'],
-			'from'		=> ['t' => 'triggers t'],
+			'from'		=> 'triggers t',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -93,8 +92,6 @@ class CTrigger extends CTriggerGeneral {
 			'host'							=> null,
 			'only_true'						=> null,
 			'min_severity'					=> null,
-			'evaltype'						=> TAG_EVAL_TYPE_AND_OR,
-			'tags'							=> null,
 			'filter'						=> null,
 			'search'						=> null,
 			'searchByAny'					=> null,
@@ -106,15 +103,13 @@ class CTrigger extends CTriggerGeneral {
 			'expandComment'					=> null,
 			'expandExpression'				=> null,
 			'output'						=> API_OUTPUT_EXTEND,
-			'selectGroups'					=> null,
+			'selectHostGroups'				=> null,
+			'selectTemplateGroups'			=> null,
 			'selectHosts'					=> null,
 			'selectItems'					=> null,
 			'selectFunctions'				=> null,
 			'selectDependencies'			=> null,
-			'selectDiscoveryRule'			=> null,
 			'selectLastEvent'				=> null,
-			'selectTags'					=> null,
-			'selectTriggerDiscovery'		=> null,
 			'countOutput'					=> false,
 			'groupCount'					=> false,
 			'preservekeys'					=> false,
@@ -123,26 +118,37 @@ class CTrigger extends CTriggerGeneral {
 			'limit'							=> null,
 			'limitSelects'					=> null
 		];
+
 		$options = zbx_array_merge($defOptions, $options);
+
+		self::validateGet($options);
 
 		// editable + PERMISSION CHECK
 		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
-			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
-			$userGroups = getUserGroupsByUserId(self::$userData['userid']);
+			if (self::$userData['ugsetid'] == 0) {
+				return $options['countOutput'] ? '0' : [];
+			}
+
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['hh'] = ['left_table' => 'i', 'table' => 'host_hgset', 'using' => 'hostid'];
+			$sqlParts['join']['p'] = ['left_table' => 'hh', 'table' => 'permission', 'using' => 'hgsetid'];
+			$sqlParts['where'][] = 'p.ugsetid='.self::$userData['ugsetid'];
+
+			if ($options['editable']) {
+				$sqlParts['where'][] = 'p.permission='.PERM_READ_WRITE;
+			}
 
 			$sqlParts['where'][] = 'NOT EXISTS ('.
 				'SELECT NULL'.
-				' FROM functions f,items i,hosts_groups hgg'.
-					' LEFT JOIN rights r'.
-						' ON r.id=hgg.groupid'.
-							' AND '.dbConditionInt('r.groupid', $userGroups).
-				' WHERE t.triggerid=f.triggerid '.
-					' AND f.itemid=i.itemid'.
-					' AND i.hostid=hgg.hostid'.
-				' GROUP BY i.hostid'.
-				' HAVING MAX(permission)<'.zbx_dbstr($permission).
-					' OR MIN(permission) IS NULL'.
-					' OR MIN(permission)='.PERM_DENY.
+				' FROM functions f1'.
+				' JOIN items i1 ON f1.itemid=i1.itemid'.
+				' JOIN host_hgset hh1 ON i1.hostid=hh1.hostid'.
+				' LEFT JOIN permission p1 ON hh1.hgsetid=p1.hgsetid'.
+					' AND p1.ugsetid='.self::$userData['ugsetid'].
+				' WHERE f.triggerid=f1.triggerid'.
+					' AND i.itemid!=f1.itemid'.
+					' AND p1.hgsetid IS NULL'.
 			')';
 		}
 
@@ -152,12 +158,9 @@ class CTrigger extends CTriggerGeneral {
 
 			sort($options['groupids']);
 
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts_groups'] = 'hosts_groups hg';
-			$sqlParts['where']['hgi'] = 'hg.hostid=i.hostid';
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['hg'] = ['left_table' => 'i', 'table' => 'hosts_groups', 'using' => 'hostid'];
 			$sqlParts['where']['groupid'] = dbConditionInt('hg.groupid', $options['groupids']);
 
 			if ($options['groupCount']) {
@@ -182,11 +185,9 @@ class CTrigger extends CTriggerGeneral {
 		if ($options['hostids'] !== null) {
 			zbx_value2array($options['hostids']);
 
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
 			$sqlParts['where']['hostid'] = dbConditionInt('i.hostid', $options['hostids']);
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['i'] = 'i.hostid';
@@ -200,13 +201,22 @@ class CTrigger extends CTriggerGeneral {
 			$sqlParts['where']['triggerid'] = dbConditionInt('t.triggerid', $options['triggerids']);
 		}
 
+		// maintenanceids
+		if ($options['maintenanceids'] !== null) {
+			$sqlParts['join']['mt'] = ['table' => 'maintenance_trigger', 'using' => 'triggerid'];
+			$sqlParts['where'][] = dbConditionInt('mt.maintenanceid', $options['maintenanceids']);
+
+			if ($options['groupCount']) {
+				$sqlParts['group']['mt'] = 'mt.maintenanceid';
+			}
+		}
+
 		// itemids
 		if ($options['itemids'] !== null) {
 			zbx_value2array($options['itemids']);
 
-			$sqlParts['from']['functions'] = 'functions f';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
 			$sqlParts['where']['itemid'] = dbConditionInt('f.itemid', $options['itemids']);
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['f'] = 'f.itemid';
@@ -217,8 +227,7 @@ class CTrigger extends CTriggerGeneral {
 		if ($options['functions'] !== null) {
 			zbx_value2array($options['functions']);
 
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
 			$sqlParts['where'][] = dbConditionString('f.name', $options['functions']);
 		}
 
@@ -267,12 +276,14 @@ class CTrigger extends CTriggerGeneral {
 
 		// lastChangeSince
 		if ($options['lastChangeSince'] !== null) {
-			$sqlParts['where']['lastchangesince'] = 't.lastchange>'.zbx_dbstr($options['lastChangeSince']);
+			$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+			$sqlParts['where']['lastchangesince'] = 'tr.lastchange>'.zbx_dbstr($options['lastChangeSince']);
 		}
 
 		// lastChangeTill
 		if ($options['lastChangeTill'] !== null) {
-			$sqlParts['where']['lastchangetill'] = 't.lastchange<'.zbx_dbstr($options['lastChangeTill']);
+			$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+			$sqlParts['where']['lastchangetill'] = 'tr.lastchange<'.zbx_dbstr($options['lastChangeTill']);
 		}
 
 		// withUnacknowledgedEvents
@@ -303,12 +314,9 @@ class CTrigger extends CTriggerGeneral {
 
 		// templated
 		if ($options['templated'] !== null) {
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
-			$sqlParts['where']['hi'] = 'h.hostid=i.hostid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 
 			if ($options['templated']) {
 				$sqlParts['where'][] = 'h.status='.HOST_STATUS_TEMPLATE;
@@ -348,6 +356,13 @@ class CTrigger extends CTriggerGeneral {
 
 		// search
 		if (is_array($options['search'])) {
+			if (array_key_exists('error', $options['search']) && $options['search']['error'] !== null) {
+				$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+				zbx_db_search('trigger_rtdata tr', ['search' => ['error' => $options['search']['error']]] + $options,
+					$sqlParts
+				);
+			}
+
 			zbx_db_search('triggers t', $options, $sqlParts);
 		}
 
@@ -369,57 +384,60 @@ class CTrigger extends CTriggerGeneral {
 			if (array_key_exists('host', $options['filter']) && $options['filter']['host'] !== null) {
 				zbx_value2array($options['filter']['host']);
 
-				$sqlParts['from']['functions'] = 'functions f';
-				$sqlParts['from']['items'] = 'items i';
-				$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-				$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
-				$sqlParts['from']['hosts'] = 'hosts h';
-				$sqlParts['where']['hi'] = 'h.hostid=i.hostid';
+				$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+				$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+				$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 				$sqlParts['where']['host'] = dbConditionString('h.host', $options['filter']['host']);
 			}
 
 			if (array_key_exists('hostid', $options['filter']) && $options['filter']['hostid'] !== null) {
 				zbx_value2array($options['filter']['hostid']);
 
-				$sqlParts['from']['functions'] = 'functions f';
-				$sqlParts['from']['items'] = 'items i';
-				$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-				$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
+				$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+				$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
 				$sqlParts['where']['hostid'] = dbConditionInt('i.hostid', $options['filter']['hostid']);
+			}
+
+			$rt_filter = [];
+
+			foreach (['value', 'state', 'lastchange', 'error'] as $field) {
+				if (array_key_exists($field, $options['filter']) && $options['filter'][$field] !== null) {
+					$rt_filter[$field] = $options['filter'][$field];
+				}
+			}
+
+			if ($rt_filter) {
+				$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+				$this->dbFilter('trigger_rtdata tr', ['filter' => $rt_filter] + $options, $sqlParts);
 			}
 		}
 
 		// group
 		if ($options['group'] !== null) {
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts_groups'] = 'hosts_groups hg';
-			$sqlParts['from']['hstgrp'] = 'hstgrp g';
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
-			$sqlParts['where']['hgi'] = 'hg.hostid=i.hostid';
-			$sqlParts['where']['ghg'] = 'g.groupid = hg.groupid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['hg'] = ['left_table' => 'i', 'table' => 'hosts_groups', 'using' => 'hostid'];
+			$sqlParts['join']['g'] = ['left_table' => 'hg', 'table' => 'hstgrp', 'using' => 'groupid'];
 			$sqlParts['where']['group'] = ' g.name='.zbx_dbstr($options['group']);
 		}
 
 		// host
 		if ($options['host'] !== null) {
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where']['ft'] = 'f.triggerid=t.triggerid';
-			$sqlParts['where']['fi'] = 'f.itemid=i.itemid';
-			$sqlParts['where']['hi'] = 'h.hostid=i.hostid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 			$sqlParts['where']['host'] = ' h.host='.zbx_dbstr($options['host']);
 		}
 
 		// only_true
 		if ($options['only_true'] !== null) {
-			$sqlParts['where']['ot'] = '((t.value='.TRIGGER_VALUE_TRUE.')'.
-				' OR ((t.value='.TRIGGER_VALUE_FALSE.')'.
-					' AND (t.lastchange>'.
-					(time() - timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::OK_PERIOD))).
-				'))'.
+			$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+
+			$ok_period_start_time = time() - timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::OK_PERIOD));
+			$sqlParts['where']['ot'] = '(tr.value='.TRIGGER_VALUE_TRUE.
+				' OR (tr.value='.TRIGGER_VALUE_FALSE.
+					' AND tr.lastchange>'.$ok_period_start_time.
+				')'.
 			')';
 		}
 
@@ -429,10 +447,27 @@ class CTrigger extends CTriggerGeneral {
 		}
 
 		// tags
-		if ($options['tags'] !== null && $options['tags']) {
-			$sqlParts['where'][] = CApiTagHelper::addWhereCondition($options['tags'], $options['evaltype'], 't',
-				'trigger_tag', 'triggerid'
-			);
+		if ($options['tags'] !== null) {
+			if ($options['inheritedTags']) {
+				$positive_tag_operators = [TAG_OPERATOR_LIKE, TAG_OPERATOR_EQUAL, TAG_OPERATOR_EXISTS];
+
+				if (array_intersect(array_column($options['tags'], 'operator'), $positive_tag_operators)) {
+					$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+					$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'],
+						['t', 'f'], 'trigger_tag', 'triggerid', true
+					);
+				}
+				else {
+					$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'],
+						['t'], 'trigger_tag', 'triggerid', true
+					);
+				}
+			}
+			else {
+				$sqlParts['where'][] = CApiTagHelper::getTagCondition($options['tags'], $options['evaltype'], ['t'],
+					'trigger_tag', 'triggerid'
+				);
+			}
 		}
 
 		// limit
@@ -495,12 +530,11 @@ class CTrigger extends CTriggerGeneral {
 			}
 		}
 
-		// removing keys (hash -> array)
 		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
+			$result = array_values($result);
 		}
 
-		$result = $this->unsetExtraFields($result, ['state', 'expression'], $options['output']);
+		$result = $this->unsetExtraFields($result, ['expression'], $options['output']);
 
 		// Triggers share table with trigger prototypes. Therefore remove trigger unrelated fields.
 		if ($this->outputIsRequested('discover', $options['output'])) {
@@ -513,10 +547,56 @@ class CTrigger extends CTriggerGeneral {
 		return $result;
 	}
 
+	private static function validateGet(array &$options): void {
+		$api_input_rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+			// Filters.
+			'maintenanceids' =>			['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'default' => null],
+			'evaltype' =>				['type' => API_INT32, 'in' => implode(',', [TAG_EVAL_TYPE_AND_OR, TAG_EVAL_TYPE_OR]), 'default' => TAG_EVAL_TYPE_AND_OR],
+			'tags' =>					['type' => API_OBJECTS, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'default' => null, 'fields' => [
+				'tag' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED],
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [TAG_OPERATOR_LIKE, TAG_OPERATOR_EQUAL, TAG_OPERATOR_NOT_LIKE, TAG_OPERATOR_NOT_EQUAL, TAG_OPERATOR_EXISTS, TAG_OPERATOR_NOT_EXISTS]), 'default' => TAG_OPERATOR_LIKE],
+				'value' =>					['type' => API_STRING_UTF8, 'default' => '']
+			]],
+			'inheritedTags' =>			['type' => API_BOOLEAN, 'default' => false],
+			// Output.
+			'selectTags' =>				['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', ['tag', 'value', 'automatic']), 'default' => null],
+			'selectInheritedTags' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', self::INHERITED_TAG_OUTPUT_FIELDS), 'default' => null],
+			'selectTriggerDiscovery' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE | API_DEPRECATED, 'in' => implode(',', self::DISCOVERY_DATA_OUTPUT_FIELDS), 'default' => null],
+			'selectDiscoveryData' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', self::DISCOVERY_DATA_OUTPUT_FIELDS), 'default' => null],
+			'selectDiscoveryRule' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', CDiscoveryRule::OUTPUT_FIELDS), 'default' => null]
+		]];
+
+		if (!CApiInputValidator::validate($api_input_rules, $options, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
+	}
+
+	protected function applyQueryOutputOptions($table_name, $table_alias, array $options, array $sql_parts) {
+		$sql_parts = parent::applyQueryOutputOptions($table_name, $table_alias, $options, $sql_parts);
+
+		if (!$options['countOutput']) {
+			if ($options['expandDescription'] !== null || $options['expandComment'] !== null) {
+				$sql_parts = $this->addQuerySelect('t.expression', $sql_parts);
+			}
+
+			foreach (['value', 'state', 'lastchange', 'error'] as $field) {
+				if ($this->outputIsRequested($field, $options['output'])) {
+					$sql_parts = $this->addQuerySelect(
+						dbConditionCoalesce('tr.'.$field, DB::getDefault('trigger_rtdata', $field), $field), $sql_parts
+					);
+
+					$sql_parts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+				}
+			}
+		}
+
+		return $sql_parts;
+	}
+
 	/**
 	 * Add triggers.
 	 *
-	 * Trigger params: expression, description, type, priority, status, comments, url, templateid
+	 * Trigger params: expression, description, type, priority, status, comments, url_name, url, templateid
 	 *
 	 * @param array $triggers
 	 *
@@ -524,29 +604,15 @@ class CTrigger extends CTriggerGeneral {
 	 */
 	public function create(array $triggers) {
 		$this->validateCreate($triggers);
+
 		$this->createReal($triggers);
+		$this->checkDependenciesLinks($triggers);
+
 		$this->inherit($triggers);
 
-		// Clear all dependencies on inherited triggers.
-		$this->deleteDependencies($triggers);
+		$this->updateDependencies($triggers);
 
-		// Add new dependencies.
-		foreach ($triggers as $trigger) {
-			if (!array_key_exists('dependencies', $trigger) || !$trigger['dependencies']) {
-				continue;
-			}
-
-			$new_dependencies = [];
-			foreach ($trigger['dependencies'] as $dependency) {
-				$new_dependencies[] = [
-					'triggerid' => $trigger['triggerid'],
-					'dependsOnTriggerid' => $dependency['triggerid']
-				];
-			}
-			$this->addDependencies($new_dependencies);
-		}
-
-		return ['triggerids' => zbx_objectValues($triggers, 'triggerid')];
+		return ['triggerids' => array_column($triggers, 'triggerid')];
 	}
 
 	/**
@@ -558,51 +624,17 @@ class CTrigger extends CTriggerGeneral {
 	 *
 	 * @return array
 	 */
-	public function update(array $triggers) {
+	public function update(array $triggers): array {
 		$this->validateUpdate($triggers, $db_triggers);
 
-		$validate_dependencies = [];
-		foreach ($triggers as $tnum => $trigger) {
-			$db_trigger = $db_triggers[$tnum];
-
-			$expressions_changed = ($trigger['expression'] !== $db_trigger['expression']
-					|| $trigger['recovery_expression'] !== $db_trigger['recovery_expression']);
-
-			if ($expressions_changed && $db_trigger['dependencies'] && !array_key_exists('dependencies', $trigger)) {
-				$validate_dependencies[] = [
-					'triggerid' => $trigger['triggerid'],
-					'dependencies' => zbx_objectValues($db_trigger['dependencies'], 'triggerid')
-				];
-			}
-		}
-
-		if ($validate_dependencies) {
-			$this->checkDependencies($validate_dependencies);
-			$this->checkDependencyParents($validate_dependencies);
-		}
-
 		$this->updateReal($triggers, $db_triggers);
+		self::checkExistingDependencies($triggers, $db_triggers);
+
 		$this->inherit($triggers);
 
-		foreach ($triggers as $trigger) {
-			// Replace dependencies.
-			if (array_key_exists('dependencies', $trigger)) {
-				$this->deleteDependencies($trigger);
+		$this->updateDependencies($triggers, $db_triggers);
 
-				if ($trigger['dependencies']) {
-					$new_dependencies = [];
-					foreach ($trigger['dependencies'] as $dependency) {
-						$new_dependencies[] = [
-							'triggerid' => $trigger['triggerid'],
-							'dependsOnTriggerid' => $dependency['triggerid']
-						];
-					}
-					$this->addDependencies($new_dependencies);
-				}
-			}
-		}
-
-		return ['triggerids' => zbx_objectValues($triggers, 'triggerid')];
+		return ['triggerids' => array_column($triggers, 'triggerid')];
 	}
 
 	/**
@@ -630,7 +662,7 @@ class CTrigger extends CTriggerGeneral {
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	protected function validateDelete(array &$triggerids, array &$db_triggers = null) {
+	protected function validateDelete(array &$triggerids, ?array &$db_triggers = null) {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 		if (!CApiInputValidator::validate($api_input_rules, $triggerids, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
@@ -663,516 +695,99 @@ class CTrigger extends CTriggerGeneral {
 	}
 
 	/**
-	 * Validates the input for the addDependencies() method.
-	 *
-	 * @param array $triggers_data
-	 * @param bool  $inherited
-	 *
-	 * @throws APIException if the given dependencies are invalid.
-	 */
-	protected function validateAddDependencies(array &$triggers_data, $inherited = false) {
-		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'uniq' => [['triggerid', 'dependsOnTriggerid']], 'fields' => [
-			'triggerid' =>			['type' => API_ID, 'flags' => API_REQUIRED],
-			'dependsOnTriggerid' =>	['type' => API_ID, 'flags' => API_REQUIRED]
-		]];
-		if (!CApiInputValidator::validate($api_input_rules, $triggers_data, '/', $error)) {
-			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
-		}
-
-		$triggerids = zbx_objectValues($triggers_data, 'triggerid');
-		$triggerids = array_keys(array_flip($triggerids));
-
-		$permission_check = $inherited
-			? ['nopermissions' => true]
-			: ['editable' => true];
-
-		$triggers = $this->get([
-			'output' => ['triggerid', 'description', 'templateid', 'flags'],
-			'triggerids' => $triggerids,
-			'preservekeys' => true
-		] + $permission_check);
-
-		if (count($triggerids) != count($triggers)) {
-			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
-		}
-
-		foreach ($triggers as $trigger) {
-			if ($trigger['templateid'] && !$inherited) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS, _s('Cannot update dependencies of inherited trigger "%1$s".',
-					$trigger['description']
-				));
-			}
-
-			if ($trigger['flags'] == ZBX_FLAG_DISCOVERY_CREATED) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS, _s('Cannot update "%2$s" for a discovered trigger "%1$s".',
-					$trigger['description'], 'dependencies'
-				));
-			}
-		}
-
-		$dep_triggerids = [];
-		$triggers = [];
-		foreach ($triggers_data as $dep) {
-			$triggerid = $dep['triggerid'];
-
-			if (!array_key_exists($dep['triggerid'], $triggers)) {
-				$triggers[$triggerid] = [
-					'triggerid' => $triggerid,
-					'dependencies' => []
-				];
-			}
-			$triggers[$triggerid]['dependencies'][] = $dep['dependsOnTriggerid'];
-			$dep_triggerids[$dep['dependsOnTriggerid']] = $dep['dependsOnTriggerid'];
-		}
-
-		if (!$inherited) {
-			$count = $this->get([
-				'countOutput' => true,
-				'triggerids' => $dep_triggerids
-			]);
-
-			if ($count != count($dep_triggerids)) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS,
-					_('No permissions to referred object or it does not exist!')
-				);
-			}
-		}
-
-		$this->checkDependencies($triggers);
-		$this->checkDependencyParents($triggers);
-		$this->checkDependencyDuplicates($triggers);
-	}
-
-	/**
-	 * Add the given dependencies and inherit them on all child triggers.
-	 *
-	 * @param array $triggers_data  An array of trigger dependency pairs, each pair in the form of
-	 *                              ['triggerid' => 1, 'dependsOnTriggerid' => 2].
-	 * @param bool  $inherited      Determines either to check permissions for added dependencies. Permissions are not
-	 *                              validated for inherited triggers.
-	 *
-	 * @return array
-	 */
-	public function addDependencies(array $triggers_data, $inherited = false) {
-		$this->validateAddDependencies($triggers_data, $inherited);
-
-		foreach ($triggers_data as $dep) {
-			$triggerId = $dep['triggerid'];
-			$depTriggerId = $dep['dependsOnTriggerid'];
-
-			DB::insert('trigger_depends', [[
-				'triggerid_down' => $triggerId,
-				'triggerid_up' => $depTriggerId
-			]]);
-
-			// propagate the dependencies to the child triggers
-			$childTriggers = API::getApiService()->select($this->tableName(), [
-				'output' => ['triggerid'],
-				'filter' => [
-					'templateid' => $triggerId
-				]
-			]);
-			if ($childTriggers) {
-				foreach ($childTriggers as $childTrigger) {
-					$childHostsQuery = get_hosts_by_triggerid($childTrigger['triggerid']);
-					while ($childHost = DBfetch($childHostsQuery)) {
-						$newDep = [$childTrigger['triggerid'] => $depTriggerId];
-						$newDep = replace_template_dependencies($newDep, $childHost['hostid']);
-
-						$this->addDependencies([[
-							'triggerid' => $childTrigger['triggerid'],
-							'dependsOnTriggerid' => $newDep[$childTrigger['triggerid']]
-						]], true);
-					}
-				}
-			}
-		}
-
-		return ['triggerids' => array_unique(zbx_objectValues($triggers_data, 'triggerid'))];
-	}
-
-	/**
-	 * Validates the input for the deleteDependencies() method.
+	 * Check the existing dependencies if the trigger expressions were changed.
 	 *
 	 * @param array $triggers
-	 * @param bool  $inherited
-	 *
-	 * @throws APIException if the given input is invalid
+	 * @param array $db_triggers
 	 */
-	protected function validateDeleteDependencies(array $triggers, $inherited) {
-		if (!$triggers) {
-			self::exception(ZBX_API_ERROR_PARAMETERS, _('Empty input parameter.'));
-		}
+	private static function checkExistingDependencies(array $triggers, array $db_triggers): void {
+		$triggerids = [];
+		$hostids = [];
 
 		foreach ($triggers as $trigger) {
-			if (!check_db_fields(['triggerid' => null], $trigger)) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Incorrect input parameters.'));
+			$db_trigger = $db_triggers[$trigger['triggerid']];
+
+			if ($trigger['expression'] !== $db_trigger['expression']
+					|| $trigger['recovery_expression'] !== $db_trigger['recovery_expression']) {
+				$triggerids[$trigger['triggerid']] = true;
+				$hostids += $db_triggers[$trigger['triggerid']]['hosts'];
 			}
 		}
 
-		$triggerids = zbx_objectValues($triggers, 'triggerid');
-		$triggerids = array_keys(array_flip($triggerids));
+		if (!$triggerids) {
+			return;
+		}
 
-		$permission_check = $inherited
-			? ['nopermissions' => true]
-			: ['editable' => true];
+		/*
+		 * It's necessary to perform the check of existing dependencies only if, as the result of the expression change,
+		 * the trigger no longer belongs to any of the previous hosts.
+		 */
+		$result = DBselect(
+			'SELECT DISTINCT f.triggerid,i.hostid'.
+			' FROM functions f,items i'.
+			' WHERE f.itemid=i.itemid'.
+				' AND '.dbConditionId('f.triggerid', array_keys($triggerids)).
+				' AND '.dbConditionId('i.hostid', array_keys($hostids))
+		);
 
-		$triggers = $this->get([
-			'output' => ['triggerid', 'description', 'templateid', 'flags'],
-			'triggerids' => $triggerids,
-			'preservekeys' => true
-		] + $permission_check);
-
-		foreach ($triggerids as $triggerid) {
-			if (!array_key_exists($triggerid, $triggers)) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS,
-					_('No permissions to referred object or it does not exist!')
-				);
+		while ($row = DBfetch($result)) {
+			if (array_key_exists($row['hostid'], $db_triggers[$row['triggerid']]['hosts'])) {
+				unset($db_triggers[$row['triggerid']]['hosts'][$row['hostid']]);
 			}
 		}
+
+		$trigger_dependencies = [];
 
 		foreach ($triggers as $trigger) {
-			if ($trigger['templateid'] && !$inherited) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS, _s('Cannot update dependencies of inherited trigger "%1$s".',
-					$trigger['description']
-				));
-			}
-
-			if ($trigger['flags'] == ZBX_FLAG_DISCOVERY_CREATED) {
-				self::exception(ZBX_API_ERROR_PERMISSIONS, _s('Cannot update "%2$s" for a discovered trigger "%1$s".',
-					$trigger['description'], 'dependencies'
-				));
-			}
-		}
-	}
-
-	/**
-	 * Deletes all trigger dependencies from the given triggers and their children.
-	 *
-	 * @param array $triggers   an array of triggers with the 'triggerid' field defined
-	 * @param bool  $inherited  Determines either to check permissions for deleted dependencies. Permissions are not
-	 *                          validated for inherited triggers.
-	 *
-	 * @return array
-	 */
-	public function deleteDependencies(array $triggers, $inherited = false) {
-		$triggers = zbx_toArray($triggers);
-
-		$this->validateDeleteDependencies($triggers, $inherited);
-
-		$triggerids = zbx_objectValues($triggers, 'triggerid');
-
-		try {
-			// delete the dependencies from the child triggers
-			$childTriggers = DB::select($this->tableName(), [
-				'output' => ['triggerid'],
-				'filter' => [
-					'templateid' => $triggerids
-				]
-			]);
-			if ($childTriggers) {
-				$this->deleteDependencies($childTriggers, true);
-			}
-
-			DB::delete('trigger_depends', [
-				'triggerid_down' => $triggerids
-			]);
-		}
-		catch (APIException $e) {
-			self::exception(ZBX_API_ERROR_PARAMETERS, _('Cannot delete dependency'));
-		}
-
-		return ['triggerids' => $triggerids];
-	}
-
-	/**
-	 * Synchronizes the templated trigger dependencies on the given hosts inherited from the given
-	 * templates.
-	 * Update dependencies, do it after all triggers that can be dependent were created/updated on
-	 * all child hosts/templates. Starting from highest level template triggers select triggers from
-	 * one level lower, then for each lower trigger look if it's parent has dependencies, if so
-	 * find this dependency trigger child on dependent trigger host and add new dependency.
-	 *
-	 * @param array $data
-	 */
-	public function syncTemplateDependencies(array $data) {
-		$templateIds = zbx_toArray($data['templateids']);
-		$hostIds = zbx_toArray($data['hostids']);
-
-		$parentTriggers = $this->get([
-			'output' => ['triggerid'],
-			'selectDependencies' => ['triggerid'],
-			'hostids' => $templateIds,
-			'preservekeys' => true,
-			'nopermissions' => true
-		]);
-
-		if ($parentTriggers) {
-			$childTriggers = $this->get([
-				'output' => ['triggerid', 'templateid'],
-				'hostids' => ($hostIds) ? $hostIds : null,
-				'filter' => ['templateid' => array_keys($parentTriggers)],
-				'nopermissions' => true,
-				'preservekeys' => true,
-				'selectHosts' => ['hostid']
-			]);
-
-			if ($childTriggers) {
-				$newDependencies = [];
-				foreach ($childTriggers as $childTrigger) {
-					$parentDependencies = $parentTriggers[$childTrigger['templateid']]['dependencies'];
-					if ($parentDependencies) {
-						$dependencies = [];
-						foreach ($parentDependencies as $depTrigger) {
-							$dependencies[] = $depTrigger['triggerid'];
-						}
-						$host = reset($childTrigger['hosts']);
-						$dependencies = replace_template_dependencies($dependencies, $host['hostid']);
-						foreach ($dependencies as $depTriggerId) {
-							$newDependencies[] = [
-								'triggerid' => $childTrigger['triggerid'],
-								'dependsOnTriggerid' => $depTriggerId
-							];
-						}
-					}
-				}
-				$this->deleteDependencies($childTriggers, true);
-
-				if ($newDependencies) {
-					$this->addDependencies($newDependencies, true);
-				}
-			}
-		}
-	}
-
-	/**
-	 * Validates the dependencies of the given triggers.
-	 *
-	 * @param array $triggers list of triggers and corresponding dependencies
-	 * @param int $triggers[]['triggerid'] trigger id
-	 * @param array $triggers[]['dependencies'] list of trigger ids on which depends given trigger
-	 *
-	 * @trows APIException if any of the dependencies is invalid
-	 */
-	protected function checkDependencies(array $triggers) {
-		foreach ($triggers as $trigger) {
-			if (empty($trigger['dependencies'])) {
+			if (!array_key_exists($trigger['triggerid'], $triggerids)
+					|| !$db_triggers[$trigger['triggerid']]['hosts']) {
 				continue;
 			}
 
-			// trigger templates
-			$triggerTemplates = API::Template()->get([
-				'output' => ['status', 'hostid'],
-				'triggerids' => $trigger['triggerid'],
-				'nopermissions' => true
-			]);
+			$dependencies = array_key_exists('dependencies', $trigger)
+				? $trigger['dependencies']
+				: $db_triggers[$trigger['triggerid']]['dependencies'];
 
-			// forbid dependencies from hosts to templates
-			if (!$triggerTemplates) {
-				$triggerDependencyTemplates = API::Template()->get([
-					'output' => ['templateid'],
-					'triggerids' => $trigger['dependencies'],
-					'nopermissions' => true,
-					'limit' => 1
-				]);
-				if ($triggerDependencyTemplates) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _('Cannot add dependency from a host to a template.'));
-				}
-			}
-
-			// the trigger can't depend on itself
-			if (in_array($trigger['triggerid'], $trigger['dependencies'])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('Cannot create dependency on trigger itself.'));
-			}
-
-			// check circular dependency
-			$downTriggerIds = [$trigger['triggerid']];
-			do {
-				// triggerid_down depends on triggerid_up
-				$res = DBselect(
-					'SELECT td.triggerid_up'.
-					' FROM trigger_depends td'.
-					' WHERE '.dbConditionInt('td.triggerid_down', $downTriggerIds)
-				);
-
-				// combine db dependencies with those to be added
-				$upTriggersIds = [];
-				while ($row = DBfetch($res)) {
-					$upTriggersIds[] = $row['triggerid_up'];
-				}
-				foreach ($downTriggerIds as $id) {
-					if (isset($triggers[$id]) && isset($triggers[$id]['dependencies'])) {
-						$upTriggersIds = array_merge($upTriggersIds, $triggers[$id]['dependencies']);
-					}
-				}
-
-				// if found trigger id is in dependent triggerids, there is a dependency loop
-				$downTriggerIds = [];
-				foreach ($upTriggersIds as $id) {
-					if (bccomp($id, $trigger['triggerid']) == 0) {
-						self::exception(ZBX_API_ERROR_PARAMETERS, _('Cannot create circular dependencies.'));
-					}
-					$downTriggerIds[] = $id;
-				}
-			} while (!empty($downTriggerIds));
-
-			// fetch all templates that are used in dependencies
-			$triggerDependencyTemplates = API::Template()->get([
-				'output' => ['templateid'],
-				'triggerids' => $trigger['dependencies'],
-				'nopermissions' => true
-			]);
-			$depTemplateIds = zbx_toHash(zbx_objectValues($triggerDependencyTemplates, 'templateid'));
-
-			// run the check only if a templated trigger has dependencies on other templates
-			$triggerTemplateIds = zbx_toHash(zbx_objectValues($triggerTemplates, 'templateid'));
-			$tdiff = array_diff($depTemplateIds, $triggerTemplateIds);
-			if (!empty($triggerTemplateIds) && !empty($depTemplateIds) && !empty($tdiff)) {
-				$affectedTemplateIds = zbx_array_merge($triggerTemplateIds, $depTemplateIds);
-
-				// create a list of all hosts, that are children of the affected templates
-				$dbLowlvltpl = DBselect(
-					'SELECT DISTINCT ht.templateid,ht.hostid,h.host'.
-					' FROM hosts_templates ht,hosts h'.
-					' WHERE h.hostid=ht.hostid'.
-						' AND '.dbConditionInt('ht.templateid', $affectedTemplateIds)
-				);
-				$map = [];
-				while ($lowlvltpl = DBfetch($dbLowlvltpl)) {
-					if (!isset($map[$lowlvltpl['hostid']])) {
-						$map[$lowlvltpl['hostid']] = [];
-					}
-					$map[$lowlvltpl['hostid']][$lowlvltpl['templateid']] = $lowlvltpl['host'];
-				}
-
-				// check that if some host is linked to the template, that the trigger belongs to,
-				// the host must also be linked to all of the templates, that trigger dependencies point to
-				foreach ($map as $templates) {
-					foreach ($triggerTemplateIds as $triggerTemplateId) {
-						// is the host linked to one of the trigger templates?
-						if (isset($templates[$triggerTemplateId])) {
-							// then make sure all of the dependency templates are also linked
-							foreach ($depTemplateIds as $depTemplateId) {
-								if (!isset($templates[$depTemplateId])) {
-									self::exception(ZBX_API_ERROR_PARAMETERS,
-										_s('Not all templates are linked to "%1$s".', reset($templates))
-									);
-								}
-							}
-							break;
-						}
-					}
-				}
-			}
-		}
-	}
-
-	/**
-	 * Check that none of the triggers have dependencies on their children. Checks only one level of inheritance, but
-	 * since it is called on each inheritance step, also works for multiple inheritance levels.
-	 *
-	 * @throws APIException     if at least one trigger is dependent on its child
-	 *
-	 * @param array $triggers
-	 */
-	protected function checkDependencyParents(array $triggers) {
-		// fetch all templated dependency trigger parents
-		$depTriggerIds = [];
-		foreach ($triggers as $trigger) {
-			foreach ($trigger['dependencies'] as $depTriggerId) {
-				$depTriggerIds[$depTriggerId] = $depTriggerId;
-			}
-		}
-		$parentDepTriggers = DBfetchArray(DBSelect(
-			'SELECT templateid,triggerid'.
-			' FROM triggers'.
-			' WHERE templateid>0'.
-				' AND '.dbConditionInt('triggerid', $depTriggerIds)
-		));
-		if ($parentDepTriggers) {
-			$parentDepTriggers = zbx_toHash($parentDepTriggers, 'triggerid');
-			foreach ($triggers as $trigger) {
-				foreach ($trigger['dependencies'] as $depTriggerId) {
-					// check if the current trigger is the parent of the dependency trigger
-					if (isset($parentDepTriggers[$depTriggerId])
-							&& $parentDepTriggers[$depTriggerId]['templateid'] == $trigger['triggerid']) {
-
-						self::exception(ZBX_API_ERROR_PARAMETERS,
-							_s('Trigger cannot be dependent on a trigger that is inherited from it.')
-						);
-					}
-				}
-			}
-		}
-	}
-
-	/**
-	 * Checks if the given dependencies contain duplicates.
-	 *
-	 * @throws APIException if the given dependencies contain duplicates
-	 *
-	 * @param array $triggers
-	 */
-	protected function checkDependencyDuplicates(array $triggers) {
-		// check duplicates in array
-		$uniqueTriggers = [];
-		$duplicateTriggerId = null;
-		foreach ($triggers as $trigger) {
-			foreach ($trigger['dependencies'] as $dep) {
-				if (isset($uniqueTriggers[$trigger['triggerid']][$dep])) {
-					$duplicateTriggerId = $trigger['triggerid'];
-					break 2;
-				}
-				else {
-					$uniqueTriggers[$trigger['triggerid']][$dep] = 1;
-				}
+			foreach ($dependencies as $trigger_up) {
+				$trigger_dependencies[$trigger_up['triggerid']][$trigger['triggerid']] = true;
 			}
 		}
 
-		if ($duplicateTriggerId === null) {
-			// check if dependency already exists in DB
-			foreach ($triggers as $trigger) {
-				$dbUpTriggers = DBselect(
-					'SELECT td.triggerid_up'.
-					' FROM trigger_depends td'.
-					' WHERE '.dbConditionInt('td.triggerid_up', $trigger['dependencies']).
-					' AND td.triggerid_down='.zbx_dbstr($trigger['triggerid'])
-				, 1);
-				if (DBfetch($dbUpTriggers)) {
-					$duplicateTriggerId = $trigger['triggerid'];
-					break;
-				}
-			}
+		if (!$trigger_dependencies) {
+			return;
 		}
 
-		if ($duplicateTriggerId) {
-			$dplTrigger = DBfetch(DBselect(
-				'SELECT t.description'.
-				' FROM triggers t'.
-				' WHERE t.triggerid='.zbx_dbstr($duplicateTriggerId)
-			));
-			self::exception(ZBX_API_ERROR_PARAMETERS,
-				_s('Duplicate dependencies in trigger "%1$s".', $dplTrigger['description'])
-			);
-		}
-	}
+		/*
+		 * There is no need to perform a check for dependency duplicates, because we are checking for existing
+		 * dependencies that cannot have them. Also there is no need to perform the check on circular
+		 * dependencies, because the dependencies are based on trigger IDs. Even if the expressions have changed, the
+		 * trigger IDs remain the same.
+		 */
 
-	protected function applyQueryOutputOptions($tableName, $tableAlias, array $options, array $sqlParts) {
-		$sqlParts = parent::applyQueryOutputOptions($tableName, $tableAlias, $options, $sqlParts);
+		$trigger_hosts = self::getTriggerHosts($trigger_dependencies);
 
-		if (!$options['countOutput'] && $options['expandDescription'] !== null) {
-			$sqlParts = $this->addQuerySelect($this->fieldId('expression'), $sqlParts);
-		}
+		/*
+		 * The template trigger can become a host trigger. Therefore the template trigger dependencies may remain
+		 * after the update.
+		 */
+		self::checkDependenciesOfHostTriggers($trigger_dependencies, $trigger_hosts);
 
-		return $sqlParts;
+		/*
+		 * The template (or host) trigger can become a trigger of another template. If after the update
+		 * the trigger became owned by another template and it also has a dependency on a trigger from another
+		 * template remaining, then we should check that:
+		 *  - Such dependency did not become a dependency on a trigger from the parent template.
+		 *  - Such dependency did not become a dependency on a trigger from the child template or host.
+		 *  - The template of the trigger-up is linked to all child templates of the new trigger's template.
+		 */
+		self::checkDependenciesOfTemplateTriggers($trigger_dependencies, $trigger_hosts);
 	}
 
 	protected function addRelatedObjects(array $options, array $result) {
 		$result = parent::addRelatedObjects($options, $result);
 
-		if (!$result) {
-			return $result;
-		}
+		self::addRelatedTags($options, $result);
+		self::addRelatedInheritedTags($options, $result);
 
 		$triggerids = array_keys($result);
 
@@ -1213,35 +828,6 @@ class CTrigger extends CTriggerGeneral {
 				'preservekeys' => true
 			]);
 			$result = $relationMap->mapMany($result, $items, 'items');
-		}
-
-		// adding discoveryrule
-		if ($options['selectDiscoveryRule'] !== null && $options['selectDiscoveryRule'] != API_OUTPUT_COUNT) {
-			$discoveryRules = [];
-			$relationMap = new CRelationMap();
-			$dbRules = DBselect(
-				'SELECT id.parent_itemid,td.triggerid'.
-				' FROM trigger_discovery td,item_discovery id,functions f'.
-				' WHERE '.dbConditionInt('td.triggerid', $triggerids).
-					' AND td.parent_triggerid=f.triggerid'.
-					' AND f.itemid=id.itemid'
-			);
-			while ($rule = DBfetch($dbRules)) {
-				$relationMap->addRelation($rule['triggerid'], $rule['parent_itemid']);
-			}
-
-			$related_ids = $relationMap->getRelatedIds();
-
-			if ($related_ids) {
-				$discoveryRules = API::DiscoveryRule()->get([
-					'output' => $options['selectDiscoveryRule'],
-					'itemids' => $related_ids,
-					'nopermissions' => true,
-					'preservekeys' => true
-				]);
-			}
-
-			$result = $relationMap->mapOne($result, $discoveryRules, 'discoveryRule');
 		}
 
 		// adding last event
@@ -1314,47 +900,46 @@ class CTrigger extends CTriggerGeneral {
 			}
 		}
 
-		// adding trigger discovery
-		if ($options['selectTriggerDiscovery'] !== null && $options['selectTriggerDiscovery'] !== API_OUTPUT_COUNT) {
-			foreach ($result as &$trigger) {
-				$trigger['triggerDiscovery'] = [];
-			}
-			unset($trigger);
-
-			$sql_select = ['triggerid'];
-			foreach (['parent_triggerid', 'ts_delete'] as $field) {
-				if ($this->outputIsRequested($field, $options['selectTriggerDiscovery'])) {
-					$sql_select[] = $field;
-				}
-			}
-
-			$trigger_discoveries = DBselect(
-				'SELECT '.implode(',', $sql_select).
-				' FROM trigger_discovery'.
-				' WHERE '.dbConditionInt('triggerid', $triggerids)
-			);
-
-			while ($trigger_discovery = DBfetch($trigger_discoveries)) {
-				$triggerid = $trigger_discovery['triggerid'];
-				unset($trigger_discovery['triggerid']);
-
-				$result[$triggerid]['triggerDiscovery'] = $trigger_discovery;
-			}
-		}
+		self::addRelatedDiscoveryRules($options, $result);
+		self::addRelatedTriggerDiscovery($options, $result);
+		self::addRelatedDiscoveryData($options, $result);
 
 		return $result;
+	}
+
+	private static function addRelatedTriggerDiscovery(array $options, array &$result): void {
+		if ($options['selectTriggerDiscovery'] === null) {
+			return;
+		}
+
+		foreach ($result as &$trigger) {
+			$trigger['triggerDiscovery'] = [];
+		}
+		unset($trigger);
+
+		$_options = [
+			'output' => array_merge(['triggerid'], $options['selectTriggerDiscovery']),
+			'triggerids' => array_keys($result)
+		];
+		$resource = DBselect(DB::makeSql('trigger_discovery', $_options));
+
+		while ($trigger_discovery = DBfetch($resource)) {
+			$result[$trigger_discovery['triggerid']]['triggerDiscovery'] =
+				array_diff_key($trigger_discovery, array_flip(['triggerid']));
+		}
 	}
 
 	protected function applyQuerySortField($sortfield, $sortorder, $alias, array $sqlParts) {
 		if ($sortfield === 'hostname') {
 			$sqlParts['select']['hostname'] = 'h.name AS hostname';
-			$sqlParts['from']['functions'] = 'functions f';
-			$sqlParts['from']['items'] = 'items i';
-			$sqlParts['from']['hosts'] = 'hosts h';
-			$sqlParts['where'][] = 't.triggerid = f.triggerid';
-			$sqlParts['where'][] = 'f.itemid = i.itemid';
-			$sqlParts['where'][] = 'i.hostid = h.hostid';
+			$sqlParts['join']['f'] = ['table' => 'functions', 'using' => 'triggerid'];
+			$sqlParts['join']['i'] = ['left_table' => 'f', 'table' => 'items', 'using' => 'itemid'];
+			$sqlParts['join']['h'] = ['left_table' => 'i', 'table' => 'hosts', 'using' => 'hostid'];
 			$sqlParts['order'][] = 'h.name '.$sortorder;
+		}
+		elseif ($sortfield === 'lastchange') {
+			$sqlParts['join']['tr'] = ['type' => 'left', 'table' => 'trigger_rtdata', 'using' => 'triggerid'];
+			$sqlParts['order'][] = 'tr.lastchange '.$sortorder;
 		}
 		else {
 			$sqlParts = parent::applyQuerySortField($sortfield, $sortorder, $alias, $sqlParts);
@@ -1392,10 +977,11 @@ class CTrigger extends CTriggerGeneral {
 			do {
 				// Fetch all dependency records where "down" trigger IDs are in current iteration trigger IDs.
 				$dbResult = DBselect(
-					'SELECT d.triggerid_down,d.triggerid_up,t.value'.
-					' FROM trigger_depends d,triggers t'.
-					' WHERE d.triggerid_up=t.triggerid'.
-					' AND '.dbConditionInt('d.triggerid_down', $triggerIds)
+					'SELECT d.triggerid_down,d.triggerid_up,'.
+						dbConditionCoalesce('tr.value', DB::getDefault('trigger_rtdata', 'value'), 'value').
+					' FROM trigger_depends d'.
+					' LEFT JOIN trigger_rtdata tr ON tr.triggerid=d.triggerid_up'.
+					' WHERE '.dbConditionId('d.triggerid_down', $triggerIds)
 				);
 
 				// Add trigger IDs as keys and empty arrays as values.
@@ -1528,5 +1114,34 @@ class CTrigger extends CTriggerGeneral {
 		}
 
 		return $triggers;
+	}
+
+	/**
+	 * Inherit template triggers to hosts.
+	 *
+	 * @param array $templateids
+	 * @param array $hostids
+	 */
+	public function linkTemplateObjects(array $templateids, array $hostids) {
+		$output = ['triggerid', 'description', 'expression', 'recovery_mode', 'recovery_expression', 'url_name', 'url',
+			'status', 'priority', 'comments', 'type', 'correlation_mode', 'correlation_tag', 'manual_close', 'opdata',
+			'event_name'
+		];
+
+		$triggers = $this->get([
+			'output' => $output,
+			'selectTags' => ['tag', 'value'],
+			'hostids' => $templateids,
+			'preservekeys' => true,
+			'nopermissions' => true
+		]);
+
+		if ($triggers) {
+			$triggers = CMacrosResolverHelper::resolveTriggerExpressions($triggers,
+				['sources' => ['expression', 'recovery_expression']]
+			);
+
+			$this->inherit($triggers, $hostids);
+		}
 	}
 }

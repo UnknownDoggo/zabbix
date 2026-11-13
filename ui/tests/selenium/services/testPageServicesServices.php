@@ -1,44 +1,49 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2021 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CWebTest.php';
-require_once dirname(__FILE__).'/../../include/helpers/CDataHelper.php';
-require_once dirname(__FILE__).'/../traits/TableTrait.php';
-require_once dirname(__FILE__).'/../behaviors/CMessageBehavior.php';
+
+require_once __DIR__.'/../../include/CWebTest.php';
+require_once __DIR__.'/../behaviors/CMessageBehavior.php';
+require_once __DIR__.'/../behaviors/CTableBehavior.php';
 
 /**
- * @backup services
+ * @dataSource EntitiesTags, Services, Actions, MonitoringOverview
  *
- * @onBefore prepareServicesData
+ * @backup services
  */
 class testPageServicesServices extends CWebTest {
 
-	use TableTrait;
+	/**
+	 * Attach MessageBehavior and TableBehavior to the test.
+	 *
+	 * @return array
+	 */
+	public function getBehaviors() {
+		return [
+			CMessageBehavior::class,
+			CTableBehavior::class
+		];
+	}
 
 	const EDIT = true;
 
-	const SERVICE_COUNT = 16;
+	const SERVICE_COUNT = 21;
 
-	const LAYOUT_PARENT = 'Server 3';
-	const LAYOUT_CHILD = 'Server 2';
-	const LAYOUT_CHILD2 = 'Server 1';
+	const LAYOUT_PARENT = 'Parent for 2 levels of child services';
+	const LAYOUT_CHILD = 'Child service with child service';
+	const LAYOUT_CHILD2 = 'Child service of child service';
 
 	const ROOTCAUSE_PARENT = 'Test order';
 	const ROOTCAUSE_CHILD1 = '1';
@@ -48,291 +53,14 @@ class testPageServicesServices extends CWebTest {
 	const BREADCRUMB_SELECTOR = 'xpath://ul[@class="breadcrumbs"]';
 	const TABLE_SELECTOR = 'id:service-list';
 
-	/**
-	 * Attach MessageBehavior to the test.
-	 *
-	 * @return array
-	 */
-	public function getBehaviors() {
-		return [CMessageBehavior::class];
-	}
-
-	public static function prepareServicesData() {
-		CDataHelper::call('service.create', [
-			[
-				'name' => 'Server 1',
-				'algorithm' => 1,
-				'sortorder' => 1
-			],
-			[
-				'name' => 'Server 2',
-				'algorithm' => 1,
-				'sortorder' => 2
-			],
-			[
-				'name' => 'Server 3',
-				'algorithm' => 1,
-				'sortorder' => 3,
-				'tags' => [
-					[
-						'tag' => 'test',
-						'value' => 'test123'
-					]
-				]
-			],
-			[
-				'name' => 'Server 4',
-				'algorithm' => 1,
-				'sortorder' => 4,
-				'tags' => [
-					[
-						'tag' => 'test',
-						'value' => 'test456'
-					],
-					[
-						'tag' => 'problem',
-						'value' => 'true'
-					]
-				]
-			],
-			[
-				'name' => 'Server 5',
-				'algorithm' => 1,
-				'sortorder' => 5,
-				'problem_tags' => [
-					[
-						'tag' => 'problem',
-						'operator' => 0,
-						'value' => 'true'
-					]
-				],
-				'tags' => [
-					[
-						'tag' => 'problem',
-						'value' => 'false'
-					],
-					[
-						'tag' => 'test',
-						'value' => 'test789'
-					]
-				]
-			],
-			[
-				'name' => 'Server 6 for delete by checkbox',
-				'algorithm' => 1,
-				'sortorder' => 6
-			],
-			[
-				'name' => 'Server 7 for delete',
-				'algorithm' => 1,
-				'sortorder' => 7
-			],
-			[
-				'name' => 'Server 8 with child for delete',
-				'algorithm' => 1,
-				'sortorder' => 8
-			],
-			[
-				'name' => 'Server 9 with child for delete',
-				'algorithm' => 1,
-				'sortorder' => 9
-			],
-			[
-				'name' => 'Server 10 child for Server 8',
-				'algorithm' => 1,
-				'sortorder' => 10
-			],
-			[
-				'name' => 'Server 11 child for Server 9',
-				'algorithm' => 1,
-				'sortorder' => 12
-			],
-			[
-				'name' => 'Server for mass delete 1',
-				'algorithm' => 1,
-				'sortorder' => 13
-			],
-			[
-				'name' => 'Server for mass delete 2',
-				'algorithm' => 1,
-				'sortorder' => 14,
-				'problem_tags' => [
-					[
-						'tag' => 'tag1',
-						'operator' => 0,
-						'value' => 'value1'
-					]
-				]
-			],
-			[
-				'name' => 'Server for mass delete 3',
-				'algorithm' => 1,
-				'sortorder' => 15,
-				'problem_tags' => [
-					[
-						'tag' => 'tag2',
-						'operator' => 0,
-						'value' => 'value2'
-					]
-				]
-			],
-			[
-				'name' => 'Server for mass update 1',
-				'algorithm' => 1,
-				'sortorder' => 16
-			],
-			[
-				'name' => 'Server 12',
-				'algorithm' => 1,
-				'sortorder' => 17
-			],
-			[
-				'name' => 'Child for mass deleting 1',
-				'algorithm' => 1,
-				'sortorder' => 18
-			],
-			[
-				'name' => 'Child for mass deleting 2',
-				'algorithm' => 1,
-				'sortorder' => 19
-			],
-			[
-				'name' => 'Child for mass deleting 3',
-				'algorithm' => 1,
-				'sortorder' => 20
-			],
-			[
-				'name' => 'Server for mass update 2',
-				'algorithm' => 1,
-				'sortorder' => 21
-			],
-			[
-				'name' => 'Server for mass update 3',
-				'algorithm' => 1,
-				'sortorder' => 22
-			],
-			[
-				'name' => 'Server with problem',
-				'algorithm' => 1,
-				'sortorder' => 23
-			],
-			[
-				'name' => 'Test order',
-				'algorithm' => 1,
-				'sortorder' => 0
-			],
-			[
-				'name' => '1',
-				'algorithm' => 1,
-				'sortorder' => 2,
-				'weight' => 10
-			],
-			[
-				'name' => '2',
-				'algorithm' => 1,
-				'sortorder' => 2,
-				'weight' => 10
-			],
-			[
-				'name' => '3',
-				'algorithm' => 1,
-				'sortorder' => 2,
-				'weight' => 10
-			]
-		]);
-
-		$services = CDataHelper::getIds('name');
-
-		CDataHelper::call('service.update', [
-			[
-				'serviceid' =>  $services['Server 1'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 2']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Server 2'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 3']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Server 10 child for Server 8'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 8 with child for delete']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Server 11 child for Server 9'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 9 with child for delete']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Child for mass deleting 1'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 12']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Child for mass deleting 2'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 12']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['Child for mass deleting 3'],
-				'parents' => [
-					[
-						'serviceid' => $services['Server 12']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['1'],
-				'parents' => [
-					[
-						'serviceid' => $services['Test order']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['2'],
-				'parents' => [
-					[
-						'serviceid' => $services['Test order']
-					]
-				]
-			],
-			[
-				'serviceid' => $services['3'],
-				'parents' => [
-					[
-						'serviceid' => $services['Test order']
-					]
-				]
-			]
-		]);
-
-		DBexecute("UPDATE services SET status = 5 WHERE name = 'Server with problem'");
-	}
+	protected static $monitoring_overview_eventids;
 
 	/**
 	 * Set parent and child services to Problem status and link the child services to the corresponding problem events.
 	 */
 	public static function prepareServiceProblemsData() {
+		self::$monitoring_overview_eventids = CDataHelper::get('MonitoringOverview.eventids');
+
 		// Statuses: Warning = 2, Average = 3, High = 4.
 		$service_statuses = [
 			self::ROOTCAUSE_PARENT => 4,
@@ -342,8 +70,8 @@ class testPageServicesServices extends CWebTest {
 		];
 
 		$service_ids = [];
-		$i = 1;
 
+		$i = 0;
 		foreach ($service_statuses as $service => $status) {
 			$service_ids[$service] = CDBHelper::getValue('SELECT serviceid FROM services WHERE name='.zbx_dbstr($service));
 
@@ -352,9 +80,10 @@ class testPageServicesServices extends CWebTest {
 
 			// Link child services to the corresponding problem events.
 			if ($service !== self::ROOTCAUSE_PARENT) {
-				// Corresponding trigger problem events have ids starting from 9001 in data_test.sql, so "9000 + $i" is used.
+				// Add service problem for each eventid from MoitoringOverview data source. Warning trigger has the smallest ID.
 				DBexecute('INSERT into service_problem (service_problemid, eventid, serviceid, severity) '.
-						'VALUES ('.$i.', '.(9000 + $i).', '.$service_ids[$service].', '.$status.')'
+						'VALUES ('.(1 + $i).', '.(self::$monitoring_overview_eventids['1_trigger_Warning'] + $i).', '.
+						$service_ids[$service].', '.$status.')'
 				);
 
 				$i++;
@@ -394,7 +123,7 @@ class testPageServicesServices extends CWebTest {
 		$this->checkParentChildLayout($table, self::LAYOUT_PARENT, self::LAYOUT_CHILD);
 
 		// Check Kiosk mode.
-		$this->query('xpath://button[@title="Kiosk mode"]')->one()->click();
+		$this->query('xpath://button[@aria-label="Enter full screen mode"]')->one()->click();
 		$this->page->waitUntilReady();
 
 		// Check that Header and Filter disappeared.
@@ -402,7 +131,7 @@ class testPageServicesServices extends CWebTest {
 		$this->assertFalse($this->query('xpath://div[@aria-label="Filter"]')->exists());
 		$this->assertTrue($this->query('id:service-list')->exists());
 
-		$this->query('xpath://button[@title="Normal view"]')->waitUntilPresent()->one()->click(true);
+		$this->query('xpath://button[@aria-label="Exit full screen mode"]')->waitUntilPresent()->one()->click(true);
 		$this->page->waitUntilReady();
 
 		// Check that Header and Filter are visible again.
@@ -432,7 +161,7 @@ class testPageServicesServices extends CWebTest {
 		$this->checkServiceButtons($table->findRow('Name', self::LAYOUT_CHILD2, true), true);
 
 		// Check there is no Kiosk mode button.
-		$this->assertFalse($this->query('xpath://button[@title="Kiosk mode"]')->exists());
+		$this->assertFalse($this->query('xpath://button[@aria-label="Enter full screen mode"]')->exists());
 
 		// Check Info/Filter tabs switching.
 		foreach (['Filter' => 'tab_1', 'Info' => 'tab_info'] as $tab => $id) {
@@ -452,9 +181,9 @@ class testPageServicesServices extends CWebTest {
 	 */
 	private function checkParentChildLayout($table, $parent, $child, $edit = false) {
 		$this->checkSeviceInfoLayout($table, $parent, $edit);
-		$this->assertTableDataColumn([$child.' 1'], 'Name');
+		$this->assertTableDataColumn([$child.' 1'], 'Name', 'xpath://form[@name="service_list"]//table');
 		$this->checkSeviceInfoLayout($table, $child, $edit);
-		$this->assertTableDataColumn([self::LAYOUT_CHILD2], 'Name');
+		$this->assertTableDataColumn([self::LAYOUT_CHILD2], 'Name', 'xpath://form[@name="service_list"]//table');
 
 		$breadcrumbs = $this->query(self::BREADCRUMB_SELECTOR)->one();
 		// Check breadcrumbs on last child page.
@@ -491,7 +220,7 @@ class testPageServicesServices extends CWebTest {
 			);
 		}
 
-		$edit_button = $info_card->query('xpath://button['.CXPathHelper::fromClass('btn-edit').']');
+		$edit_button = $info_card->query('xpath://button['.CXPathHelper::fromClass('js-edit-service').']');
 		$this->assertEquals($edit, $edit_button->one(false)->isClickable());
 		$table->invalidate();
 		$this->assertTableStats(1);
@@ -541,43 +270,43 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 4'
+						'Service with multiple service tags'
 					]
 				]
 			],
-			// Tags source: Problem.
+			// Tag problem Equals false.
 			[
 				[
 					'Tags' => [
-						'Source' => 'Problem',
+						'Source' => 'Service',
 						'tags' => [
 							[
 								'index' => 0,
 								'action' => USER_ACTION_UPDATE,
 								'tag' => 'problem',
-								'operator' => 'Contains',
-								'value' => 'true'
+								'operator' => 'Equals',
+								'value' => 'false'
 							]
 						]
 					],
 					'result' => [
-						'Server 5'
+						'Simple actions service'
 					]
 				]
 			],
-			// Tags source: Problem and Evaluation: Or.
+			// Tags source: Service and Evaluation: Or.
 			[
 				[
 					'Tags' => [
-						'Source' => 'Problem',
+						'Source' => 'Service',
 						'Evaluation' => 'Or',
 						'tags' => [
 							[
 								'index' => 0,
 								'action' => USER_ACTION_UPDATE,
 								'tag' => 'problem',
-								'operator' => 'Contains',
-								'value' => 'true'
+								'operator' => 'Equals',
+								'value' => 'false'
 							],
 							[
 								'tag' => 'test',
@@ -586,7 +315,10 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 5'
+						'Service with tags for updating',
+						'Parent for 2 levels of child services 1',
+						'Service with multiple service tags',
+						'Simple actions service'
 					]
 				]
 			],
@@ -594,15 +326,11 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'delete',
+						'Name' => 'parent',
 						'Only services without children' => true
 					],
 					'result' => [
-						'Server 6 for delete by checkbox',
-						'Server 7 for delete',
-						'Server for mass delete 1',
-						'Server for mass delete 2',
-						'Server for mass delete 3'
+						'Parent for child creation'
 					]
 				]
 			],
@@ -610,11 +338,15 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'Server for mass delete',
+						'Name' => 'parent',
 						'Only services without problem tags' => true
 					],
 					'result' => [
-						'Server for mass delete 1'
+						'Parent for 2 levels of child services 1',
+						'Parent for deletion from row 1',
+						'Parent for child deletion from row 1',
+						'Clone parent 3',
+						'Parent for child creation'
 					]
 				]
 			]
@@ -627,12 +359,14 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'Server for mass delete'
+						'Name' => 'parent'
 					],
 					'result' => [
-						'Server for mass delete 1',
-						'Server for mass delete 2',
-						'Server for mass delete 3'
+						'Parent for 2 levels of child services 1',
+						'Parent for deletion from row 1',
+						'Parent for child deletion from row 1',
+						'Clone parent 3',
+						'Parent for child creation'
 					],
 					'check_breadcrumbs' => true
 				]
@@ -641,13 +375,12 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'with',
+						'Name' => 'with problem',
 						'Status' => 'Any'
 					],
 					'result' => [
-						'Server 8 with child for delete 1',
-						'Server 9 with child for delete 1',
-						'Server with problem'
+						'Service with problem tags',
+						'Service with problem'
 					]
 				]
 			],
@@ -655,12 +388,11 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'with',
+						'Name' => 'with problem',
 						'Status' => 'OK'
 					],
 					'result' => [
-						'Server 8 with child for delete 1',
-						'Server 9 with child for delete 1'
+						'Service with problem tags'
 					]
 				]
 			],
@@ -668,11 +400,33 @@ class testPageServicesServices extends CWebTest {
 			[
 				[
 					'filter' => [
-						'Name' => 'with',
+						'Name' => 'with problem',
 						'Status' => 'Problem'
 					],
 					'result' => [
-						'Server with problem'
+						'Service with problem'
+					]
+				]
+			],
+			// Multiple spaces between words in the filter.
+			[
+				[
+					'filter' => [
+						'Name' => '   spaces   '
+					],
+					'result' => [
+						'Multiple spaces in service name'
+					]
+				]
+			],
+			// Multiple spaces in the filter.
+			[
+				[
+					'filter' => [
+						'Name' => '   '
+					],
+					'result' => [
+						'Multiple spaces in service name'
 					]
 				]
 			],
@@ -696,7 +450,7 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 4'
+						'Service with multiple service tags'
 					]
 				]
 			],
@@ -720,9 +474,10 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 3 1',
-						'Server 4',
-						'Server 5'
+						'Service with tags for updating',
+						'Parent for 2 levels of child services 1',
+						'Service with multiple service tags',
+						'Simple actions service'
 					]
 				]
 			],
@@ -742,7 +497,7 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Name' => 'Server 5'
+						'Simple actions service'
 					]
 				]
 			],
@@ -766,7 +521,7 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 3 1'
+						'Parent for 2 levels of child services 1'
 					]
 				]
 			],
@@ -790,8 +545,9 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 3 1',
-						'Server 4'
+						'Service with tags for updating',
+						'Parent for 2 levels of child services 1',
+						'Service with multiple service tags'
 					]
 				]
 			],
@@ -815,7 +571,7 @@ class testPageServicesServices extends CWebTest {
 						]
 					],
 					'result' => [
-						'Server 5'
+						'Simple actions service'
 					]
 				]
 			],
@@ -871,10 +627,12 @@ class testPageServicesServices extends CWebTest {
 		// Reset filter in case if some filtering remained before ongoing test case.
 		$filter_form->query('button:Reset')->one()->click();
 
+		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
+
 		// Fill filter form with data.
 		$filter_form->fill(CTestArrayHelper::get($data, 'filter'));
 
-		// If data contains Tags fill them separataly, because tags form is more complicated.
+		// If data contains Tags fill them separately, because tags form is more complicated.
 		if (CTestArrayHelper::get($data, 'Tags')) {
 			if (CTestArrayHelper::get($data['Tags'], 'Source')) {
 				$filter_form->getField('id:filter_tag_source')->asSegmentedRadio()->fill($data['Tags']['Source']);
@@ -888,6 +646,7 @@ class testPageServicesServices extends CWebTest {
 		}
 
 		$filter_form->submit();
+		$table->waitUntilReloaded();
 		$this->page->waitUntilReady();
 
 		// Check filtered result.
@@ -895,7 +654,6 @@ class testPageServicesServices extends CWebTest {
 
 		// Check breadcrumbs and table headers.
 		$selector = $this->query(self::BREADCRUMB_SELECTOR);
-		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
 		if (CTestArrayHelper::get($data, 'check_breadcrumbs')) {
 			$this->assertTrue($selector->one()->query('link:All services')->one()->isClickable());
 			$this->assertTrue($selector->query('xpath:.//span[@class="selected" and text()="Filter results"]')->exists());
@@ -906,7 +664,7 @@ class testPageServicesServices extends CWebTest {
 			$this->assertSame($headers, $table->getHeadersText());
 		}
 
-		// Reset filer not to impact the results of next tests.
+		// Reset filter not to impact the results of next tests.
 		$filter_form->query('button:Reset')->one()->click();
 
 		// Check breadcrumbs and "Parent services" headers disappeared.
@@ -931,18 +689,19 @@ class testPageServicesServices extends CWebTest {
 		// Check table contents before filtering.
 		$start_rows_count = $table->getRows()->count();
 		$this->assertTableStats($start_rows_count);
-		$start_contents = $this->getTableResult('Name');
+		$start_contents = $this->getTableColumnData('Name');
 
 		// Filling fields with needed services info.
-		$form->fill(['id:filter_name' => 'Server 3']);
+		$form->fill(['id:filter_name' => 'Parent for 2 levels of child services']);
 		$form->submit();
+		$table->waitUntilReloaded();
 
 		// Check that filtered count matches expected.
 		$this->assertEquals(1, $table->getRows()->count());
 		$this->assertTableStats(1);
 
 		// Checking that filtered service matches expected.
-		$this->assertTableDataColumn(['Server 3 1']);
+		$this->assertTableDataColumn(['Parent for 2 levels of child services 1']);
 
 		// After pressing reset button, check that previous services are displayed again.
 		$form->query('button:Reset')->one()->click();
@@ -950,11 +709,11 @@ class testPageServicesServices extends CWebTest {
 		$reset_count =  $table->getRows()->count();
 		$this->assertEquals($start_rows_count, $reset_count);
 		$this->assertTableStats($reset_count);
-		$this->assertEquals($start_contents, $this->getTableResult('Name'));
+		$this->assertEquals($start_contents, $this->getTableColumnData('Name'));
 	}
 
 	public function testPageServicesServices_AddChild() {
-		$parent = 'Server with problem';
+		$parent = 'Service with problem';
 		$child_name = 'Added child for Server with problem';
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
@@ -976,16 +735,14 @@ class testPageServicesServices extends CWebTest {
 		// Check that row count is not changed.
 		$this->assertTableStats($before_rows_count);
 
-		// Check that parent became a link.
-		$this->assertTrue($table->findRow('Name', $parent, true)->query('link', $parent)->exists());
-
 		// Check DB.
 		$childid = CDBHelper::getValue('SELECT serviceid FROM services WHERE name='.zbx_dbstr($child_name));
 		$parentid = CDBHelper::getValue('SELECT serviceid FROM services WHERE name='.zbx_dbstr($parent));
 
 		// Check parent-child linking in DB.
 		$this->assertEquals(1, CDBHelper::getCount('SELECT * FROM services_links WHERE serviceupid='.
-				$parentid.' AND servicedownid ='.zbx_dbstr($childid)));
+				zbx_dbstr($parentid).' AND servicedownid ='.zbx_dbstr($childid))
+		);
 	}
 
 	public function testPageServicesServices_CancelDeleteFromRow() {
@@ -1002,7 +759,7 @@ class testPageServicesServices extends CWebTest {
 	 * @param boolean    $mass    true if is mass delete scenario, false otherwise
 	 */
 	private function cancelDelete($mass = false) {
-		$name = 'Server 6 for delete by checkbox';
+		$name = 'Service for delete by checkbox';
 		$sql = 'SELECT * FROM services ORDER BY serviceid';
 		$old_hash = CDBHelper::getHash($sql);
 
@@ -1014,8 +771,8 @@ class testPageServicesServices extends CWebTest {
 			$this->query('button:Delete')->one()->click();
 		}
 		else {
-			$table->findRow('Name', $name)->query('xpath:.//button[contains(@class, "btn-remove")]')->one()
-				->waitUntilClickable()->click();
+			$table->findRow('Name', $name)->query("xpath:.//button[".CXPathHelper::fromClass('js-delete-service')."]")
+					->one()->waitUntilClickable()->click();
 		}
 
 		$this->page->dismissAlert();
@@ -1030,7 +787,7 @@ class testPageServicesServices extends CWebTest {
 	}
 
 	public function testPageServicesServices_SimpleServiceDeleteFromRow() {
-		$name = 'Server 7 for delete';
+		$name = 'Service for delete';
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
 		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
@@ -1039,8 +796,8 @@ class testPageServicesServices extends CWebTest {
 		$this->assertTableStats($before_rows_count);
 
 		// Delete service pressing cross button.
-		$table->findRow('Name', $name)->query('xpath:.//button[contains(@class, "btn-remove")]')->one()
-				->waitUntilClickable()->click();
+		$table->findRow('Name', $name)->query("xpath:.//button[".CXPathHelper::fromClass('js-delete-service')."]")
+				->one()->waitUntilClickable()->click();
 		$this->page->acceptAlert();
 		$this->page->waitUntilReady();
 		$this->assertMessage(TEST_GOOD, 'Service deleted');
@@ -1054,8 +811,8 @@ class testPageServicesServices extends CWebTest {
 	}
 
 	public function testPageServicesServices_DeleteChildFromRow() {
-		$parent = 'Server 8 with child for delete';
-		$name = 'Server 10 child for Server 8';
+		$parent = 'Parent for child deletion from row';
+		$name = 'Child 1';
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
 		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
@@ -1066,8 +823,8 @@ class testPageServicesServices extends CWebTest {
 
 		// Delete child service pressing cross button.
 		$table->invalidate();
-		$table->findRow('Name', $name)->query('xpath:.//button[contains(@class, "btn-remove")]')->one()
-				->waitUntilClickable()->click();
+		$table->findRow('Name', $name)->query("xpath:.//button[".CXPathHelper::fromClass('js-delete-service')."]")
+				->one()->waitUntilClickable()->click();
 
 		$this->page->acceptAlert();
 		$this->page->waitUntilReady();
@@ -1084,8 +841,8 @@ class testPageServicesServices extends CWebTest {
 	}
 
 	public function testPageServicesServices_DeleteParentFromRow() {
-		$name = 'Server 9 with child for delete';
-		$child = 'Server 11 child for Server 9';
+		$name = 'Parent for deletion from row';
+		$child = 'Child 2';
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
 		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
@@ -1100,8 +857,8 @@ class testPageServicesServices extends CWebTest {
 		$this->assertFalse($table->query("xpath://td/a[text()=".CXPathHelper::escapeQuotes($child)."]")->exists());
 
 		// Delete parent service.
-		$table->findRow('Name', $name, true)->query('xpath:.//button[contains(@class, "btn-remove")]')->one()
-				->waitUntilClickable()->click();
+		$table->findRow('Name', $name, true)->query("xpath:.//button[".CXPathHelper::fromClass('js-delete-service')."]")
+				->one()->waitUntilClickable()->click();
 
 		$this->page->acceptAlert();
 		$this->page->waitUntilReady();
@@ -1121,11 +878,13 @@ class testPageServicesServices extends CWebTest {
 		$this->assertEquals(1, CDBHelper::getCount('SELECT * FROM services WHERE name='.zbx_dbstr($child)));
 	}
 
+	/**
+	 * @depends testPageServicesServices_SimpleServiceDeleteFromRow
+	 */
 	public function testPageServicesServices_SimpleServicesMassDelete() {
 		$names = [
-			'Server for mass delete 1',
-			'Server for mass delete 2',
-			'Server for mass delete 3'
+			'Service for delete by checkbox',
+			'Service for delete 2'
 		];
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
@@ -1150,18 +909,16 @@ class testPageServicesServices extends CWebTest {
 		}
 
 		// Check database.
-		$this->assertEquals(0, CDBHelper::getCount('SELECT * FROM services WHERE name LIKE '.
-				zbx_dbstr('%Server for mass delete%'))
-		);
+		$this->assertEquals(0, CDBHelper::getCount('SELECT * FROM services WHERE name LIKE '.zbx_dbstr('%delete%')));
 	}
 
 	public function testPageServicesServices_ChildrenMassDelete() {
-		$parent = 'Server 12';
+		$parent = 'Clone parent';
 		$names = [
-			'Child for mass deleting 1',
-			'Child for mass deleting 2'
+			'Clone child 1',
+			'Clone child 2'
 		];
-		$remained = 'Child for mass deleting 3';
+		$remained = 'Clone child 3';
 
 		$this->page->login()->open('zabbix.php?action=service.list.edit');
 		$table = $this->query(self::TABLE_SELECTOR)->asTable()->one();
@@ -1211,8 +968,10 @@ class testPageServicesServices extends CWebTest {
 			$form = COverlayDialogElement::find()->waitUntilReady()->asForm()->one();
 			$form->fill(['Sort order (0->999)' => $order]);
 			$form->submit();
+			$table->waitUntilReloaded();
 			$this->page->waitUntilReady();
 			$this->assertMessage(TEST_GOOD, 'Service updated');
+			CMessageElement::find()->one()->close();
 		}
 
 		$this->assertTableDataColumn(['3', '1', '2']);
@@ -1754,17 +1513,18 @@ class testPageServicesServices extends CWebTest {
 		$form->getField('Status calculation rule')->fill($data['parent']['Status calculation rule']);
 
 		if (array_key_exists('Additional rules', $data['parent'])) {
-			$form->query('id:advanced_configuration')->asCheckbox()->one()->set(true);
+			$form->fill(['Advanced configuration' => true]);
 
 			// Remove the additional rules from previous test cases.
 			$form->getFieldContainer('Additional rules')->query('button:Remove')->all(false)->click();
 
-			// Fill in configuration of each Addirional rule separately.
+			// Fill in configuration of each Additional rule separately.
 			foreach ($data['parent']['Additional rules'] as $rule_fields) {
 				$form->getFieldContainer('Additional rules')->query('button:Add')->waitUntilClickable()->one()->click();
 				$rules_form = COverlayDialogElement::find()->all()->last()->waitUntilReady()->asForm();
 				$rules_form->fill($rule_fields);
 				$rules_form->submit();
+				$rules_form->waitUntilNotVisible();
 			}
 		}
 
@@ -1793,6 +1553,7 @@ class testPageServicesServices extends CWebTest {
 
 				COverlayDialogElement::find()->one()->waitUntilReady();
 				$form = $this->query('id:service-form')->asForm()->one();
+				$form->fill(['Advanced configuration' => true]);
 
 				$form->fill($child_service['fields']);
 				$form->submit();

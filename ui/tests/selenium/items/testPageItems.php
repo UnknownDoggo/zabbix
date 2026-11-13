@@ -1,26 +1,52 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CLegacyWebTest.php';
 
+require_once __DIR__.'/../../include/CLegacyWebTest.php';
+
+/**
+ * @backup items
+ *
+ * @onBefore prepareItemData
+ */
 class testPageItems extends CLegacyWebTest {
+
+	/**
+	 * Attach TableBehavior and MessageBehavior to the test.
+	 *
+	 * @return array
+	 */
+	public function getBehaviors() {
+		return [
+			CTableBehavior::class,
+			CMessageBehavior::class
+		];
+	}
+
+	public static function prepareItemData() {
+		$hostid = CDBHelper::getValue("SELECT hostid FROM hosts WHERE host='Host for trigger tags filtering'");
+		CDataHelper::call('item.create', [
+			[
+				'hostid' => $hostid,
+				'name' => 'Multiple   spaces   in item name',
+				'key_' => 'customItemkey123',
+				'type' => ITEM_TYPE_TRAPPER,
+				'value_type' => 0
+			]
+		]);
+	}
 
 	public static function data() {
 		return CDBHelper::getDataProvider(
@@ -34,12 +60,8 @@ class testPageItems extends CLegacyWebTest {
 	 * @dataProvider data
 	 */
 	public function testPageItems_CheckLayout($data) {
-		$this->zbxTestLogin('items.php?filter_set=1&filter_hostids%5B0%5D='.$data['hostid'].'&context=host');
-		$this->zbxTestCheckTitle('Configuration of items');
-		$this->zbxTestCheckHeader('Items');
-		$this->zbxTestTextPresent('Displaying');
-
 		if ($data['status'] == HOST_STATUS_MONITORED || $data['status'] == HOST_STATUS_NOT_MONITORED) {
+			$this->zbxTestLogin('zabbix.php?action=item.list&context=host&filter_set=1&filter_hostids[0]='.$data['hostid']);
 			$this->zbxTestTextPresent('All hosts');
 			$this->zbxTestTextPresent(
 				[
@@ -54,8 +76,11 @@ class testPageItems extends CLegacyWebTest {
 					'Info'
 				]
 			);
+			$this->zbxTestAssertElementPresentXpath("//button[text()='Execute now'][@disabled]");
+			$this->zbxTestTextPresent('Clear history and trends');
 		}
 		elseif ($data['status'] == HOST_STATUS_TEMPLATE) {
+			$this->zbxTestLogin('zabbix.php?action=item.list&context=template&filter_set=1&filter_hostids[0]='.$data['hostid']);
 			$this->zbxTestTextPresent('All templates');
 			$this->zbxTestTextPresent(
 				[
@@ -66,30 +91,31 @@ class testPageItems extends CLegacyWebTest {
 					'History',
 					'Trends',
 					'Type',
-					'Status',
-					'Info'
+					'Status'
 				]
 			);
+			$this->zbxTestAssertElementNotPresentXpath("//button[text()='Execute now']");
+			$this->zbxTestAssertElementNotPresentXpath("//button[text()='Clear history and trends']");
 		}
 
-		$this->zbxTestAssertElementPresentXpath("//button[text()='Execute now'][@disabled]");
-
-		// TODO someday should check that interval is not shown for trapper items, trends not shown for non-numeric items etc
-		$this->zbxTestTextPresent('Enable', 'Disable', 'Mass update', 'Copy', 'Clear history', 'Delete');
+		$this->zbxTestCheckTitle('Configuration of items');
+		$this->zbxTestCheckHeader('Items');
+		$this->zbxTestTextPresent(['Enable', 'Disable', 'Mass update', 'Copy', 'Delete']);
 	}
 
 	/**
 	 * @dataProvider data
 	 */
 	public function testPageItems_CheckNowAll($data) {
-		$this->zbxTestLogin('items.php?filter_set=1&filter_hostids%5B0%5D='.$data['hostid'].'&context=host');
+		$context = ($data['status'] == HOST_STATUS_TEMPLATE) ? 'template' : 'host';
+		$this->zbxTestLogin('zabbix.php?action=item.list&context='.$context.'&filter_set=1&filter_hostids[0]='.$data['hostid']);
 		$this->zbxTestCheckHeader('Items');
 
 		$this->zbxTestClick('all_items');
 
 		if ($data['status'] == HOST_STATUS_TEMPLATE) {
-			$this->assertFalse($this->query('button:Execute now')->one()->isEnabled());
-			$this->assertFalse($this->query('button:Clear history')->one()->isEnabled());
+			$this->assertFalse($this->query('button:Execute now')->exists());
+			$this->assertFalse($this->query('button:Clear history and trends')->exists());
 		}
 		else {
 			$this->zbxTestClickButtonText('Execute now');
@@ -123,8 +149,8 @@ class testPageItems extends CLegacyWebTest {
 						['Host for triggers filtering' => 'Inheritance item for triggers filtering'],
 						['Host for triggers filtering' => 'Item for triggers filtering'],
 						['Host for trigger tags filtering' => 'Trapper'],
-						['ЗАББИКС Сервер' => 'Zabbix server: Utilization of snmp trapper data collector processes, in %'],
-						['ЗАББИКС Сервер' => 'Zabbix server: Utilization of trapper data collector processes, in %']
+						['ЗАББИКС Сервер' => 'Utilization of snmp trapper data collector processes, in %'],
+						['ЗАББИКС Сервер' => 'Utilization of trapper data collector processes, in %']
 					],
 					'not_displayed' => [
 						'Host' => 'Test Item Template',
@@ -175,7 +201,19 @@ class testPageItems extends CLegacyWebTest {
 						['Host for triggers filtering' => 'Discovered item one'],
 						['Host for triggers filtering' => 'Inheritance item for triggers filtering'],
 						['Host for triggers filtering' => 'Item for triggers filtering'],
+						['Host for trigger tags filtering' => 'Multiple spaces in item name'],
 						['Host for trigger tags filtering' => 'Trapper']
+					]
+				]
+			],
+			// Multiple spaces in Name field.
+			[
+				[
+					'filter_options' => [
+						'Name' => '   '
+					],
+					'result' => [
+						['Host for trigger tags filtering' => 'Multiple spaces in item name']
 					]
 				]
 			]
@@ -186,12 +224,13 @@ class testPageItems extends CLegacyWebTest {
 	 * @dataProvider getHostAndGroupData
 	 */
 	public function testPageItems_FilterHostAndGroupsFilter($data) {
-		$this->page->login()->open('items.php?filter_set=1&filter_hostids%5B0%5D=99062&context=host');
+		$this->page->login()->open('zabbix.php?action=item.list&context=host&filter_set=1&filter_hostids[0]=99062');
 		$form = $this->query('name:zbx_filter')->asForm()->one();
 
 		// Item create button enabled and breadcrumbs exist.
 		$this->assertTrue($this->query('button:Create item')->one()->isEnabled());
 		$this->assertFalse($this->query('class:breadcrumbs')->all()->isEmpty());
+
 		// Clear hosts in filter fields.
 		if (!array_key_exists('Hosts', $data['filter_options'])) {
 			$form->getField('Hosts')->asMultiselect()->clear();
@@ -204,21 +243,52 @@ class testPageItems extends CLegacyWebTest {
 		// Item create button disabled and breadcrumbs not exist.
 		$this->assertFalse($this->query('button:Create item (select host first)')->one()->isEnabled());
 		$this->assertTrue($this->query('class:filter-breadcrumb')->all()->isEmpty());
+
 		// Check results in table.
-		$table = $this->query('name:items')->one()->query('class:list-table')->asTable()->one();
+		$table = $this->query('name:item_list')->one()->query('class:list-table')->asTable()->one();
 		foreach ($table->getRows() as $i => $row) {
-			$get_host = $row->getColumn('Name')->query('xpath:./a[not(@class)]')->one()->getText();
-			$get_group = $row->getColumn('Host')->getText();
 			foreach ($data['result'][$i] as $group => $host) {
+				$get_host = $row->getColumn('Name')->query('link:'.$host)->one()->getText();
+				$get_group = $row->getColumn('Host')->getText();
 				$this->assertEquals($host, $get_host);
 				$this->assertEquals($group, $get_group);
 			}
 		}
+
 		if (array_key_exists('not_displayed', $data)) {
 			foreach ($data['not_displayed'] as $column => $value) {
 				$this->assertNotContains($value, $table->getCells($column));
 			}
 		}
+
 		$this->assertEquals(count($data['result']), $table->getRows()->count());
+	}
+
+	/**
+	 * @dataProvider data
+	 */
+	public function testPageItems_Delete($data) {
+		$context = ($data['status'] == HOST_STATUS_TEMPLATE) ? 'template' : 'host';
+		$this->page->login()->open('zabbix.php?action=item.list&context='.$context.'&filter_set=1&filter_hostids[0]='.
+				$data['hostid']
+		)->waitUntilReady();
+
+		$table_rows_count = $this->query('class:list-table')->asTable()->one()->getRows()->count();
+		$this->assertTableStats($table_rows_count);
+		$delete_button = $this->query('button:Delete')->one();
+
+		// Cancel delete.
+		$this->query('id:all_items')->asCheckbox()->one()->check();
+		$delete_button->click();
+		$this->page->dismissAlert();
+		$this->assertTableStats($table_rows_count);
+		$this->assertSelectedCount($table_rows_count);
+
+		// Delete all.
+		$delete_button->click();
+		$this->page->acceptAlert();
+		$this->assertMessage(TEST_GOOD, 'Item deleted');
+		$this->assertTableStats(0);
+		$this->assertSelectedCount(0);
 	}
 }

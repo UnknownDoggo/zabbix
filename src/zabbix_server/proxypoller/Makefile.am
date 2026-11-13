@@ -6,3 +6,7 @@ libzbxproxypoller_a_SOURCES = \
 	proxypoller.c \
 	proxypoller.h
 
+libzbxproxypoller_a_CFLAGS = \
+	-I$(top_srcdir)/src/zabbix_server \
+	$(TLS_CFLAGS) \
+	$(ARES_CFLAGS)

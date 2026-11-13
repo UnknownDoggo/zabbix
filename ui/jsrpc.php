@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -50,6 +45,10 @@ if (!is_array($data) || !isset($data['method'])
 	fatal_error('Wrong RPC call to JS RPC!');
 }
 
+if (!CJsRpcInputValidator::validate($data)) {
+	fatal_error('Wrong RPC call to JS RPC!');
+}
+
 $result = [];
 $limit = CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT);
 
@@ -65,11 +64,17 @@ switch ($data['method']) {
 		break;
 
 	case 'zabbix.status':
-		if (!CSessionHelper::has('serverCheckResult')
-				|| (CSessionHelper::get('serverCheckTime') + SERVER_CHECK_INTERVAL) <= time()) {
+		global $ZBX_SERVER, $ZBX_SERVER_PORT;
+
+		$now = time();
+		$check_time = CSessionHelper::get('serverCheckTime') ?? 0;
+
+		if ($check_time + SERVER_CHECK_INTERVAL <= $now || $now < $check_time) {
+			$status = true;
+			$error_code = 0;
 
 			if ($ZBX_SERVER === null && $ZBX_SERVER_PORT === null) {
-				$is_running = false;
+				$status = false;
 			}
 			else {
 				$zabbix_server = new CZabbixServer($ZBX_SERVER, $ZBX_SERVER_PORT,
@@ -77,18 +82,29 @@ switch ($data['method']) {
 					timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::SOCKET_TIMEOUT)), 0
 				);
 
-				$is_running = $zabbix_server->isRunning(CSessionHelper::getId());
+				if (!$zabbix_server->isRunning() && !$zabbix_server->canConnect(CSessionHelper::getId())) {
+					$status = false;
+					$error_code = $zabbix_server->getErrorCode();
+				}
 			}
 
-			CSessionHelper::set('serverCheckResult', $is_running);
-			CSessionHelper::set('serverCheckTime', time());
+			CSessionHelper::set('serverCheckResult', $status);
+			CSessionHelper::set('serverCheckResultErrorCode', $error_code);
+			CSessionHelper::set('serverCheckTime', $now);
+		}
+
+		$server_status = CSessionHelper::get('serverCheckResult');
+		$message = '';
+
+		if ($server_status === false) {
+			$message = (CSessionHelper::get('serverCheckResultErrorCode') === CZabbixServer::ERROR_CODE_TLS)
+				? _('Unable to connect to the Zabbix server due to TLS settings. Some functions are unavailable.')
+				: _('Zabbix server is not running: the information displayed may not be current.');
 		}
 
 		$result = [
-			'result' => (bool) CSessionHelper::get('serverCheckResult'),
-			'message' => CSessionHelper::get('serverCheckResult')
-				? ''
-				: _('Zabbix server is not running: the information displayed may not be current.')
+			'result' => $server_status,
+			'message' => $message
 		];
 		break;
 
@@ -129,8 +145,7 @@ switch ($data['method']) {
 		break;
 
 	/**
-	 * Create multi select data.
-	 * Supported objects: "hosts", "hostGroup", "templates", "triggers"
+	 * Create multiselect data.
 	 *
 	 * @param string $data['object_name']
 	 * @param string $data['search']
@@ -141,42 +156,31 @@ switch ($data['method']) {
 	case 'multiselect.get':
 		switch ($data['object_name']) {
 			case 'hostGroup':
-				$options = [
+				$db_groups = API::HostGroup()->get([
 					'output' => ['groupid', 'name'],
 					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
 					'filter' => array_key_exists('filter', $data) ? $data['filter'] : null,
-					'real_hosts' => array_key_exists('real_hosts', $data) ? $data['real_hosts'] : null,
-					'with_items' => array_key_exists('with_items', $data) ? $data['with_items'] : null,
-					'with_httptests' => array_key_exists('with_httptests', $data) ? $data['with_httptests'] : null,
-					'with_hosts_and_templates' => array_key_exists('with_hosts_and_templates', $data)
-						? $data['with_hosts_and_templates']
-						: null,
-					'with_monitored_triggers' => array_key_exists('with_monitored_triggers', $data)
-						? $data['with_monitored_triggers']
-						: null,
-					'with_triggers' => array_key_exists('with_triggers', $data) ? $data['with_triggers'] : null,
-					'templated_hosts' => array_key_exists('templated_hosts', $data) ? $data['templated_hosts'] : null,
-					'editable' => array_key_exists('editable', $data) ? $data['editable'] : false,
+					'with_hosts' => array_key_exists('with_hosts', $data),
+					'with_items' => array_key_exists('with_items', $data),
+					'with_httptests' => array_key_exists('with_httptests', $data),
+					'with_monitored_triggers' => array_key_exists('with_monitored_triggers', $data),
+					'with_triggers' => array_key_exists('with_triggers', $data),
+					'editable' => array_key_exists('editable', $data),
 					'limit' => array_key_exists('limit', $data) ? $data['limit'] : null,
 					'preservekeys' => true
-				];
-				$hostGroups = API::HostGroup()->get($options);
+				]);
 
-				if ($hostGroups) {
-					if (array_key_exists('enrich_parent_groups', $data)) {
-						$hostGroups = enrichParentGroups($hostGroups);
-					}
-
-					CArrayHelper::sort($hostGroups, [
-						['field' => 'name', 'order' => ZBX_SORT_UP]
-					]);
-
-					if (isset($data['limit'])) {
-						$hostGroups = array_slice($hostGroups, 0, $data['limit']);
-					}
-
-					$result = CArrayHelper::renameObjectsKeys($hostGroups, ['groupid' => 'id']);
+				if (array_key_exists('enrich_parent_groups', $data)) {
+					$db_groups = enrichParentGroups($db_groups);
 				}
+
+				CArrayHelper::sort($db_groups, [['field' => 'name', 'order' => ZBX_SORT_UP]]);
+
+				if (array_key_exists('limit', $data)) {
+					$db_groups = array_slice($db_groups, 0, $data['limit']);
+				}
+
+				$result = CArrayHelper::renameObjectsKeys($db_groups, ['groupid' => 'id']);
 				break;
 
 			case 'host_templates':
@@ -188,6 +192,7 @@ switch ($data['method']) {
 					'with_httptests' => array_key_exists('with_httptests', $data) ? $data['with_httptests'] : null,
 					'with_triggers' => array_key_exists('with_triggers', $data) ? $data['with_triggers'] : null,
 					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'filter' => array_key_exists('filter', $data) ? $data['filter'] : null,
 					'editable' => array_key_exists('editable', $data) ? $data['editable'] : false,
 					'limit' => $limit
 				];
@@ -227,24 +232,33 @@ switch ($data['method']) {
 			case 'items':
 			case 'item_prototypes':
 				$options = [
-					'output' => ['itemid', 'name'],
+					'output' => ['itemid'],
 					'selectHosts' => ['name'],
 					'hostids' => array_key_exists('hostid', $data) ? $data['hostid'] : null,
 					'templated' => array_key_exists('real_hosts', $data) ? false : null,
-					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
 					'filter' => array_key_exists('filter', $data) ? $data['filter'] : null,
 					'limit' => $limit
 				];
 
 				if ($data['object_name'] === 'item_prototypes') {
+					$options['output'][] = 'name';
+					$options['search'] = array_key_exists('search', $data) ? ['name' => $data['search']] : null;
+
 					$records = API::ItemPrototype()->get($options);
 				}
 				else {
-					if (array_key_exists('webitems', $data)) {
-						$options['webitems'] = $data['webitems'];
-					}
+					$resolve_macros = array_key_exists('resolve_macros', $data) && $data['resolve_macros'];
+					$name_field = $resolve_macros ? 'name_resolved' : 'name';
+
+					$options['output'][] = $name_field;
+					$options['search'] = array_key_exists('search', $data) ? [$name_field => $data['search']] : null;
+					$options['webitems'] = true;
 
 					$records = API::Item()->get($options);
+
+					if ($resolve_macros) {
+						$records = CArrayHelper::renameObjectsKeys($records, ['name_resolved' => 'name']);
+					}
 				}
 
 				if ($records) {
@@ -278,6 +292,7 @@ switch ($data['method']) {
 
 				if ($data['object_name'] === 'graph_prototypes') {
 					$options['selectDiscoveryRule'] = ['hostid'];
+					$options['selectDiscoveryRulePrototype'] = ['hostid'];
 
 					$records = API::GraphPrototype()->get($options);
 				}
@@ -297,7 +312,8 @@ switch ($data['method']) {
 					}
 					else {
 						$host_names = array_column($record['hosts'], 'name', 'hostid');
-						$host_name = $host_names[$record['discoveryRule']['hostid']];
+						$parent_lld = $record['discoveryRule'] ?: $record['discoveryRulePrototype'];
+						$host_name = $host_names[$parent_lld['hostid']];
 					}
 
 					$result[] = [
@@ -329,21 +345,67 @@ switch ($data['method']) {
 				}
 				break;
 
+			case 'templateGroup':
+				$db_groups = API::TemplateGroup()->get([
+					'output' => ['groupid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'filter' => array_key_exists('filter', $data) ? $data['filter'] : null,
+					'with_templates' => array_key_exists('with_templates', $data),
+					'with_items' => array_key_exists('with_items', $data),
+					'with_httptests' => array_key_exists('with_httptests', $data),
+					'with_triggers' => array_key_exists('with_triggers', $data),
+					'editable' => array_key_exists('editable', $data),
+					'limit' => array_key_exists('limit', $data) ? $data['limit'] : null,
+					'preservekeys' => true
+				]);
+
+				if (array_key_exists('enrich_parent_groups', $data)) {
+					$db_groups = enrichParentTemplateGroups($db_groups);
+				}
+
+				CArrayHelper::sort($db_groups, [['field' => 'name', 'order' => ZBX_SORT_UP]]);
+
+				if (array_key_exists('limit', $data)) {
+					$db_groups = array_slice($db_groups, 0, $data['limit']);
+				}
+
+				$result = CArrayHelper::renameObjectsKeys($db_groups, ['groupid' => 'id']);
+				break;
+
 			case 'proxies':
 				$proxies = API::Proxy()->get([
-					'output' => ['proxyid', 'host'],
-					'search' => array_key_exists('search', $data) ? ['host' => $data['search']] : null,
+					'output' => ['proxyid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'proxy_groupids' => array_key_exists('without_proxy_group', $data) ? 0 : null,
 					'limit' => $limit
 				]);
 
 				if ($proxies) {
-					CArrayHelper::sort($proxies, ['host']);
+					CArrayHelper::sort($proxies, ['name']);
 
 					if (isset($data['limit'])) {
 						$proxies = array_slice($proxies, 0, $data['limit']);
 					}
 
-					$result = CArrayHelper::renameObjectsKeys($proxies, ['proxyid' => 'id', 'host' => 'name']);
+					$result = CArrayHelper::renameObjectsKeys($proxies, ['proxyid' => 'id']);
+				}
+				break;
+
+			case 'proxy_groups':
+				$db_proxy_groups = API::ProxyGroup()->get([
+					'output' => ['proxy_groupid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'limit' => $limit
+				]);
+
+				if ($db_proxy_groups) {
+					CArrayHelper::sort($db_proxy_groups, ['name']);
+
+					if (array_key_exists('limit', $data)) {
+						$db_proxy_groups = array_slice($db_proxy_groups, 0, $data['limit']);
+					}
+
+					$result = CArrayHelper::renameObjectsKeys($db_proxy_groups, ['proxy_groupid' => 'id']);
 				}
 				break;
 
@@ -358,6 +420,7 @@ switch ($data['method']) {
 					'selectHosts' => $host_fields,
 					'editable' => isset($data['editable']) ? $data['editable'] : false,
 					'monitored' => isset($data['monitored']) ? $data['monitored'] : null,
+					'templated' => array_key_exists('templated', $data) ? $data['templated'] : null,
 					'search' => isset($data['search']) ? ['description' => $data['search']] : null,
 					'limit' => $limit
 				]);
@@ -402,7 +465,7 @@ switch ($data['method']) {
 				break;
 
 			case 'users':
-				$users = API::User()->get([
+				$options = [
 					'output' => ['userid', 'username', 'name', 'surname'],
 					'search' => array_key_exists('search', $data)
 						? [
@@ -413,7 +476,30 @@ switch ($data['method']) {
 						: null,
 					'searchByAny' => true,
 					'limit' => $limit
-				]);
+				];
+
+				if (array_key_exists('exclude_provisioned', $data) && $data['exclude_provisioned']) {
+					$options['filter']['userdirectoryid'] = 0;
+				}
+
+				if (array_key_exists('has_devices_access', $data) && $data['has_devices_access']) {
+					$roles = API::Role()->get([
+						'output' => ['roleid'],
+						'selectRules' => [CRoleHelper::DEVICES_ACCESS]
+					]);
+
+					$roles = array_filter($roles, static fn($role) =>
+						$role['rules'][CRoleHelper::DEVICES_ACCESS] == 1
+					);
+
+					$options['filter']['roleid'] = array_column($roles, 'roleid');
+				}
+
+				$users = API::User()->get($options);
+
+				if (array_key_exists('context', $data) && stripos('system', $data['search']) !== false) {
+					$users[] = ['userid' => '0', 'username' => 'System', 'name' => '', 'surname' => ''];
+				}
 
 				if ($users) {
 					CArrayHelper::sort($users, [
@@ -434,11 +520,17 @@ switch ($data['method']) {
 				break;
 
 			case 'usersGroups':
-				$groups = API::UserGroup()->get([
+				$options = [
 					'output' => ['usrgrpid', 'name'],
 					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
 					'limit' => $limit
-				]);
+				];
+
+				if (array_key_exists('group_status', $data)) {
+					$options['status'] = $data['group_status'];
+				}
+
+				$groups = API::UserGroup()->get($options);
 
 				if ($groups) {
 					CArrayHelper::sort($groups, [
@@ -454,10 +546,16 @@ switch ($data['method']) {
 				break;
 
 			case 'drules':
+				$filter = [];
+
+				if (array_key_exists('enabled_only', $data) && $data['enabled_only']) {
+					$filter['status'] = DRULE_STATUS_ACTIVE;
+				}
+
 				$drules = API::DRule()->get([
 					'output' => ['druleid', 'name'],
 					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
-					'filter' => ['status' => DRULE_STATUS_ACTIVE],
+					'filter' => $filter,
 					'limit' => $limit
 				]);
 
@@ -508,10 +606,6 @@ switch ($data['method']) {
 				break;
 
 			case 'valuemap_names':
-				if (!array_key_exists('hostids', $data) || !array_key_exists('context', $data)) {
-					break;
-				}
-
 				$hostids = $data['hostids'];
 
 				if (array_key_exists('with_inherited', $data)) {
@@ -530,37 +624,17 @@ switch ($data['method']) {
 				break;
 
 			case 'valuemaps':
-				if (!array_key_exists('hostids', $data) || !array_key_exists('context', $data)) {
+			case 'template_valuemaps':
+				if (!array_key_exists('hostids', $data)) {
 					break;
 				}
 
-				if ($data['context'] === 'host') {
-					$hosts = API::Host()->get([
-						'output' => ['name'],
-						'hostids' => $data['hostids'],
-						'preservekeys' => true
-					]);
-				}
-				else {
-					$hosts = API::Template()->get([
-						'output' => ['name'],
-						'templateids' => $data['hostids'],
-						'preservekeys' => true
-					]);
-				}
-
 				$valuemaps = API::ValueMap()->get([
-					'output' => ['valuemapid', 'name', 'hostid'],
+					'output' => ['valuemapid', 'name'],
 					'hostids' => $data['hostids'],
-					'search' => ['name' => $data['search'] ? $data['search'] : null],
+					'search' => ['name' => $data['search'] ?: null],
 					'limit' => $limit
 				]);
-
-				foreach ($valuemaps as &$valuemap) {
-					$valuemap['prefix'] = $hosts[$valuemap['hostid']]['name'].NAME_DELIMITER;
-					unset($valuemap['hostid']);
-				}
-				unset($valuemap);
 
 				$result = CArrayHelper::renameObjectsKeys($valuemaps, ['valuemapid' => 'id']);
 				CArrayHelper::sort($result, ['name']);
@@ -622,20 +696,137 @@ switch ($data['method']) {
 					$result = CArrayHelper::renameObjectsKeys($slas, ['slaid' => 'id']);
 				}
 				break;
+
+			case 'actions':
+				$actions = API::Action()->get([
+					'output' => ['actionid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'searchByAny' => true,
+					'limit' => $limit
+				]);
+
+				if ($actions) {
+					CArrayHelper::sort($actions, [
+						['field' => 'name', 'order' => ZBX_SORT_UP]
+					]);
+
+					if (array_key_exists('limit', $data)) {
+						$actions = array_slice($actions, 0, $data['limit']);
+					}
+
+					foreach ($actions as $action) {
+						$result[] = [
+							'id' => $action['actionid'],
+							'name' => $action['name']
+						];
+					}
+				}
+				break;
+
+			case 'media_types':
+				$media_types = API::MediaType()->get([
+					'output' => ['mediatypeid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'searchByAny' => true,
+					'limit' => $limit
+				]);
+
+				if ($media_types) {
+					CArrayHelper::sort($media_types, [
+						['field' => 'name', 'order' => ZBX_SORT_UP]
+					]);
+
+					if (array_key_exists('limit', $data)) {
+						$media_types = array_slice($media_types, 0, $data['limit']);
+					}
+
+					foreach ($media_types as $media_type) {
+						$result[] = [
+							'id' => $media_type['mediatypeid'],
+							'name' => $media_type['name']
+						];
+					}
+				}
+				break;
+
+			case 'sysmaps':
+				$sysmaps = API::Map()->get([
+					'output' => ['sysmapid', 'name'],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'limit' => $limit
+				]);
+
+				if ($sysmaps) {
+					CArrayHelper::sort($sysmaps, [
+						['field' => 'name', 'order' => ZBX_SORT_UP]
+					]);
+
+					if (array_key_exists('limit', $data)) {
+						$sysmaps = array_slice($sysmaps, 0, $data['limit']);
+					}
+
+					$result = CArrayHelper::renameObjectsKeys($sysmaps, ['sysmapid' => 'id']);
+				}
+				break;
+
+			case 'host_inventory':
+				$inventory_fields = array_column(getHostInventories(true), 'title', 'nr');
+
+				if (array_key_exists('search', $data)) {
+					$inventory_fields = preg_grep('/'.preg_quote($data['search']).'/i', $inventory_fields);
+				}
+
+				foreach (array_slice($inventory_fields, 0, $limit, true) as $nr => $title) {
+					$result[] = ['id' => (string) $nr, 'name' => $title];
+				}
+				break;
+
+			case 'devices':
+				$options = [
+					'output' => ['uuid', 'name'],
+					'filter' => ['status' => ZBX_DEVICE_STATUS_ACTIVATED],
+					'search' => array_key_exists('search', $data) ? ['name' => $data['search']] : null,
+					'limit' => $limit
+				];
+
+				if (array_key_exists('userid', $data)) {
+					$options['userids'] = [$data['userid']];
+				}
+
+				$devices = API::Device()->get($options);
+
+				if ($devices) {
+					CArrayHelper::sort($devices, [
+						['field' => 'name', 'order' => ZBX_SORT_UP]
+					]);
+
+					if (array_key_exists('limit', $data)) {
+						$devices = array_slice($devices, 0, $data['limit']);
+					}
+
+					$result = CArrayHelper::renameObjectsKeys($devices, ['uuid' => 'id']);
+				}
+
+				break;
 		}
 		break;
 
 	case 'patternselect.get':
 		$search = (array_key_exists('search', $data) && $data['search'] !== '') ? $data['search'] : null;
+		$hostids = array_key_exists('hostids', $data) ? $data['hostids'] : null;
+		$items = array_key_exists('items', $data) ? $data['items'] : null;
+		$groupids = array_key_exists('groupids', $data) ? getSubGroups($data['groupids']) : null;
 		$wildcard_enabled = array_key_exists('wildcard_allowed', $data) && strpos($search, '*') !== false;
 
 		switch ($data['object_name']) {
 			case 'hosts':
 				$options = [
 					'output' => ['name'],
+					'groupids' => $groupids,
 					'search' => ['name' => $search.($wildcard_enabled ? '*' : '')],
 					'searchWildcardsEnabled' => $wildcard_enabled,
 					'preservekeys' => true,
+					'sortfield' => 'name',
 					'limit' => $limit
 				];
 
@@ -643,17 +834,59 @@ switch ($data['method']) {
 				break;
 
 			case 'items':
+				if (array_key_exists('host_pattern', $data)) {
+					$host_pattern_multiple = array_key_exists('host_pattern_multiple', $data)
+						&& $data['host_pattern_multiple'] == 1;
+					$host_patterns = $host_pattern_multiple ? $data['host_pattern'] : [$data['host_pattern']];
+					$host_pattern_wildcard_enabled = array_key_exists('host_pattern_wildcard_allowed', $data)
+						&& !in_array('*', $host_patterns, true);
+
+					$hosts = API::Host()->get([
+						'output' => [],
+						'hostids' => $hostids,
+						'groupids' => $groupids,
+						'search' => [
+							'name' => $host_pattern_wildcard_enabled ? $host_patterns : null
+						],
+						'searchWildcardsEnabled' => $host_pattern_wildcard_enabled,
+						'searchByAny' => true,
+						'preservekeys' => true
+					]);
+
+					$hostids = array_keys($hosts);
+				}
+
+				if (array_key_exists('hostid', $data)) {
+					$hostids = $data['hostid'];
+				}
+
+				$resolve_macros = array_key_exists('resolve_macros', $data) && $data['resolve_macros'];
+				$name_field = $resolve_macros ? 'name_resolved' : 'name';
+
 				$options = [
-					'output' => ['name'],
-					'search' => ['name' => $search.($wildcard_enabled ? '*' : '')],
+					'output' => ['itemid', $name_field],
+					'search' => [$name_field => $search.($wildcard_enabled ? '*' : '')],
 					'searchWildcardsEnabled' => $wildcard_enabled,
 					'filter' => array_key_exists('filter', $data) ? $data['filter'] : null,
 					'templated' => array_key_exists('real_hosts', $data) ? false : null,
-					'webitems' => array_key_exists('webitems', $data) ? $data['webitems'] : null,
+					'hostids' => $hostids,
+					'groupids' => $groupids,
+					'webitems' => true,
+					'sortfield' => 'name',
 					'limit' => $limit
 				];
 
+				if ($items) {
+					$options['search'][$name_field] = [...$items, $options['search'][$name_field]];
+					$options['searchWildcardsEnabled'] = true;
+					$options['searchByAny'] = true;
+				}
+
 				$db_result = API::Item()->get($options);
+
+				if ($resolve_macros) {
+					$db_result = CArrayHelper::renameObjectsKeys($db_result, ['name_resolved' => 'name']);
+				}
 				break;
 
 			case 'graphs':
@@ -663,6 +896,7 @@ switch ($data['method']) {
 					'hostids' => array_key_exists('hostid', $data) ? $data['hostid'] : null,
 					'templated' => array_key_exists('real_hosts', $data) ? false : null,
 					'searchWildcardsEnabled' => $wildcard_enabled,
+					'sortfield' => 'name',
 					'limit' => $limit
 				];
 
@@ -676,9 +910,9 @@ switch ($data['method']) {
 		];
 
 		if ($db_result) {
-			$db_result = array_flip(zbx_objectValues($db_result, 'name'));
+			$db_result = array_flip(array_column($db_result, 'name'));
 
-			if (array_key_exists($search, $db_result)) {
+			if ($search !== null && array_key_exists($search, $db_result)) {
 				unset($db_result[$search]);
 			}
 
@@ -695,8 +929,121 @@ switch ($data['method']) {
 		}
 		break;
 
-	default:
-		fatal_error('Wrong RPC call to JS RPC!');
+	case 'item_value_type.get':
+		$result = '';
+
+		if (array_key_exists('itemid', $data) && is_scalar($data['itemid'])) {
+			$items = API::Item()->get([
+				'output' => ['value_type'],
+				'itemids' => $data['itemid'],
+				'webitems' => true
+			]);
+
+			if ($items) {
+				$result = $items[0]['value_type'];
+			}
+		}
+		break;
+
+	case 'item_prototype_value_type.get':
+		$result = '';
+
+		if (array_key_exists('itemid', $data) && is_scalar($data['itemid'])) {
+			$items = API::ItemPrototype()->get([
+				'output' => ['value_type'],
+				'itemids' => $data['itemid'],
+				'webitems' => true
+			]);
+
+			if ($items) {
+				$result = $items[0]['value_type'];
+			}
+		}
+		break;
+
+	case 'get_scripts_by_hosts':
+		$result = [];
+
+		if (array_key_exists('hostid', $data) && is_scalar($data['hostid'])) {
+			$scripts = API::Script()->getScriptsByHosts([
+				'hostid' => $data['hostid'],
+				'scriptid' => $data['scriptid'],
+				'manualinput' => $data['manualinput']
+			]);
+
+			$errors = CMessageHelper::getMessages();
+
+			if ($errors) {
+				$result = [
+					'error' => array_values(array_column($errors, 'message'))
+				];
+			}
+			elseif ($scripts) {
+				$script = $scripts[$data['hostid']][0];
+				$url_validator = new CUrlValidator(['schemes' => CSettingsHelper::getAllowedUriSchemes()]);
+
+				if ($script['type'] == ZBX_SCRIPT_TYPE_URL && !$url_validator->validate($script['url'])) {
+					$result = [
+						'error' => [_s('Provided URL "%1$s" is invalid.', $script['url'])]
+					];
+				}
+				else {
+					$result = $script;
+				}
+			}
+		}
+		break;
+
+	case 'get_scripts_by_events':
+		$result = [];
+
+		if (array_key_exists('eventid', $data) && is_scalar($data['eventid'])) {
+			$scripts = API::Script()->getScriptsByEvents([
+				'eventid' => $data['eventid'],
+				'scriptid' => $data['scriptid'],
+				'manualinput' => $data['manualinput']
+			]);
+
+			$errors = CMessageHelper::getMessages();
+
+			if ($errors) {
+				$result = [
+					'error' => array_values(array_column($errors, 'message'))
+				];
+			}
+			elseif ($scripts) {
+				$script = $scripts[$data['eventid']][0];
+				$url_validator = new CUrlValidator(['schemes' => CSettingsHelper::getAllowedUriSchemes()]);
+
+				if ($script['type'] == ZBX_SCRIPT_TYPE_URL && !$url_validator->validate($script['url'])) {
+					$result = [
+						'error' => [_s('Provided URL "%1$s" is invalid.', $script['url'])]
+					];
+				}
+				else {
+					$result = $script;
+				}
+			}
+		}
+		break;
+
+	case 'link_thresholds.validate':
+		$result = [];
+
+		if (array_key_exists('thresholds', $data)) {
+			$validation_rules = ['type' => API_OBJECTS, 'fields' => [
+				'threshold' => ['type' => API_NUMERIC]
+			]];
+
+			CApiInputValidator::validate($validation_rules, $data['thresholds'], 'thresholds', $error);
+
+			if ($error !== '') {
+				$result = [
+					'error' => $error
+				];
+			}
+		}
+		break;
 }
 
 if ($requestType == PAGE_TYPE_JSON) {

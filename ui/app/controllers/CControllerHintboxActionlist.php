@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -27,7 +22,7 @@ class CControllerHintboxActionlist extends CController {
 	protected $event;
 
 	protected function init(): void {
-		$this->disableSIDvalidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput(): bool {
@@ -40,8 +35,8 @@ class CControllerHintboxActionlist extends CController {
 		if ($ret) {
 			$events = API::Event()->get([
 				'output' => ['eventid', 'r_eventid', 'clock'],
-				'select_acknowledges' => ['userid', 'action', 'message', 'clock', 'new_severity',
-					'old_severity'
+				'selectAcknowledges' => ['userid', 'action', 'message', 'clock', 'new_severity', 'old_severity',
+					'suppress_until', 'maintenanceid', 'details', 'cep_ruleid'
 				],
 				'eventids' => (array) $this->getInput('eventid')
 			]);
@@ -74,6 +69,15 @@ class CControllerHintboxActionlist extends CController {
 
 	protected function doAction(): void {
 		$actions = getEventDetailsActions($this->event);
+		$ceprule_actions = array_filter($actions['actions'], fn (array $action) =>
+			array_key_exists('action_type', $action) && $action['action_type'] == ZBX_EVENT_HISTORY_CEP_UPDATE
+		);
+
+		$ceprules = $ceprule_actions ? API::CepRule()->get([
+			'output' => ['name'],
+			'cep_ruleids' => array_column($ceprule_actions, 'cep_ruleid'),
+			'preservekeys' => true
+		]) : [];
 
 		$users = $actions['userids']
 			? API::User()->get([
@@ -91,10 +95,20 @@ class CControllerHintboxActionlist extends CController {
 			])
 			: [];
 
+		$maintenances = $actions['maintenanceids']
+			? API::Maintenance()->get([
+				'output' => ['name'],
+				'maintenanceids' => array_keys($actions['maintenanceids']),
+				'preservekeys' => true
+			])
+			: [];
+
 		$this->setResponse(new CControllerResponseData([
 			'actions' => $actions['actions'],
 			'users' => $users,
 			'mediatypes' => $mediatypes,
+			'ceprules' => $ceprules,
+			'maintenances' => $maintenances,
 			'foot_note' => ($actions['count'] > ZBX_WIDGET_ROWS)
 				? _s('Displaying %1$s of %2$s found', ZBX_WIDGET_ROWS, $actions['count'])
 				: null

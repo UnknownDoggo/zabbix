@@ -1,4 +1,18 @@
 <?php
+/*
+** Copyright (C) 2001-2026 Zabbix SIA
+**
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
+**
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
+**
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
+**/
+
 
 define('DEFAULT_SRC_FILE', dirname(__FILE__).'/../src/schema.tmpl');
 define('DEFAULT_DEST_FILE', dirname(__FILE__).'/../src/schema.inc.php');
@@ -56,20 +70,24 @@ function parse_schema($path) {
 						break;
 					case 't_text':
 					case 't_longtext':
-						$type = 'DB::FIELD_TYPE_NCLOB';
-						$length = false;
-						break;
-					case 't_shorttext':
 						$type = 'DB::FIELD_TYPE_TEXT';
-						$length = false;
+						$length = 65535;
 						break;
 					case 't_image':
+						$type = 'DB::FIELD_TYPE_BLOB';
+						$length = 2048;
+						break;
+					case 't_bin':
 						$type = 'DB::FIELD_TYPE_BLOB';
 						$length = 2048;
 						break;
 					case 't_cuid':
 						$type = 'DB::FIELD_TYPE_CUID';
 						$length = 25;
+						break;
+					case 't_json':
+						$type = 'DB::FIELD_TYPE_JSON';
+						$length = 128*1048576;
 						break;
 				}
 

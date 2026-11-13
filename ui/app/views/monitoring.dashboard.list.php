@@ -1,40 +1,39 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 /**
  * @var CView $this
+ * @var array $data
  */
+
+$this->includeJsFile('monitoring.dashboard.list.js.php');
 
 if ($data['uncheck']) {
 	uncheckTableRows('dashboard');
 }
+
 $this->addJsFile('layout.mode.js');
 
 $this->enableLayoutModes();
 $web_layout_mode = $this->getLayoutMode();
 
-$widget = (new CWidget())
+$html_page = (new CHtmlPage())
 	->setTitle(_('Dashboards'))
 	->setWebLayoutMode($web_layout_mode)
-	->setDocUrl(CDocHelper::getUrl(CDocHelper::MONITORING_DASHBOARD_LIST))
+	->setDocUrl(CDocHelper::getUrl(CDocHelper::DASHBOARDS_LIST))
 	->setControls(
 		(new CTag('nav', true,
 			(new CList())
@@ -46,13 +45,18 @@ $widget = (new CWidget())
 							->getUrl()
 					))->setEnabled($data['allowed_edit'])
 				)
+				->addItem(
+					(new CSimpleButton(_('Import')))
+						->addClass('js-import')
+						->setEnabled($data['allowed_edit'])
+				)
 				->addItem(get_icon('kioskmode', ['mode' => $web_layout_mode]))
 			)
 		)->setAttribute('aria-label', _('Content controls'))
 	);
 
 if ($web_layout_mode == ZBX_LAYOUT_NORMAL) {
-	$widget
+	$html_page
 		->addItem((new CFilter())
 			->setResetUrl((new CUrl('zabbix.php'))->setArgument('action', 'dashboard.list'))
 			->setProfile($data['profileIdx'])
@@ -85,8 +89,10 @@ $table = (new CTableInfo())
 		make_sorting_header(_('Name'), 'name', $data['sort'], $data['sortorder'],
 			(new CUrl('zabbix.php'))
 				->setArgument('action', 'dashboard.list')
-				->getUrl())
-	]);
+				->getUrl()
+		)->setColSpan(2)
+	])
+	->setPageNavigation($data['paging']);
 
 foreach ($data['dashboards'] as $dashboard) {
 	$tags = [];
@@ -102,31 +108,46 @@ foreach ($data['dashboards'] as $dashboard) {
 	}
 
 	$table->addRow([
-		(new CCheckBox('dashboardids['.$dashboard['dashboardid'].']', $dashboard['dashboardid']))
-			->setEnabled($dashboard['editable']),
-		(new CDiv([
-			new CLink($dashboard['name'],
+		new CCheckBox('dashboardids['.$dashboard['dashboardid'].']', $dashboard['dashboardid']),
+		new CDiv([
+			(new CLink($dashboard['name'],
 				(new CUrl('zabbix.php'))
 					->setArgument('action', 'dashboard.view')
 					->setArgument('dashboardid', $dashboard['dashboardid'])
 					->getUrl()
-			),
-			$tags ? new CDiv($tags) : null
-		]))->addClass(ZBX_STYLE_DASHBOARD_LIST_ITEM)
+			))->addClass(ZBX_STYLE_WORDBREAK)
+		]),
+		(new CCol($tags))->addClass(ZBX_STYLE_LIST_TABLE_ACTIONS)
 	]);
 }
 
 $form->addItem([
 	$table,
-	$data['paging'],
 	new CActionButtonList('action', 'dashboardids', [
+		'dashboard.export' => [
+			'content' => new CButtonExport('export.dashboards',
+				(new CUrl('zabbix.php'))
+					->setArgument('action', 'dashboard.list')
+					->setArgument('page', ($data['page'] == 1) ? null : $data['page'])
+					->getUrl()
+			)
+		],
 		'dashboard.delete' => [
 			'name' => _('Delete'),
-			'confirm' => _('Delete selected dashboards?'),
-			'disabled' => !$data['allowed_edit']
+			'confirm_singular' => _('Delete selected dashboard?'),
+			'confirm_plural' => _('Delete selected dashboards?'),
+			'disabled' => !$data['allowed_edit'],
+			'csrf_token' => CCsrfTokenHelper::get('dashboard')
 		]
 	], 'dashboard')
 ]);
 
-$widget->addItem($form);
-$widget->show();
+$html_page
+	->addItem($form)
+	->show();
+
+(new CScriptTag('
+	view.init('.json_encode(['import_csrf_token' => CCsrfTokenHelper::get('import')]).');
+'))
+	->setOnDocumentReady()
+	->show();

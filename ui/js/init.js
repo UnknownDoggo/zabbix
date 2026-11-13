@@ -1,21 +1,16 @@
 /*
- ** Zabbix
- ** Copyright (C) 2001-2022 Zabbix SIA
- **
- ** This program is free software; you can redistribute it and/or modify
- ** it under the terms of the GNU General Public License as published by
- ** the Free Software Foundation; either version 2 of the License, or
- ** (at your option) any later version.
- **
- ** This program is distributed in the hope that it will be useful,
- ** but WITHOUT ANY WARRANTY; without even the implied warranty of
- ** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- ** GNU General Public License for more details.
- **
- ** You should have received a copy of the GNU General Public License
- ** along with this program; if not, write to the Free Software
- ** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- **/
+** Copyright (C) 2001-2026 Zabbix SIA
+**
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
+**
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
+**
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
+**/
 
 
 /**
@@ -45,11 +40,25 @@ window.ZABBIX = Object.create({
 	/**
 	 * Logs user out, also, handles side effects before that.
 	 */
-	logout: function() {
-		var ls = this.namespace('instances.localStorage');
+	logout: function(csrf_token) {
+		let ls = this.namespace('instances.localStorage');
 		ls && ls.destruct();
 
-		redirect('index.php?reconnect=1', 'post', 'sid', true);
+		redirect(`index.php?reconnect=1&${CSRF_TOKEN_NAME}=${csrf_token}`, 'post', CSRF_TOKEN_NAME, true);
+	}
+});
+
+document.addEventListener('click', e => {
+	const element = e.target;
+
+	if (element.matches('input[type="radio"][readonly], input[type="checkbox"][readonly]')) {
+		e.preventDefault();
+	}
+});
+
+document.addEventListener('mouseover', ({target}) => {
+	if (target.matches('label') && target.scrollWidth > target.clientWidth) {
+		target.title = target.textContent;
 	}
 });
 
@@ -69,7 +78,7 @@ jQuery(function($) {
 	if ($search.length) {
 		createSuggest('search');
 
-		var $search_icon = $search.siblings('.search-icon');
+		var $search_icon = $search.siblings('.js-search');
 
 		$search.on('keyup', function() {
 			$search_icon.prop('disabled', $.trim($search.val()) === '');
@@ -105,19 +114,15 @@ jQuery(function($) {
 		var $this = $(this);
 
 		uncheckedHandler($this);
-		$this.on('change enable disable', function() {
-			uncheckedHandler($(this));
-		});
+		$this.on('change enable disable', function () {
+			uncheckedHandler($(this))
+		})
 	});
 
 	function showMenuPopup($obj, data, event, options) {
 		var sections;
 
 		switch (data.type) {
-			case 'history':
-				sections = getMenuPopupHistory(data);
-				break;
-
 			case 'host':
 				sections = getMenuPopupHost(data, $obj);
 				break;
@@ -154,12 +159,8 @@ jQuery(function($) {
 				sections = getMenuPopupItem(data);
 				break;
 
-			case 'item_configuration':
-				sections = getMenuPopupItemConfiguration(data);
-				break;
-
-			case 'item_prototype_configuration':
-				sections = getMenuPopupItemPrototypeConfiguration(data);
+			case 'item_prototype':
+				sections = getMenuPopupItemPrototype(data);
 				break;
 
 			case 'dropdown':
@@ -168,6 +169,10 @@ jQuery(function($) {
 
 			case 'submenu':
 				sections = getMenuPopupSubmenu(data);
+				break;
+
+			case 'drule':
+				sections = getMenuPopupDRule(data);
 				break;
 
 			default:
@@ -211,7 +216,6 @@ jQuery(function($) {
 			case 'dashboard':
 			case 'dropdown':
 			case 'submenu':
-			case 'widget_actions':
 				return false;
 
 			default:
@@ -251,15 +255,16 @@ jQuery(function($) {
 					my: 'left top',
 					at: 'left bottom',
 					using: (pos, data) => {
-						let max_left = data.horizontal === 'left'
-							? document.querySelector('.wrapper').clientWidth
-							: document.querySelector('.wrapper').clientWidth - data.element.width;
+						const wrapper = document.querySelector('.wrapper');
+						const menu = data.element.element[0];
+						const wrapper_rect = document.querySelector('.wrapper').getBoundingClientRect();
+						const margin_right = Math.max(WRAPPER_PADDING_RIGHT, wrapper_rect.width - wrapper.clientWidth);
+						const max_left = wrapper_rect.right - menu.offsetWidth - margin_right;
 
-						pos.top = Math.max(0, pos.top);
-						pos.left = Math.max(0, Math.min(max_left, pos.left));
+						pos.left = Math.max(wrapper_rect.left, Math.min(max_left, pos.left));
 
-						data.element.element[0].style.top = `${pos.top}px`;
-						data.element.element[0].style.left = `${pos.left}px`;
+						menu.style.left = `${pos.left}px`;
+						menu.style.top = `${pos.top}px`;
 					}
 				};
 		}
@@ -290,6 +295,11 @@ jQuery(function($) {
 		}, data.options || {});
 
 		if (isServerRequestRequired(data.type)) {
+			if (data.type === 'trigger') {
+				// Add additional IDs from checkboxes and pass them to popup menu.
+				data.data.ids = Object.keys(chkbxRange.getSelectedIds());
+			}
+
 			var url = new Curl('zabbix.php');
 
 			url.setArgument('action', 'menu.popup');
@@ -389,6 +399,10 @@ jQuery(function($) {
 		var confirmation = button.attr('data-confirmation');
 
 		if (typeof confirmation === 'undefined' || (typeof confirmation !== 'undefined' && confirm(confirmation))) {
+			if (button.attr('data-post')) {
+				return redirect(button.attr('data-url'), 'post', CSRF_TOKEN_NAME, true);
+			}
+
 			window.location = button.attr('data-url');
 		}
 	});
@@ -396,10 +410,7 @@ jQuery(function($) {
 	// Initialize hintBox event handlers.
 	hintBox.bindEvents();
 
-	// Simulate Safari behaviour when text in a text field with autofocus becomes selected after page has loaded.
-	if (!SF) {
-		$('input[type=text][autofocus=autofocus]').filter(':visible').select();
-	}
+	Focuser.focus(document.querySelector('[autofocus]'));
 
 	/**
 	 * @param {boolean} preserve_state  Preserve current state of the debug button.
@@ -432,9 +443,7 @@ jQuery(function($) {
 		style.sheet.insertRule('.debug-output { display: ' + (visible ? 'block' : 'none') + '; }', 0);
 
 		if (preserve_state !== true) {
-			$.publish('debug.click', {
-				visible: visible
-			});
+			document.dispatchEvent(new CustomEvent('debug.click', {detail: {visible}}));
 		}
 
 		return false;

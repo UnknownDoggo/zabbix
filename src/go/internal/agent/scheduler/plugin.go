@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package scheduler
@@ -22,7 +17,7 @@ package scheduler
 import (
 	"container/heap"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/sdk/plugin"
 )
 
 // pluginAgent manages plugin usage
@@ -36,7 +31,7 @@ type pluginAgent struct {
 	// used plugin capacity
 	usedCapacity int
 	// force active check on first configuration
-	forceActiveChecksOnStart int
+	forceActiveChecksOnStart bool
 	// index in plugin queue
 	index int
 	// refcount us used to track plugin usage by clients
@@ -47,7 +42,7 @@ type pluginAgent struct {
 
 // peekTask() returns next task in the queue without removing it from queue or nil
 // if the queue is empty.
-func (p *pluginAgent) peekTask() performer {
+func (p *pluginAgent) peekTask() Performer {
 	if len(p.tasks) == 0 {
 		return nil
 	}
@@ -56,7 +51,7 @@ func (p *pluginAgent) peekTask() performer {
 
 // popTask() returns next task in the queue and removes it from queue.
 // nil is returned for empty queues.
-func (p *pluginAgent) popTask() performer {
+func (p *pluginAgent) popTask() Performer {
 	if len(p.tasks) == 0 {
 		return nil
 	}
@@ -65,7 +60,7 @@ func (p *pluginAgent) popTask() performer {
 	return task
 }
 
-func (p *pluginAgent) enqueueTask(task performer) {
+func (p *pluginAgent) enqueueTask(task Performer) {
 	heap.Push(&p.tasks, task)
 }
 
@@ -73,11 +68,11 @@ func (p *pluginAgent) removeTask(index int) {
 	heap.Remove(&p.tasks, index)
 }
 
-func (p *pluginAgent) reserveCapacity(task performer) {
+func (p *pluginAgent) reserveCapacity(task Performer) {
 	p.usedCapacity += task.getWeight()
 }
 
-func (p *pluginAgent) releaseCapacity(task performer) {
+func (p *pluginAgent) releaseCapacity(task Performer) {
 	p.usedCapacity -= task.getWeight()
 }
 

@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #include "zbxmocktest.h"
@@ -23,7 +18,7 @@
 #include "zbxmockutil.h"
 #include "zbxmockhelper.h"
 
-#include "common.h"
+#include "zbxcommon.h"
 #include "zbxcomms.h"
 
 void	zbx_mock_test_entry(void **state)
@@ -33,12 +28,14 @@ void	zbx_mock_test_entry(void **state)
 	char		*buffer;
 	zbx_socket_t	s;
 	ssize_t		received;
+	size_t		out_fragments;
 	int		expected_ret, offset = ZBX_TCP_HEADER_DATALEN_LEN;
 
 	ZBX_UNUSED(state);
 
 	zbx_mock_assert_result_eq("zbx_tcp_connect() return code", SUCCEED,
-			zbx_tcp_connect(&s, NULL, "127.0.0.1", 10050, 0, ZBX_TCP_SEC_UNENCRYPTED, NULL, NULL));
+			zbx_tcp_connect(&s, NULL, "127.0.0.1", 10050, 0, ZBX_TCP_SEC_UNENCRYPTED, NULL, NULL,
+			ZBX_DNS_FAILOVER_ENABLED));
 
 	expected_ret = zbx_mock_str_to_return_code(zbx_mock_get_parameter_string("out.return"));
 	received = zbx_tcp_recv_ext(&s, 0, ZBX_TCP_LARGE);
@@ -56,7 +53,8 @@ void	zbx_mock_test_entry(void **state)
 	if (0 == received)
 		return;
 
-	buffer = zbx_yaml_assemble_binary_sequence("out.fragments", received);
+	out_fragments = (size_t)received;
+	buffer = zbx_yaml_assemble_binary_sequence("out.fragments", &out_fragments);
 
 	if (0 != (ZBX_TCP_LARGE & s.protocol))
 		offset += 8;

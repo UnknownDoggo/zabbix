@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -52,6 +47,10 @@ class CXmlConstantName {
 	const SNMP = 'SNMP';
 	const IPMI = 'IPMI';
 	const JMX = 'JMX';
+
+	const SERVER = 'SERVER';
+	const PROXY = 'PROXY';
+	const PROXY_GROUP = 'PROXY_GROUP';
 
 	// const DISABLED = 'DISABLED'; // Duplicate.
 	const MANUAL = 'MANUAL';
@@ -98,6 +97,9 @@ class CXmlConstantName {
 	const MAX = 'MAX';
 	const ALL = 'ALL';
 	const LAST = 'LAST';
+	const COUNT = 'COUNT';
+	const SUM = 'SUM';
+	const PERCENTILE = 'PERCENTILE';
 
 	const SIMPLE = 'SIMPLE';
 	const GRAPH_SUM = 'GRAPH_SUM';
@@ -237,12 +239,27 @@ class CXmlConstantName {
 	const DEPENDENT = 'DEPENDENT';
 	const HTTP_AGENT = 'HTTP_AGENT';
 	const SNMP_AGENT = 'SNMP_AGENT';
+	// const SCRIPT = 'SCRIPT'; // Duplicate.
+	const BROWSER = 'BROWSER';
+	const NESTED = 'NESTED';
+	const TELEMETRY_QUERY = 'TELEMETRY_QUERY';
+
+	const TQ_SIGNAL_TYPE_TRACES = 'TRACES';
+	const TQ_SIGNAL_TYPE_METRICS = 'METRICS';
+	const TQ_SIGNAL_TYPE_LOGS = 'LOGS';
+
+	const TQ_METRICS_POINT_TYPE_SUM = 'SUM';
+	const TQ_METRICS_POINT_TYPE_GAUGE = 'GAUGE';
+	const TQ_METRICS_POINT_TYPE_HISTOGRAM = 'HISTOGRAM';
+	const TQ_METRICS_POINT_TYPE_EXPONENTIAL_HISTOGRAM = 'EXPONENTIAL_HISTOGRAM';
 
 	const FLOAT = 'FLOAT';
 	const CHAR = 'CHAR';
 	const LOG = 'LOG';
 	const UNSIGNED = 'UNSIGNED';
 	const TEXT = 'TEXT';
+	const BINARY = 'BINARY';
+	// const JSON = 'JSON'; // Duplicate.
 
 	const ORIGINAL_ERROR = 'ORIGINAL_ERROR';
 	const DISCARD_VALUE = 'DISCARD_VALUE';
@@ -278,6 +295,9 @@ class CXmlConstantName {
 	const CSV_TO_JSON = 'CSV_TO_JSON';
 	const STR_REPLACE = 'STR_REPLACE';
 	const XML_TO_JSON = 'XML_TO_JSON';
+	const SNMP_WALK_VALUE = 'SNMP_WALK_VALUE';
+	const SNMP_WALK_TO_JSON = 'SNMP_WALK_TO_JSON';
+	const SNMP_GET_VALUE = 'SNMP_GET_VALUE';
 
 	const AND_OR = 'AND_OR';
 	const XML_AND = 'AND';
@@ -291,6 +311,13 @@ class CXmlConstantName {
 	const SCRIPT = 'SCRIPT';
 	const SMS = 'SMS';
 	const WEBHOOK = 'WEBHOOK';
+	const PUSH = 'PUSH';
+
+	const GENERIC_SMTP = 'GENERIC_SMTP';
+	const GMAIL = 'GMAIL';
+	const GMAIL_RELAY = 'GMAIL_RELAY';
+	const OFFICE365 = 'OFFICE365';
+	const OFFICE365_RELAY = 'OFFICE365_RELAY';
 
 	// const NONE = 'NONE'; // Duplicate.
 	const STARTTLS = 'STARTTLS';
@@ -298,9 +325,10 @@ class CXmlConstantName {
 
 	const SMTP_AUTHENTICATION_NONE = 'NONE';
 	const SMTP_AUTHENTICATION_PASSWORD = 'PASSWORD';
+	const SMTP_AUTHENTICATION_OAUTH = 'OAUTH';
 
-	const CONTENT_TYPE_TEXT = 'TEXT'; // Duplicate.
-	const CONTENT_TYPE_HTML = 'HTML';
+	const MESSAGE_FORMAT_TEXT = 'TEXT'; // Duplicate.
+	const MESSAGE_FORMAT_HTML = 'HTML';
 
 	const TRIGGERS = 'TRIGGERS';
 	const DISCOVERY = 'DISCOVERY';
@@ -316,6 +344,19 @@ class CXmlConstantName {
 	const MACRO_TYPE_SECRET = 'SECRET_TEXT';
 	const MACRO_TYPE_VAULT = 'VAULT';
 
+	const MACRO_CONFIG_TYPE_NOCONF = 'NOCONF';
+	const MACRO_CONFIG_TYPE_TEXT = 'TEXT';
+	const MACRO_CONFIG_TYPE_LIST = 'LIST';
+	const MACRO_CONFIG_TYPE_CHECKBOX = 'CHECKBOX';
+
+	// Constants for low-level discovery rules.
+	const LLD_DELETE_AFTER = 'DELETE_AFTER';
+	const LLD_DELETE_NEVER = 'DELETE_NEVER';
+	const LLD_DELETE_IMMEDIATELY = 'DELETE_IMMEDIATELY';
+	const LLD_DISABLE_AFTER = 'DISABLE_AFTER';
+	const LLD_DISABLE_NEVER = 'DISABLE_NEVER';
+	const LLD_DISABLE_IMMEDIATELY = 'DISABLE_IMMEDIATELY';
+
 	// Constants for low-level discovery rule overrides.
 	const LLD_OVERRIDE_STOP_NO = 'NO_STOP';
 	const LLD_OVERRIDE_STOP_YES = 'STOP';
@@ -323,12 +364,16 @@ class CXmlConstantName {
 	const LLD_OVERRIDE_OPERATION_OBJECT_TRIGGER_PROTOTYPE = 'TRIGGER_PROTOTYPE';
 	const LLD_OVERRIDE_OPERATION_OBJECT_GRAPH_PROTOTYPE = 'GRAPH_PROTOTYPE';
 	const LLD_OVERRIDE_OPERATION_OBJECT_HOST_PROTOTYPE = 'HOST_PROTOTYPE';
+	const LLD_OVERRIDE_OPERATION_OBJECT_LLD_RULE_PROTOTYPE = 'LLD_RULE_PROTOTYPE';
 	const CONDITION_OPERATOR_EQUAL = 'EQUAL';
 	const CONDITION_OPERATOR_NOT_EQUAL = 'NOT_EQUAL';
 	const CONDITION_OPERATOR_LIKE = 'LIKE';
 	const CONDITION_OPERATOR_NOT_LIKE = 'NOT_LIKE';
 	const CONDITION_OPERATOR_REGEXP = 'REGEXP';
 	const CONDITION_OPERATOR_NOT_REGEXP = 'NOT_REGEXP';
+	const CONDITION_OPERATOR_EXISTS = 'EXISTS';
+	const CONDITION_OPERATOR_GREATER_EQUAL = 'GREATER_OR_EQUAL';
+	const CONDITION_OPERATOR_LESS_EQUAL = 'LESS_OR_EQUAL';
 	const DISCOVER = 'DISCOVER';
 	const NO_DISCOVER = 'NO_DISCOVER';
 
@@ -343,11 +388,18 @@ class CXmlConstantName {
 	// Constants for widget field types.
 	const DASHBOARD_WIDGET_FIELD_TYPE_INTEGER = 'INTEGER';
 	const DASHBOARD_WIDGET_FIELD_TYPE_STRING = 'STRING';
+	const DASHBOARD_WIDGET_FIELD_TYPE_GROUP = 'GROUP';
 	const DASHBOARD_WIDGET_FIELD_TYPE_HOST = 'HOST';
 	const DASHBOARD_WIDGET_FIELD_TYPE_ITEM = 'ITEM';
 	const DASHBOARD_WIDGET_FIELD_TYPE_ITEM_PROTOTYPE = 'ITEM_PROTOTYPE';
 	const DASHBOARD_WIDGET_FIELD_TYPE_GRAPH = 'GRAPH';
 	const DASHBOARD_WIDGET_FIELD_TYPE_GRAPH_PROTOTYPE = 'GRAPH_PROTOTYPE';
+	const DASHBOARD_WIDGET_FIELD_TYPE_MAP = 'MAP';
+	const DASHBOARD_WIDGET_FIELD_TYPE_SERVICE = 'SERVICE';
+	const DASHBOARD_WIDGET_FIELD_TYPE_SLA = 'SLA';
+	const DASHBOARD_WIDGET_FIELD_TYPE_USER = 'USER';
+	const DASHBOARD_WIDGET_FIELD_TYPE_ACTION = 'ACTION';
+	const DASHBOARD_WIDGET_FIELD_TYPE_MEDIA_TYPE = 'MEDIA_TYPE';
 
 	// Constants for value map mapping type.
 	const MAPPING_EQUAL = 'EQUAL';
@@ -356,4 +408,25 @@ class CXmlConstantName {
 	const MAPPING_IN_RANGE = 'IN_RANGE';
 	const MAPPING_REGEXP = 'REGEXP';
 	const MAPPING_DEFAULT = 'DEFAULT';
+
+	// Constants for map background scale.
+	public const MAP_BACKGROUND_SCALE_NONE = 'NONE';
+	public const MAP_BACKGROUND_SCALE_COVER = 'PROPORTIONALLY';
+
+	// Constants for map element label appearance.
+	public const SHOW_LABEL_DEFAULT = 'DEFAULT';
+	public const SHOW_LABEL_AUTO_HIDE = 'AUTO_HIDE';
+	public const SHOW_LABEL_ALWAYS = 'ALWAYS';
+
+	// Constants for map link indicators.
+	public const INDICATOR_TYPE_STATIC_LINK = 'STATIC_LINK';
+	public const INDICATOR_TYPE_TRIGGER = 'TRIGGER';
+	public const INDICATOR_TYPE_ITEM_VALUE = 'ITEM_VALUE';
+
+	// Regular expression types.
+	public const REGEX_TYPE_CONTAINS_STRING = 'CONTAINS_STRING';
+	public const REGEX_TYPE_CONTAINS_ANY_SUBSTRING = 'CONTAINS_ANY_SUBSTRING';
+	public const REGEX_TYPE_NOT_CONTAINS_STRING = 'NOT_CONTAINS_STRING';
+	public const REGEX_TYPE_MATCHES_REGEX = 'MATCHES_REGEX';
+	public const REGEX_TYPE_NOT_MATCHES_REGEX = 'NOT_MATCHES_REGEX';
 }

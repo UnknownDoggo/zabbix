@@ -1,27 +1,29 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CJsonRpc {
 
 	const VERSION = '2.0';
+
+	public const AUTH_TYPE_BEARER = 2;
+	public const AUTH_TYPE_COOKIE = 3;
+	public const AUTH_TYPE_DPOP = 4;
+
+	public const HEADER_AUTHENTICATE_BEARER = 'Bearer';
+	public const HEADER_AUTHENTICATE_DPOP = 'DPoP';
 
 	/**
 	 * API client to use for making requests.
@@ -42,7 +44,10 @@ class CJsonRpc {
 	 * @param string $data
 	 */
 	public function __construct(CApiClient $apiClient, $data) {
+		global $NO_AUTH_DEBUG_MODE;
+
 		$this->apiClient = $apiClient;
+		$this->apiClient->debug = $NO_AUTH_DEBUG_MODE;
 
 		$this->initErrors();
 
@@ -50,44 +55,147 @@ class CJsonRpc {
 		$this->_jsonDecoded = json_decode($data, true);
 	}
 
-	/**
-	 * Executes API requests.
-	 *
-	 * @return string JSON encoded value
-	 */
-	public function execute() {
+	public function execute(CHttpRequest $request): CHttpResponse {
 		if (json_last_error()) {
 			$this->jsonError([], '-32700', null, null, true);
-			return json_encode($this->_response[0], JSON_UNESCAPED_SLASHES);
+			return new CHttpResponse(json_encode($this->_response[0], JSON_UNESCAPED_SLASHES));
 		}
 
 		if (!is_array($this->_jsonDecoded) || $this->_jsonDecoded === []) {
 			$this->jsonError([], '-32600', null, null, true);
-			return json_encode($this->_response[0], JSON_UNESCAPED_SLASHES);
+			return new CHttpResponse(json_encode($this->_response[0], JSON_UNESCAPED_SLASHES));
 		}
+
+		$auth_header = $request->getParsedAuthHeader();
+
+		if ($auth_header['type'] !== null && strcasecmp($auth_header['type'], self::HEADER_AUTHENTICATE_BEARER) == 0) {
+			$auth['type'] = self::AUTH_TYPE_BEARER;
+			$auth['auth'] = $auth_header['auth'];
+		}
+		elseif ($auth_header['type'] !== null
+				&& strcasecmp($auth_header['type'], self::HEADER_AUTHENTICATE_DPOP) == 0) {
+			$auth['type'] = self::AUTH_TYPE_DPOP;
+			$auth['auth'] = $auth_header['auth'];
+			$auth['sign'] = (string) $request->header(self::HEADER_AUTHENTICATE_DPOP);
+		}
+		else {
+			$session = new CEncryptedCookieSession();
+
+			$auth['type'] = self::AUTH_TYPE_COOKIE;
+			$auth['auth'] = $session->extractSessionId();
+		}
+
+		$no_auth_calls = [];
+		$auth_calls = [];
+		$api_method_names = [];
 
 		foreach (zbx_toArray($this->_jsonDecoded) as $call) {
 			if (!$this->validate($call)) {
 				continue;
 			}
 
-			list($api, $method) = explode('.', $call['method']) + [1 => ''];
-			$result = $this->apiClient->callMethod($api, $method, $call['params'], $call['auth']);
+			$api_method_names[] = $call['method'];
 
-			$this->processResult($call, $result);
+			[$request_api, $request_method] = explode('.', $call['method']) + [1 => ''];
+
+			$api = strtolower($request_api);
+			$method = strtolower($request_method);
+
+			if (!$this->apiClient->isValidApi($api)) {
+				$this->jsonError($call, '-32601', _s('Incorrect API "%1$s".', $request_api));
+
+				continue;
+			}
+
+			if (!$this->apiClient->isValidMethod($api, $method)) {
+				$this->jsonError($call, '-32601', _s('Incorrect method "%1$s.%2$s".', $request_api, $request_method));
+
+				continue;
+			}
+
+			if ($auth['type'] != CJsonRpc::AUTH_TYPE_COOKIE
+					&& !$this->apiClient->requiresAuthentication($api, $method)
+					&& !$this->apiClient->supportsAuthentication($api, $method)) {
+				$this->jsonError($call, '-32602',
+					_s('The "%1$s.%2$s" method must be called without authorization header.', $request_api,
+						$request_method
+					)
+				);
+
+				continue;
+			}
+
+			$call = [
+				'api' => $request_api,
+				'method' => $request_method
+			] + array_intersect_key($call, array_flip(['params', 'id']));
+
+			if ($this->apiClient->requiresAuthentication($api, $method)) {
+				$auth_calls[] = $call;
+			}
+			else {
+				$no_auth_calls[] = $call;
+			}
+		}
+
+		$auth_response = $auth_calls || $auth['auth'] !== null
+			? $this->apiClient->authenticate($auth, implode(',', $api_method_names))
+			: null;
+
+		$is_auth_error = $auth_response !== null && $auth_response->errorCode !== null;
+
+		if ($is_auth_error) {
+			foreach ($auth_calls as $call) {
+				$this->processResult($call, $auth_response);
+			}
+		}
+		else {
+			foreach ($auth_calls as $call) {
+				$result = $this->apiClient->callMethod($call['api'], $call['method'], $call['params'], $auth['type']);
+
+				$this->processResult($call, $result);
+			}
+		}
+
+		if ($auth['auth'] !== null && $is_auth_error) {
+			foreach ($no_auth_calls as $call) {
+				$this->processResult($call, $auth_response);
+			}
+		}
+		else {
+			foreach ($no_auth_calls as $call) {
+				$result = $this->apiClient->callMethod($call['api'], $call['method'], $call['params'], $auth['type']);
+
+				$this->processResult($call, $result);
+			}
+		}
+
+		$response = new CHttpResponse();
+
+		$user_data = $this->apiClient->getUserData();
+
+		if ($request->isHpkeHeadersRequested() && $user_data !== null && array_key_exists('uuid', $user_data)) {
+			$response->headers[] = 'X-Recipient-ID: '.$user_data['uuid'];
+			$response->headers[] = 'X-HPKE-Recipient-KID: '.$user_data['kid'];
+			$response->headers[] = 'X-HPKE-Recipient-Pub: '.$user_data['key'];
 		}
 
 		if ($this->_response === array_fill(0, count($this->_response), null)) {
-			return '';
+			return $response;
 		}
 
 		if (is_array($this->_jsonDecoded)
 				&& array_keys($this->_jsonDecoded) === range(0, count($this->_jsonDecoded) - 1)) {
 			// Return response as encoded batch if $this->_jsonDecoded is associative array.
-			return json_encode(array_values(array_filter($this->_response)), JSON_UNESCAPED_SLASHES);
+			$response->body = json_encode(array_values(array_filter($this->_response)), JSON_UNESCAPED_SLASHES);
+		}
+		else {
+			$response->body = ($this->_response[0] !== null)
+				? json_encode($this->_response[0], JSON_UNESCAPED_SLASHES)
+				: '';
 		}
 
-		return ($this->_response[0] !== null) ? json_encode($this->_response[0], JSON_UNESCAPED_SLASHES) : '';
+		return $response;
 	}
 
 	public function validate(&$call) {
@@ -95,7 +203,6 @@ class CJsonRpc {
 			'jsonrpc' =>	['type' => API_STRING_UTF8, 'flags' => API_REQUIRED, 'in' => self::VERSION],
 			'method' =>		['type' => API_STRING_UTF8, 'flags' => API_REQUIRED],
 			'params' =>		['type' => API_JSONRPC_PARAMS, 'flags' => API_REQUIRED],
-			'auth' =>		['type' => API_STRING_UTF8, 'flags' => API_NOT_EMPTY | API_ALLOW_NULL, 'default' => null],
 			'id' =>			['type' => API_JSONRPC_ID]
 		]];
 
@@ -119,6 +226,12 @@ class CJsonRpc {
 
 	public function processResult(array $call, CApiClientResponse $response) {
 		if ($response->errorCode) {
+			$user_type = CUser::$userData === null ? USER_TYPE_ZABBIX_USER : CUser::$userData['type'];
+
+			if ($response->errorCode == ZBX_API_ERROR_DB && $user_type != USER_TYPE_SUPER_ADMIN) {
+				$response->errorMessage = _('System error occurred. Please contact Zabbix administrator.');
+			}
+
 			$errno = $this->_zbx2jsonErrors[$response->errorCode];
 
 			$this->jsonError($call, $errno, $response->errorMessage, $response->debug);
@@ -213,7 +326,10 @@ class CJsonRpc {
 			ZBX_API_ERROR_PARAMETERS => '-32602',
 			ZBX_API_ERROR_NO_AUTH => '-32602',
 			ZBX_API_ERROR_PERMISSIONS => '-32500',
-			ZBX_API_ERROR_INTERNAL => '-32500'
+			ZBX_API_ERROR_INTERNAL => '-32500',
+			ZBX_API_ERROR_DB => '-32500',
+			ZBX_API_ERROR_NO_ENTITY => '-32500',
+			ZBX_API_ERROR_NO_EXTERNAL_ENTITY => '-32500'
 		];
 	}
 }

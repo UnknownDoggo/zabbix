@@ -1,26 +1,22 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
 require_once dirname(__FILE__).'/CTest.php';
+require_once __DIR__.'/helpers/CTestDataHelper.php';
 
 /**
  * Base class for Zabbix API tests.
@@ -58,20 +54,25 @@ class CAPITest extends CTest {
 			elseif (is_numeric($error)) {
 				$this->assertSame($error, $response['error']['code']);
 			}
+			elseif (is_callable($error)) {
+				$this->assertSame($error(), $response['error']['data']);
+			}
 		}
 	}
 
 	/**
 	 * Make API call.
 	 *
-	 * @param mixed $data     string containing request data as json.
+	 * @param mixed  $data       String containing request data as json.
+	 * @param string $sessionid  Authorization token.
+	 * @param string $dpop_jwt   DPoP token.
 	 *
 	 * @return array
 	 *
 	 * @throws Exception      if API call fails.
 	 */
-	public function callRaw($data) {
-		return CAPIHelper::callRaw($data);
+	public function callRaw($data, ?string $sessionid = null, ?string $dpop_jwt = null) {
+		return CAPIHelper::callRaw($data, $sessionid, $dpop_jwt);
 	}
 
 	/**
@@ -97,15 +98,16 @@ class CAPITest extends CTest {
 	/**
 	 * Enable authorization/session for the following API calls.
 	 */
-	public function enableAuthorization() {
+	public static function enableAuthorization() {
 		CAPIHelper::setSessionId(null);
+		CAPIHelper::enableAuth();
 	}
 
 	/**
 	 * Disable authorization/session for the following API calls.
 	 */
-	public function disableAuthorization() {
-		CAPIHelper::setSessionId(false);
+	public static function disableAuthorization(): void {
+		CAPIHelper::disableAuth();
 	}
 
 	/**

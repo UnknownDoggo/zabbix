@@ -1,74 +1,75 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerResponseData extends CControllerResponse {
 
-	private $data;
-	private $title = null;
-	private $file_name = null;
+	private array $data;
 
-	/**
-	 * @var bool $view_enabled  true - send view and layout; false - send layout only.
-	 */
-	private $view_enabled = true;
+	private string $title = '';
 
-	public function __construct($data) {
+	private string $file_name = '';
+	private string $file_mime_type = '';
+
+	private bool $view_enabled = true;
+
+	public function __construct(array $data) {
 		$this->data = $data;
 	}
 
-	public function getData() {
+	public function getData(): array {
 		return $this->data;
 	}
 
-	public function setTitle($title) {
+	public function setTitle(string $title): static {
 		$this->title = $title;
+
+		return $this;
 	}
 
-	public function getTitle() {
+	public function getTitle(): string {
 		return $this->title;
 	}
 
-	public function setFileName($file_name) {
+	public function setFileName(string $file_name): static {
 		$this->file_name = $file_name;
+
+		return $this;
 	}
 
-	public function getFileName() {
+	public function getFileName(): string {
 		return $this->file_name;
 	}
 
-	/**
-	 * Prohibits sending view.
-	 */
-	public function disableView() {
+	public function setFileMimeType(string $mime_type): static {
+		$this->file_mime_type = $mime_type;
+
+		return $this;
+	}
+
+	public function getFileMimeType(): string {
+		return $this->file_mime_type;
+	}
+
+	public function disableView(): static {
 		$this->view_enabled = false;
 
 		return $this;
 	}
 
-	/**
-	 * Returns current value of view_enabled variable.
-	 *
-	 * @return bool
-	 */
-	public function isViewEnabled() {
+	public function isViewEnabled(): bool {
 		return $this->view_enabled;
 	}
 }

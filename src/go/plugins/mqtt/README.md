@@ -6,11 +6,6 @@ supports active checks only.
 
 This plugin works using "Eclipse Paho MQTT Go client library" (https://github.com/eclipse/paho.mqtt.golang)
 
-
-## Requirements
-- Zabbix Agent 2
-- Go >= 1.12 (required only to build from source)
-
 ## Installation
 The plugin is supplied as part of the Zabbix Agent 2 and does not require any special installation steps. Once 
 Zabbix Agent 2 is installed, the plugin is ready to work. Now you need to make sure that an MQTT broker is available.
@@ -18,9 +13,36 @@ Zabbix Agent 2 is installed, the plugin is ready to work. Now you need to make s
 ## Configuration
 Open the Zabbix Agent configuration file (zabbix_agent2.conf) and set the required parameters.
 
-**Plugins.MQTT.Timeout** — connection timeout (how long to wait for a connection to respond before shutting it down).  
+**Plugins.MQTT.Timeout** — connection timeout (how long to wait for a connection to respond before shutting it down).
+
+> The value is now *deprecated*, and used only for requests coming from Zabbix servers older than 7.0 version.
+
 *Default value:* equals the global 'Timeout' (configuration parameter set in zabbix_agent2.conf).  
 *Limits:* 1-30
+
+**Plugins.MQTT.Sessions.<session_name>.Url** — Broker connection string used for MQTT.
+*Default value:* tcp://localhost:1883
+
+**Plugins.MQTT.Sessions.<session_name>.Topic** — Topic used for MQTT subscription.
+*Default value:*
+
+**Plugins.MQTT.Sessions.<session_name>.User** — Username to be used for MQTT authentication.
+*Default value:* 
+
+**Plugins.MQTT.Sessions.<session_name>.Password** — Password to be used for MQTT authentication.
+*Default value:*
+
+**Plugins.MQTT.Sessions.<session_name>.TLSCAFile** — Full pathname of a file containing the top-level CA(s) certificates for MQTT
+*Default value:* 
+
+**Plugins.MQTT.Sessions.<session_name>.TLSCertFile** — Full pathname of a file containing the MQTT certificate or certificate chain.
+*Default value:* 
+
+**Plugins.MQTT.Sessions.<session_name>.TLSKeyFile** — Full pathname of a file containing the MQTT private key.
+*Default value:* 
+
+**Plugins.MQTT.Sessions.<session_name>.ConnectionTimeout** — Timeout used when establishing MQTT timeout.
+*Default value:* equals the global 'Timeout' (configuration parameter set in zabbix_agent2.conf). 
 
 ### Connection and authentication
 The plugin uses broker URI, topic, username and password from item key parameters.
@@ -32,8 +54,8 @@ Websocket connection is supported using "ws://" scheme.
 If the Zabbix agent 2 is running behind a http/https proxy then the following environment variables are used 
 'TP_PROXY', 'HTTPS_PROXY' and 'NO_PROXY', when this plugin establishes a connection.
 
-TLS encryption certificates can be used, by saving them in default locations.
-For example in ubuntu it is "/etc/ssl/certs/" directory.
+TLS encryption certificates can be used, by providing them either via session or default parameters
+in Zabbix agent 2 MQTT plugin configuration file.
 For TLS use "tls://" scheme
 
 If broker URI is left empty the default value of "localhost" is used.

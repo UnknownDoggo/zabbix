@@ -1,0 +1,509 @@
+
+# GitHub organization by HTTP
+
+## Overview
+
+This template is designed for the effortless deployment of GitHub organization monitoring by Zabbix via GitHub REST API and doesn't require any external scripts.
+
+For more details about GitHub REST API, refer to the [official documentation](https://docs.github.com/en/rest?apiVersion=2022-11-28).
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GitHub API version 2022-11-28
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+Additional information is available in the official documentation:
+- [Regarding authentication](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2022-11-28#about-authentication)
+- [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28)
+
+1. **Create an access token for monitoring**
+
+One of the simplest ways to send authenticated requests is to use a [personal access token](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2022-11-28#authenticating-with-a-personal-access-token) - either a classic or a fine-grained one.
+
+**Classic personal access token**
+
+You can create a new classic personal access token by following the [instructions in the official documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
+
+Additional information about OAuth scopes is available in the [official documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps#available-scopes).
+
+Note that authenticated users must have admin access to the repository and the `repo` scope must be set to get information about [self-hosted runners](https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository).
+
+In order to gather [`security` and `analysis` metrics](https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories) for a repository, the authenticated user must have admin permissions for the repository or be an owner or security manager for the organization that owns the repository.
+
+**Fine-grained personal access token**
+
+Alternatively, you can use a [fine-grained personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
+
+In order to use fine-grained tokens to monitor organization-owned repositories, [organizations must opt in to fine-grained personal access tokens and set up a personal access token policy](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization).
+
+The fine-grained token needs to have the following permissions set to provide access to the organization and repository resources:
+- "Actions" repository permissions (read);
+- "Administration" repository permissions (read);
+- "Contents" repository permissions (read);
+- "Issues" repository permissions (read);
+- "Metadata" repository permissions (read);
+- "Pull requests" repository permissions (read).
+
+2. **Set the access token** that you've created in step 1 in the `{$GITHUB.API.TOKEN}` macro
+3. **Change the API URL** in the `{$GITHUB.API.URL}` macro if needed (for self-hosted installations)
+4. **Set the organization name** in the `{$GITHUB.ORG.NAME}` macro
+5. **Set the Copilot monitoring flag** to `1` in the `{$GITHUB.COPILOT.USED}` macro if you want to gather Copilot metrics
+
+Note that the Copilot Metrics API access policy must be enabled for the organization. Only organization owners and billing managers of the parent enterprise can [view Copilot metrics](https://docs.github.com/en/rest/copilot/copilot-metrics?apiVersion=2022-11-28#get-copilot-metrics-for-an-organization).
+
+OAuth app tokens and personal access tokens (classic) need either the `manage_billing:copilot`, `read:org`, or `read:enterprise` scopes to use this endpoint.
+
+The fine-grained token needs to have the following permissions set to provide access to Copilot metrics:
+- "GitHub Copilot Business" organization permissions (read);
+- "Administration" organization permissions (read).
+
+6. **Set the LLD rule filters** if needed:
+- Filter repositories by name: `{$GITHUB.REPO.NAME.MATCHES}`, `{$GITHUB.REPO.NAME.NOT_MATCHES}`;
+- Filter repositories by owner: `{$GITHUB.REPO.OWNER.MATCHES}`, `{$GITHUB.REPO.OWNER.NOT_MATCHES}`;
+- Filter Copilot IDEs by name: `{$GITHUB.COPILOT.IDE.NAME.MATCHES}`, `{$GITHUB.COPILOT.IDE.NAME.NOT_MATCHES}`;
+- Filter Copilot models by name: `{$GITHUB.COPILOT.MODEL.NAME.MATCHES}`, `{$GITHUB.COPILOT.MODEL.NAME.NOT_MATCHES}`;
+- Filter Copilot programming languages by name: `{$GITHUB.COPILOT.LANG.NAME.MATCHES}`, `{$GITHUB.COPILOT.LANG.NAME.NOT_MATCHES}`.
+
+Note: Update intervals and timeouts for script items can be changed individually via `{$GITHUB.INTERVAL}` and `{$GITHUB.TIMEOUT}` macros with context. Depending on the organization being monitored, it can be adjusted if needed (if you are exceeding rate limits, you can increase update intervals for some script items to stay within per hour request limits). But be aware that it may also affect the triggers (check whether the item is used in triggers and adjust thresholds and/or evaluation periods if needed).
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GITHUB.API.URL}|<p>Set the API URL here.</p>|`https://api.github.com/`|
+|{$GITHUB.USER_AGENT}|<p>The user agent that is used in headers for HTTP requests.</p>|`Zabbix/8.2`|
+|{$GITHUB.API_VERSION}|<p>The API version that is used in headers for HTTP requests.</p>|`2022-11-28`|
+|{$GITHUB.COPILOT.USED}|<p>The flag for gathering Copilot metrics. If set to a value other than "1", items for Copilot will not be created. If set to "1", the `{$GITHUB.ORG.NAME}` macro is required.</p>|`0`|
+|{$GITHUB.ORG.NAME}|<p>Set the organization name here.</p>||
+|{$GITHUB.API.TOKEN}|<p>Set the access token here.</p>||
+|{$GITHUB.INTERVAL}|<p>The update interval for the script items that retrieve data from the API. Can be used with context if needed (check the context values in relevant items).</p>|`1m`|
+|{$GITHUB.INTERVAL:"get_repo_list"}|<p>The update interval for the script item that retrieves a list of repositories.</p>|`15m`|
+|{$GITHUB.INTERVAL:"get_copilot_data"}|<p>The update interval for the script item that retrieves Copilot statistics.</p>|`1h`|
+|{$GITHUB.INTERVAL:"get_copilot_billing"}|<p>The update interval for the script item that retrieves Copilot billing.</p>|`1h`|
+|{$GITHUB.TIMEOUT}|<p>The timeout threshold for the script items that retrieve data from the API. Can be used with context if needed (check the context values in relevant items).</p>|`15s`|
+|{$GITHUB.HTTP_PROXY}|<p>The HTTP proxy for script items (set if needed). If the macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GitHub organization", e.g. {$HTTP.TLS.VERIFY:"GitHub organization"}.</p>|`full`|
+|{$GITHUB.RESULTS_PER_PAGE}|<p>The number of results to fetch per page. Can be used with context and adjusted if needed (check the context values in script parameters of relevant items).</p>|`100`|
+|{$GITHUB.REPO.NAME.MATCHES}|<p>The repository name regex filter to use in repository discovery - for including.</p>|`.+`|
+|{$GITHUB.REPO.NAME.NOT_MATCHES}|<p>The repository name regex filter to use in repository discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.REPO.OWNER.MATCHES}|<p>The repository owner regex filter to use in repository discovery - for including.</p>|`.+`|
+|{$GITHUB.REPO.OWNER.NOT_MATCHES}|<p>The repository owner regex filter to use in repository discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.COPILOT.IDE.NAME.MATCHES}|<p>The Copilot IDE name regex filter to use in Copilot-related metric discovery - for including.</p>|`.+`|
+|{$GITHUB.COPILOT.IDE.NAME.NOT_MATCHES}|<p>The Copilot IDE name regex filter to use in Copilot-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.COPILOT.MODEL.NAME.MATCHES}|<p>The Copilot model name regex filter to use in Copilot-related metric discovery - for including.</p>|`.+`|
+|{$GITHUB.COPILOT.MODEL.NAME.NOT_MATCHES}|<p>The Copilot model name regex filter to use in Copilot-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.COPILOT.LANG.NAME.MATCHES}|<p>The Copilot programming language name regex filter to use in Copilot-related metric discovery - for including.</p>|`.+`|
+|{$GITHUB.COPILOT.LANG.NAME.NOT_MATCHES}|<p>The Copilot programming language name regex filter to use in Copilot-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Get repositories|<p>Get a list of repositories for the `{$GITHUB.ORG.NAME}` organization.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-organization-repositories</p>|Script|github.org.repo.get<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Get repositories check|<p>Data collection check.</p>|Dependent item|github.org.repo.get.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of repositories|<p>The number of repositories in the organization.</p>|Dependent item|github.org.repo.number<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data.length()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Total size of repositories|<p>The total size of repositories in the organization.</p>|Dependent item|github.org.repo.total_size<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..size.sum()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Custom multiplier: `1024`</p></li></ul>|
+|Open issue count|<p>The total number of issues opened in all repositories.</p>|Dependent item|github.org.repo.open_issues<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..open_issues_count.sum()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of private repositories|<p>The number of private repositories in the organization.</p>|Dependent item|github.org.repo.number_private<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..[?(@.private == "true")].length()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of archived repositories|<p>The number of archived repositories in the organization.</p>|Dependent item|github.org.repo.number_archived<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..[?(@.archived == "true")].length()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of disabled repositories|<p>The number of disabled repositories in the organization.</p>|Dependent item|github.org.repo.number_disabled<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..[?(@.disabled == "true")].length()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of repository templates|<p>The number of repository templates in the organization.</p>|Dependent item|github.org.repo.number_templates<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..[?(@.is_template == "true")].length()`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Get copilot billing|<p>Get information about an organization's Copilot subscription, including seat breakdown and feature policies.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/copilot/copilot-user-management?apiVersion=2022-11-28#get-copilot-seat-information-and-settings-for-an-organization</p>|Script|github.org.copilot.billing_get<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data[0]`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get copilot billing check|<p>Data collection check.</p>|Dependent item|github.org.copilot.billing_get.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Copilot seats total|<p>The total number of Copilot seats.</p>|Dependent item|github.org.copilot.seats_total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.total`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Copilot seats added|<p>The number of Copilot seats added this cycle.</p>|Dependent item|github.org.copilot.seats_added_this_cycle<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.added_this_cycle`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Copilot seats active|<p>The number of Copilot seats active this cycle.</p>|Dependent item|github.org.copilot.seats_active_this_cycle<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.active_this_cycle`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Copilot seats inactive|<p>The number of Copilot seats inactive this cycle.</p>|Dependent item|github.org.copilot.seats_inactive_this_cycle<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.inactive_this_cycle`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Copilot seats invited|<p>The number of Copilot seats pending invitation.</p>|Dependent item|github.org.copilot.seats_pending_invitation<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.pending_invitation`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Copilot seats cancelled|<p>The number of Copilot seats pending cancellation.</p>|Dependent item|github.org.copilot.seats_pending_cancellation<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.seat_breakdown.pending_cancellation`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Get copilot data|<p>Get a breakdown of aggregated metrics for various GitHub Copilot features.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/copilot/copilot-metrics?apiVersion=2022-11-28#get-copilot-metrics-for-an-organization</p>|Script|github.org.copilot.data_get<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data[0]`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Get copilot data check|<p>Data collection check.</p>|Dependent item|github.org.copilot.data_get.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Copilot active users|<p>The number of users using Copilot.</p>|Dependent item|github.org.copilot.active_users<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.total_active_users`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Copilot engaged users|<p>The number of engaged users using Copilot.</p>|Dependent item|github.org.copilot.engaged_users<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.total_engaged_users`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GitHub: There are errors in requests to API|<p>Errors have been received in response to API requests. Check the latest values for details.</p>|`length(last(/GitHub organization by HTTP/github.org.copilot.data_get.check))>0 or length(last(/GitHub organization by HTTP/github.org.repo.get.check))>0 or length(last(/GitHub organization by HTTP/github.org.copilot.billing_get.check))>0`|Average||
+
+### LLD rule Repository discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Repository discovery|<p>The discovery of repositories.</p>|Dependent item|github.org.repo.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Repository discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Get data|<p>Get `{$GITHUB.REPO.NAME}` repository data.</p>|Dependent item|github.org.repo.get_data[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data[?(@.node_id == '{#NODE_ID}')].first()`</p><p>⛔️Custom on fail: Set value to: `{}`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Fork count|<p>The number of repository forks.</p>|Dependent item|github.org.repo.forks_count[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.forks_count`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Stargazer count|<p>The number of stargazers in the repository.</p>|Dependent item|github.org.repo.stargazers_count[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.stargazers_count`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Watcher count|<p>The number of watchers in the repository.</p>|Dependent item|github.org.repo.watchers_count[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.watchers_count`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Open issue count|<p>The number of issues opened in the repository.</p>|Dependent item|github.org.repo.open_issues[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.open_issues_count`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Size|<p>The size of the repository, in kilobytes.</p>|Dependent item|github.org.repo.size[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.size`</p><p>⛔️Custom on fail: Set value to: `0`</p></li><li><p>Custom multiplier: `1024`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Language|<p>The language of the repository.</p>|Dependent item|github.org.repo.language[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.language`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Does not match regular expression: `^null$`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Is private|<p>Whether the repository is private.</p>|Dependent item|github.org.repo.is_private[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.private`</p><p>⛔️Custom on fail: Discard value</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Is a fork|<p>Whether the repository is a fork.</p>|Dependent item|github.org.repo.is_fork[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.fork`</p><p>⛔️Custom on fail: Discard value</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Is a template|<p>Whether the repository is a template.</p>|Dependent item|github.org.repo.is_template[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.is_template`</p><p>⛔️Custom on fail: Discard value</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Is archived|<p>Whether the repository is archived.</p>|Dependent item|github.org.repo.archived[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.archived`</p><p>⛔️Custom on fail: Discard value</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Visibility|<p>Visibility type of the repository.</p>|Dependent item|github.org.repo.visibility[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.visibility`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Pushed at|<p>The time when the repository was pushed.</p>|Dependent item|github.org.repo.pushed_at[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pushed_at`</p></li><li><p>JavaScript: `return Math.floor(new Date(value) / 1000);`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Created at|<p>The time when the repository was created.</p>|Dependent item|github.org.repo.created_at[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.created_at`</p></li><li><p>JavaScript: `return Math.floor(new Date(value) / 1000);`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Updated at|<p>The time when the repository was updated.</p>|Dependent item|github.org.repo.updated_at[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.updated_at`</p></li><li><p>JavaScript: `return Math.floor(new Date(value) / 1000);`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Advanced Security|<p>Whether GitHub Advanced Security for the repository is enabled. For standalone Code Scanning or Secret Protection products, this value cannot be collected.</p>|Dependent item|github.org.repo.advanced_security[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.security_and_analysis.advanced_security.status`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Secret Scanning|<p>Whether GitHub Secret Scanning for the repository is enabled.</p>|Dependent item|github.org.repo.secret_scanning[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.security_and_analysis.secret_scanning.status`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Secret Protection|<p>Whether GitHub Secret Protection for the repository is enabled.</p>|Dependent item|github.org.repo.secret_protection[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Secret Scanning non-provider patterns|<p>Whether GitHub Secret Scanning non-provider patterns for the repository are enabled.</p>|Dependent item|github.org.repo.secret_scanning_non_provider_patterns[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Secret Scanning Validity Checks|<p>Whether GitHub Secret Scanning validity checks for the repository are enabled.</p>|Dependent item|github.org.repo.secret_scanning_validity_checks[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+|[{#REPO_OWNER}/{#REPO_NAME}]: Secret Scanning AI Detection|<p>Whether GitHub Secret Scanning AI Detection for the repository is enabled.</p>|Dependent item|github.org.repo.secret_ai_detection[{#NODE_ID}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.security_and_analysis.secret_scanning_ai_detection.status`</p><p>⛔️Custom on fail: Set value to: `disabled`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1d`</p></li></ul>|
+
+### LLD rule Copilot IDE chat discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot IDE chat discovery|<p>The discovery of Copilot IDE chats.</p>|Dependent item|github.org.copilot_ide_chat.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.copilot_ide_chat.editors`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Copilot IDE chat discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|IDE [{#IDE_NAME}]: Engaged users|<p>The number of engaged users using Copilot in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_ide_chat.engaged_users[{#IDE_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule IDE [{#IDE_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|IDE [{#IDE_NAME}]: Model discovery|<p>The discovery of models used in the `{#IDE_NAME}` Copilot chat.</p>|Dependent item|github.org.copilot_ide_model.discovery[{#IDE_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for IDE [{#IDE_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|IDE [{#IDE_NAME}/{#MODEL_NAME}]: Total chats|<p>The number of Copilot chats with the `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_ide_model.total_chats[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|IDE [{#IDE_NAME}/{#MODEL_NAME}]: Engaged users|<p>The number of engaged users using the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_ide_model.engaged_users[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+|IDE [{#IDE_NAME}/{#MODEL_NAME}]: Chat copy events|<p>The number of Copilot chat copy events caused by the `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_ide_model.chat_copy_events[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|IDE [{#IDE_NAME}/{#MODEL_NAME}]: Chat insertion events|<p>The number of Copilot chat insertion events caused by the `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_ide_model.chat_insertion_events[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+
+### LLD rule Copilot IDE code completion discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot IDE code completion discovery|<p>The discovery of Copilot IDE code completions.</p>|Dependent item|github.org.copilot_completion.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.copilot_ide_code_completions.editors`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Copilot IDE code completion discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|IDE [{#IDE_NAME}]: Engaged users|<p>The number of engaged users using Copilot in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_completion.engaged_users[{#IDE_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule IDE [{#IDE_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|IDE [{#IDE_NAME}]: Model discovery|<p>The discovery of models used in the `{#IDE_NAME}` Copilot chat.</p>|Dependent item|github.org.copilot_completion_model.discovery[{#IDE_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for IDE [{#IDE_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|{#IDE_NAME} [{#MODEL_NAME}]: Engaged users|<p>The number of engaged users using the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_completion_model.engaged_users[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule {#IDE_NAME} [{#MODEL_NAME}]: Language discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|{#IDE_NAME} [{#MODEL_NAME}]: Language discovery|<p>The discovery of programming languages used by the `{#MODEL_NAME}` model in the `{#IDE_NAME}` Copilot chat.</p>|Dependent item|github.org.copilot_completion_language.discovery[{#IDE_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for {#IDE_NAME} [{#MODEL_NAME}]: Language discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Engaged users|<p>The number of engaged users using the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}` for code in `{#LANG_NAME}`.</p>|Dependent item|github.org.copilot_completion_language.engaged_users[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Code suggestions|<p>The number of code suggestions in `{#LANG_NAME}` provided by the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_completion_language.code_suggestions[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Code acceptances|<p>The number of code acceptances in `{#LANG_NAME}` by users for suggestions provided by the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_completion_language.code_acceptances[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Acceptance rate|<p>The percentage of code acceptances in `{#LANG_NAME}` for the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Calculated|github.org.copilot_completion_language.acceptance_rate[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Total code lines suggested|<p>The total number of code lines in `{#LANG_NAME}` suggested by the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Dependent item|github.org.copilot_completion_language.lines_suggested[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Total code lines accepted|<p>The total number of code lines in `{#LANG_NAME}` suggested by the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}` and accepted by users.</p>|Dependent item|github.org.copilot_completion_language.lines_accepted[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|{#IDE_NAME} [{#MODEL_NAME}/{#LANG_NAME}]: Line acceptance rate|<p>The percentage of code lines accepted in `{#LANG_NAME}` for the Copilot `{#MODEL_NAME}` model in `{#IDE_NAME}`.</p>|Calculated|github.org.copilot_completion_language.line_acceptance_rate[{#IDE_NAME},{#MODEL_NAME},{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+### LLD rule Copilot.com chat model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot.com chat model discovery|<p>The discovery of chats on copilot.com.</p>|Dependent item|github.org.copilot_web_chat.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.copilot_dotcom_chat.models`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Copilot.com chat model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot.com [{#MODEL_NAME}]: Total chats|<p>The number of chats with the `{#MODEL_NAME}` model on copilot.com.</p>|Dependent item|github.org.copilot_web_model.total_chats[{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|Copilot.com [{#MODEL_NAME}]: Engaged users|<p>The number of engaged users using the `{#MODEL_NAME}` model on copilot.com.</p>|Dependent item|github.org.copilot_web_model.engaged_users[{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule Copilot.com PR discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot.com PR discovery|<p>The discovery of pull requests on copilot.com.</p>|Dependent item|github.org.copilot_pull_request.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.copilot_dotcom_pull_requests.repositories`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Copilot.com PR discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Repo [{#REPO_NAME}]: Engaged users|<p>The number of engaged users working with PRs on copilot.com.</p>|Dependent item|github.org.copilot_pull_request.engaged_users[{#REPO_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule Repo [{#REPO_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Repo [{#REPO_NAME}]: Model discovery|<p>The discovery of models used for work with PRs.</p>|Dependent item|github.org.copilot_pr_model.discovery[{#REPO_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Repo [{#REPO_NAME}]: Model discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|{#REPO_NAME} [{#MODEL_NAME}]: PR summaries created|<p>The number of PR summaries created by the Copilot `{#MODEL_NAME}` model.</p>|Dependent item|github.org.copilot_pr_model.summaries_created[{#REPO_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p></li></ul>|
+|{#REPO_NAME} [{#MODEL_NAME}]: Engaged users|<p>The number of engaged users using the Copilot `{#MODEL_NAME}` model for work with PRs.</p>|Dependent item|github.org.copilot_pr_model.engaged_users[{#REPO_NAME},{#MODEL_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+### LLD rule Copilot IDE code language discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Copilot IDE code language discovery|<p>The discovery of Copilot IDE code completion languages.</p>|Dependent item|github.org.copilot_ide_lang.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.copilot_ide_code_completions.languages`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Item prototypes for Copilot IDE code language discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Language [{#LANG_NAME}]: Engaged users|<p>The number of engaged users working with code in `{#LANG_NAME}`.</p>|Dependent item|github.org.copilot_ide_lang.engaged_users[{#LANG_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `The text is too long. Please see the template.`</p><p>⛔️Custom on fail: Set value to: `0`</p></li></ul>|
+
+# GitHub repository by HTTP
+
+## Overview
+
+This template is designed for the effortless deployment of GitHub repository monitoring by Zabbix via GitHub REST API and doesn't require any external scripts.
+
+For more details about GitHub REST API, refer to the [official documentation](https://docs.github.com/en/rest?apiVersion=2022-11-28).
+
+## Requirements
+
+Zabbix version: 8.2 and higher.
+
+## Tested versions
+
+This template has been tested on:
+- GitHub API version 2022-11-28
+
+## Configuration
+
+> Zabbix should be configured according to the instructions in the [Templates out of the box](https://www.zabbix.com/documentation/8.2/manual/config/templates_out_of_the_box) section.
+
+## Setup
+
+GitHub limits the number of REST API requests that you can make within a specific amount of time, which also depends on whether you are authenticated or not, the plan, and the token type used. Many REST API endpoints require authentication or return additional information if you are authenticated. Additionally, you can make more requests per hour when you are authenticated.
+
+Additional information is available in the official documentation:
+- [Regarding authentication](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2022-11-28#about-authentication)
+- [Rate limits for the REST API](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28)
+
+1. **Create an access token for monitoring**
+
+One of the simplest ways to send authenticated requests is to use a [personal access token](https://docs.github.com/en/rest/authentication/authenticating-to-the-rest-api?apiVersion=2022-11-28#authenticating-with-a-personal-access-token) - either a classic or a fine-grained one.
+
+**Classic personal access token**
+
+You can create a new classic personal access token by following the [instructions in the official documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-personal-access-token-classic).
+
+For public repositories, no additional permission scopes are required. For monitoring to work on private repositories, the `repo` scope must be set to have full control of private repositories.
+
+Additional information about OAuth scopes is available in the [official documentation](https://docs.github.com/en/apps/oauth-apps/building-oauth-apps/scopes-for-oauth-apps#available-scopes).
+
+Note that authenticated users must have admin access to the repository and the `repo` scope must be set to get information about [self-hosted runners](https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository).
+
+**Fine-grained personal access token**
+
+Alternatively, you can use a [fine-grained personal access token](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens#creating-a-fine-grained-personal-access-token).
+
+In order to use fine-grained tokens to monitor organization-owned repositories, [organizations must opt in to fine-grained personal access tokens and set up a personal access token policy](https://docs.github.com/en/organizations/managing-programmatic-access-to-your-organization/setting-a-personal-access-token-policy-for-your-organization).
+
+The fine-grained token needs to have the following permissions set to provide access to the repository resources:
+- "Actions" repository permissions (read);
+- "Administration" repository permissions (read);
+- "Contents" repository permissions (read);
+- "Issues" repository permissions (read);
+- "Metadata" repository permissions (read);
+- "Pull requests" repository permissions (read).
+
+2. **Set the access token** that you've created in step 1 in the `{$GITHUB.API.TOKEN}` macro
+3. **Change the API URL** in the `{$GITHUB.API.URL}` macro if needed (for self-hosted installations)
+4. **Set the repository owner name** in the `{$GITHUB.REPO.OWNER}` macro
+5. **Set the repository name** in the `{$GITHUB.REPO.NAME}` macro
+6. **Set the LLD rule filters** if needed (you may want to use them to stay within rate limits as on large repositories, LLD rules may generate a lot of script items):
+- Filter repository branches by name: `{$GITHUB.BRANCH.NAME.MATCHES}`, `{$GITHUB.BRANCH.NAME.NOT_MATCHES}`;
+- Filter repository workflows by name: `{$GITHUB.WORKFLOW.NAME.MATCHES}`, `{$GITHUB.WORKFLOW.NAME.NOT_MATCHES}`;
+- Filter repository workflows by state: `{$GITHUB.WORKFLOW.STATE.MATCHES}`, `{$GITHUB.WORKFLOW.STATE.NOT_MATCHES}`;
+- Filter self-hosted runners by name: `{$GITHUB.RUNNER.NAME.MATCHES}`, `{$GITHUB.RUNNER.NAME.NOT_MATCHES}`;
+- Filter self-hosted runners by OS: `{$GITHUB.RUNNER.OS.MATCHES}`, `{$GITHUB.RUNNER.OS.NOT_MATCHES}`.
+
+Note: Update intervals and timeouts for script items can be changed individually via `{$GITHUB.INTERVAL}` and `{$GITHUB.TIMEOUT}` macros with context. Depending on the repository being monitored, it can be adjusted if needed (if you are exceeding rate limits, you can increase update intervals for some script items to stay within per hour request limits). But be aware that it may also affect the triggers (check whether the item is used in triggers and adjust thresholds and/or evaluation periods if needed).
+
+### Macros used
+
+|Name|Description|Default|
+|----|-----------|-------|
+|{$GITHUB.API.URL}|<p>Set the API URL here.</p>|`https://api.github.com/`|
+|{$GITHUB.USER_AGENT}|<p>The user agent that is used in headers for HTTP requests.</p>|`Zabbix/8.2`|
+|{$GITHUB.API_VERSION}|<p>The API version that is used in headers for HTTP requests.</p>|`2022-11-28`|
+|{$GITHUB.REPO.OWNER}|<p>Set the repository owner here.</p>||
+|{$GITHUB.REPO.NAME}|<p>Set the repository name here.</p>||
+|{$GITHUB.API.TOKEN}|<p>Set the access token here.</p>||
+|{$GITHUB.INTERVAL}|<p>The update interval for the script items that retrieve data from the API. Can be used with context if needed (check the context values in relevant items).</p>|`1m`|
+|{$GITHUB.INTERVAL:regex:"get_(tags\|releases\|issues)_count"}|<p>The update interval for the script items that retrieve the number of tags, releases, issues, and pull requests (total, open, closed).</p>|`1h`|
+|{$GITHUB.INTERVAL:"get_repo"}|<p>The update interval for the script item that retrieves the repository information.</p>|`15m`|
+|{$GITHUB.INTERVAL:"get_(branches\|workflows)"}|<p>The update interval for the script items that retrieve the branches and workflows. Used only for related metric discovery.</p>|`1h`|
+|{$GITHUB.INTERVAL:"get_runners"}|<p>The update interval for the script item that retrieves the information about self-hosted runners.</p>|`15m`|
+|{$GITHUB.INTERVAL:regex:"get_last_run:.+"}|<p>The update interval for the script items that retrieve the information about the last workflow run results.</p>|`15m`|
+|{$GITHUB.INTERVAL:regex:"get_commits_count:.+"}|<p>The update interval for the script items that retrieve the commits count in discovered branches.</p>|`1h`|
+|{$GITHUB.TIMEOUT}|<p>The timeout threshold for the script items that retrieve data from the API. Can be used with context if needed (check the context values in relevant items).</p>|`15s`|
+|{$GITHUB.HTTP_PROXY}|<p>The HTTP proxy for script items (set if needed). If the macro is empty, then no proxy is used.</p>||
+|{$HTTP.TLS.VERIFY}|<p>TLS certificate verification for script items: "none" - disabled, "peer" - verify the certificate chain and expiration, "full" - full verification. Any other value enables full verification. To override the setting for this template only, define the macro with the context "GitHub repository", e.g. {$HTTP.TLS.VERIFY:"GitHub repository"}.</p>|`full`|
+|{$GITHUB.RESULTS_PER_PAGE}|<p>The number of results to fetch per page. Can be used with context and adjusted if needed (check the context values in script parameters of relevant items).</p>|`100`|
+|{$GITHUB.WORKFLOW.NAME.MATCHES}|<p>The repository workflow name regex filter to use in workflow-related metric discovery - for including.</p>|`.+`|
+|{$GITHUB.WORKFLOW.NAME.NOT_MATCHES}|<p>The repository workflow name regex filter to use in workflow-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.WORKFLOW.STATE.MATCHES}|<p>The repository workflow state regex filter to use in workflow-related metric discovery - for including.</p>|`active`|
+|{$GITHUB.WORKFLOW.STATE.NOT_MATCHES}|<p>The repository workflow state regex filter to use in workflow-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.BRANCH.NAME.MATCHES}|<p>The repository branch name regex filter to use in branch-related metric discovery - for including.</p>|`.+`|
+|{$GITHUB.BRANCH.NAME.NOT_MATCHES}|<p>The repository branch name regex filter to use in branch-related metric discovery - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.RUNNER.NAME.MATCHES}|<p>The repository self-hosted runner name regex filter to use in discovering metrics related to the self-hosted runner - for including.</p>|`.+`|
+|{$GITHUB.RUNNER.NAME.NOT_MATCHES}|<p>The repository self-hosted runner name regex filter to use in discovering metrics related to the self-hosted runner - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.RUNNER.OS.MATCHES}|<p>The repository self-hosted runner OS regex filter to use in discovering metrics related to the self-hosted runner - for including.</p>|`.+`|
+|{$GITHUB.RUNNER.OS.NOT_MATCHES}|<p>The repository self-hosted runner OS regex filter to use in discovering metrics related to the self-hosted runner - for excluding.</p>|`CHANGE_IF_NEEDED`|
+|{$GITHUB.REQUESTS.UTIL.WARN}|<p>The threshold percentage of utilized API requests in a Warning trigger expression.</p>|`80`|
+|{$GITHUB.REQUESTS.UTIL.HIGH}|<p>The threshold percentage of utilized API requests in a High trigger expression.</p>|`90`|
+|{$GITHUB.WORKFLOW.STATUS.QUEUED.THRESH}|<p>The time threshold used in the trigger of a workflow run that has been in the queue for too long. Can be used with context if needed.</p>|`1h`|
+|{$GITHUB.WORKFLOW.STATUS.IN_PROGRESS.THRESH}|<p>The time threshold used in the trigger of a workflow run that has been in the queue for too long. Can be used with context if needed.</p>|`24h`|
+
+### Items
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Get self-hosted runners|<p>Get the self-hosted runners of the repository.</p><p></p><p>Note that admin access to the repository is required to use this endpoint:</p><p>https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository</p>|Script|github.repo.runners.get<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get self-hosted runner check|<p>Carry out a self-hosted runners data collection check.</p>|Dependent item|github.repo.runners.get.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Number of releases|<p>The number of releases in the repository. Note that this number also includes draft releases.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/releases/releases?apiVersion=2022-11-28#list-releases</p>|Script|github.repo.releases.count<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+|Number of tags|<p>The number of tags in the repository.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#list-repository-tags</p>|Script|github.repo.tags.count<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+|Get issue count|<p>Get the count of issues and pull requests in the repository (total, open, closed).</p><p></p><p>Information about endpoint for issues:</p><p>https://docs.github.com/en/rest/issues/issues?apiVersion=2022-11-28#list-repository-issues</p><p></p><p>Information about endpoint for pull requests:</p><p>https://docs.github.com/en/rest/pulls/pulls?apiVersion=2022-11-28#list-pull-requests</p>|Script|github.repo.issues.get<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Number of issues|<p>The total number of issues in the repository.</p>|Dependent item|github.repo.issues.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.issues.total`</p></li></ul>|
+|Number of open issues|<p>The number of open issues in the repository.</p>|Dependent item|github.repo.issues.open<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.issues.open`</p></li></ul>|
+|Number of closed issues|<p>The number of closed issues in the repository.</p>|Dependent item|github.repo.issues.closed<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.issues.closed`</p></li></ul>|
+|Number of PRs|<p>The total number of pull requests in the repository.</p>|Dependent item|github.repo.pr.total<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pr.total`</p></li></ul>|
+|Number of open PRs|<p>The number of open pull requests in the repository.</p>|Dependent item|github.repo.pr.open<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pr.open`</p></li></ul>|
+|Number of closed PRs|<p>The number of closed pull requests in the repository.</p>|Dependent item|github.repo.pr.closed<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.pr.closed`</p></li></ul>|
+|Request limit|<p>API request limit.</p><p></p><p>Information about request limits in GitHub REST API documentation:</p><p>https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28</p>|Dependent item|github.repo.requests.limit<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.headers['x-ratelimit-limit']`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Requests used|<p>The number of used API requests.</p><p></p><p>Information about request limits in GitHub REST API documentation:</p><p>https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28</p>|Dependent item|github.repo.requests.used<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.headers['x-ratelimit-used']`</p></li></ul>|
+|Request limit utilization, in %|<p>The calculated utilization of the API request limit in %.</p><p></p><p>Information about request limits in GitHub REST API documentation:</p><p>https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28</p>|Dependent item|github.repo.requests.util<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Get repository|<p>Get the general repository information. If the repository is not a fork, the community profile metrics are also retrieved.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/repos/repos?apiVersion=2022-11-28#get-a-repository</p><p></p><p>Information about community profile metrics:</p><p>https://docs.github.com/en/rest/metrics/community?apiVersion=2022-11-28#get-community-profile-metrics</p>|Script|github.repo.repository.get|
+|Get repository data check|<p>Data collection check.</p>|Dependent item|github.repo.repository.get.check<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.error`</p><p>⛔️Custom on fail: Set value to: ``</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Repository is a fork|<p>Indicates whether the repository is a fork.</p>|Dependent item|github.repo.repository.is_fork<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..fork.first()`</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+|Repository size|<p>The size of the repository.</p>|Dependent item|github.repo.repository.size<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..size.first()`</p></li><li><p>Custom multiplier: `1024`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Repository stargazers|<p>The number of GitHub users who have starred the repository.</p>|Dependent item|github.repo.repository.stargazers<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..stargazers_count.first()`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Repository watchers|<p>The number of GitHub users who are subscribed to the repository.</p>|Dependent item|github.repo.repository.watchers<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..subscribers_count.first()`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Repository forks|<p>The number of repository forks.</p>|Dependent item|github.repo.repository.forks.count<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..forks_count.first()`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Get workflows|<p>Get the repository workflows.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#list-repository-workflows</p>|Script|github.repo.workflows.get<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+|Get branches|<p>Get the repository branches.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#list-branches</p>|Script|github.repo.branches.get<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li></ul>|
+
+### Triggers
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GitHub: No access to repository self-hosted runners|<p>Admin access to the repository is required to use this endpoint:<br>https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository</p>|`find(/GitHub repository by HTTP/github.repo.runners.get.check,,"iregexp","Must have admin rights to Repository")=1`|Average||
+|GitHub: The total number of issues has increased|<p>The total number of issues has increased which means that either a new issue (or multiple) has been opened.</p>|`last(/GitHub repository by HTTP/github.repo.issues.total)>last(/GitHub repository by HTTP/github.repo.issues.total,#2)`|Warning||
+|GitHub: The total number of PRs has increased|<p>The total number of pull requests has increased which means that either a new pull request (or multiple) has been opened.</p>|`last(/GitHub repository by HTTP/github.repo.pr.total)>last(/GitHub repository by HTTP/github.repo.pr.total,#2)`|Info||
+|GitHub: API request limit utilization is high|<p>The API request limit utilization is high. It can be lowered by increasing the update intervals for script items (by setting up higher values in corresponding context macros).<br><br>The trigger will be resolved automatically if the limit usage drops 5% below the trigger threshold.<br><br>Information about request limits in GitHub REST API documentation:<br>https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28</p>|`max(/GitHub repository by HTTP/github.repo.requests.util,1h)>{$GITHUB.REQUESTS.UTIL.WARN}`|Warning|**Depends on**:<br><ul><li>GitHub: API request limit utilization is very high</li></ul>|
+|GitHub: API request limit utilization is very high|<p>The API request limit utilization is very high. It can be lowered by increasing the update intervals for script items (by setting up higher values in corresponding context macros).<br><br>The trigger will be resolved automatically if the limit usage drops 5% below the trigger threshold.<br><br>Information about request limits in GitHub REST API documentation:<br>https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api?apiVersion=2022-11-28</p>|`max(/GitHub repository by HTTP/github.repo.requests.util,1h)>{$GITHUB.REQUESTS.UTIL.HIGH}`|Average||
+|GitHub: There are errors in requests to API|<p>Errors have been received in response to API requests. Check the latest values for details.</p>|`length(last(/GitHub repository by HTTP/github.repo.repository.get.check))>0`|Average||
+
+### LLD rule Workflow discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Workflow discovery|<p>Discovers repository workflows. By default, only the active workflows are discovered.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/actions/workflows?apiVersion=2022-11-28#list-repository-workflows</p>|Dependent item|github.repo.workflows.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data`</p></li></ul>|
+
+### Item prototypes for Workflow discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Workflow [{#WORKFLOW_NAME}]: Get last run|<p>Get the data about the last workflow run.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/actions/workflow-runs?apiVersion=2022-11-28#list-workflow-runs-for-a-workflow</p>|Script|github.repo.workflows.last_run.get[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JSON Path: `$.data.first()`</p></li></ul>|
+|Workflow [{#WORKFLOW_NAME}]: Last run status|<p>The status of the last workflow run. Possible values:</p><p></p><p>0 - queued</p><p>1 - in_progress</p><p>2 - completed</p><p>10 - unknown</p>|Dependent item|github.repo.workflows.last_run.status[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.status`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li></ul>|
+|Workflow [{#WORKFLOW_NAME}]: Last run conclusion|<p>The conclusion of the last workflow run. Possible values:</p><p></p><p>0 - success</p><p>1 - failure</p><p>2 - neutral</p><p>3 - cancelled</p><p>4 - skipped</p><p>5 - timed_out</p><p>6 - action_required</p><p>10 - unknown</p>|Dependent item|github.repo.workflows.last_run.conclusion[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.conclusion`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Workflow [{#WORKFLOW_NAME}]: Last run start date|<p>The date when the last workflow run was started.</p>|Dependent item|github.repo.workflows.last_run.start_date[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.run_started_at`</p></li><li><p>JavaScript: `return Math.floor(new Date(value) / 1000);`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Workflow [{#WORKFLOW_NAME}]: Last run update date|<p>The date when the last workflow run was updated.</p>|Dependent item|github.repo.workflows.last_run.update_date[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.updated_at`</p></li><li><p>JavaScript: `return Math.floor(new Date(value) / 1000);`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+|Workflow [{#WORKFLOW_NAME}]: Last run duration|<p>The duration of the last workflow run.</p>|Dependent item|github.repo.workflows.last_run.duration[{#WORKFLOW_NAME}]<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `3h`</p></li></ul>|
+
+### Trigger prototypes for Workflow discovery
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GitHub: Workflow [{#WORKFLOW_NAME}]: The workflow has been in the queue for too long|<p>The last workflow run has been in the "queued" status for too long. This may mean that it has failed to be assigned to a runner. The default threshold is provided as an example and can be adjusted for relevant workflows with context macros.</p>|`last(/GitHub repository by HTTP/github.repo.workflows.last_run.status[{#WORKFLOW_NAME}])=0 and changecount(/GitHub repository by HTTP/github.repo.workflows.last_run.status[{#WORKFLOW_NAME}],{$GITHUB.WORKFLOW.STATUS.QUEUED.THRESH:"workflow_queued:{#WORKFLOW_NAME}"})=0`|Warning||
+|GitHub: Workflow [{#WORKFLOW_NAME}]: The workflow has been in progress for too long|<p>The last workflow run has been in the "in_progress" status for too long. The default threshold is provided as an example and can be adjusted for relevant workflows with context macros.</p>|`last(/GitHub repository by HTTP/github.repo.workflows.last_run.status[{#WORKFLOW_NAME}])=1 and changecount(/GitHub repository by HTTP/github.repo.workflows.last_run.status[{#WORKFLOW_NAME}],{$GITHUB.WORKFLOW.STATUS.IN_PROGRESS.THRESH:"workflow_in_progress:{#WORKFLOW_NAME}"})=0`|Warning||
+|GitHub: Workflow [{#WORKFLOW_NAME}]: The workflow has failed|<p>The last workflow run has returned a "failure" conclusion.</p>|`last(/GitHub repository by HTTP/github.repo.workflows.last_run.conclusion[{#WORKFLOW_NAME}])=1`|Warning||
+
+### LLD rule Branch discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Branch discovery|<p>Discovers repository branches.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/branches/branches?apiVersion=2022-11-28#list-branches</p>|Dependent item|github.repo.branches.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data`</p></li></ul>|
+
+### Item prototypes for Branch discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Branch [{#BRANCH_NAME}]: Number of commits|<p>Get the number of commits in the branch.</p><p></p><p>Information about endpoint:</p><p>https://docs.github.com/en/rest/commits/commits?apiVersion=2022-11-28#list-commits</p>|Script|github.repo.branches.commits.total[{#BRANCH_NAME}]<p>**Preprocessing**</p><ul><li><p>Check for error using a regular expression: `API rate limit exceeded<br>\0`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### LLD rule Self-hosted runner discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Self-hosted runner discovery|<p>Discovers self-hosted runners of the repository.</p><p></p><p>Note that admin access to the repository is required to use this endpoint:</p><p>https://docs.github.com/en/rest/actions/self-hosted-runners?apiVersion=2022-11-28#list-self-hosted-runners-for-a-repository</p>|Dependent item|github.repo.runners.discovery<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data`</p><p>⛔️Custom on fail: Discard value</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+### Item prototypes for Self-hosted runner discovery
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Runner [{#RUNNER_NAME}]: Busy|<p>Indicates whether the runner is currently executing a job.</p>|Dependent item|github.repo.runners.busy[{#RUNNER_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data[?(@.id == "{#RUNNER_ID}")].busy.first()`</p></li><li>Boolean to decimal</li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+|Runner [{#RUNNER_NAME}]: Online|<p>Indicates whether the runner is connected to GitHub and is ready to execute jobs.</p>|Dependent item|github.repo.runners.online[{#RUNNER_NAME}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data[?(@.id == "{#RUNNER_ID}")].status.first()`</p></li><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+### Trigger prototypes for Self-hosted runner discovery
+
+|Name|Description|Expression|Severity|Dependencies and additional info|
+|----|-----------|----------|--------|--------------------------------|
+|GitHub: Runner [{#RUNNER_NAME}]: The runner has become offline|<p>The runner was online previously, but is currently not connected to GitHub. This could be because the machine is offline, the self-hosted runner application is not running on the machine, or the self-hosted runner application cannot communicate with GitHub.</p>|`last(/GitHub repository by HTTP/github.repo.runners.online[{#RUNNER_NAME}],#2)=1 and last(/GitHub repository by HTTP/github.repo.runners.online[{#RUNNER_NAME}])=0`|Warning||
+
+### LLD rule Discovery of community profile metrics
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Discovery of community profile metrics|<p>Discovers community profile metrics (the repository must not be a fork).</p><p></p><p>Information about community profile metrics:</p><p>https://docs.github.com/en/rest/metrics/community?apiVersion=2022-11-28#get-community-profile-metrics</p>|Dependent item|github.repo.community_profile.discovery<p>**Preprocessing**</p><ul><li><p>JavaScript: `The text is too long. Please see the template.`</p></li><li><p>Discard unchanged with heartbeat: `6h`</p></li></ul>|
+
+### Item prototypes for Discovery of community profile metrics
+
+|Name|Description|Type|Key and additional info|
+|----|-----------|----|-----------------------|
+|Health percentage score|<p>The health percentage score is defined as a percentage of how many of the recommended community health files are present.</p><p></p><p>For more information, see the documentation:</p><p>https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/about-community-profiles-for-public-repositories</p>|Dependent item|github.repo.repository.health[{#SINGLETON}]<p>**Preprocessing**</p><ul><li><p>JSON Path: `$.data..zbx_community_profile.health_percentage.first()`</p></li><li><p>Discard unchanged with heartbeat: `1h`</p></li></ul>|
+
+## Feedback
+
+Please report any issues with the template at [`https://support.zabbix.com`](https://support.zabbix.com)
+
+You can also provide feedback, discuss the template, or ask for help at [`ZABBIX forums`](https://www.zabbix.com/forum/zabbix-suggestions-and-feedback)
+

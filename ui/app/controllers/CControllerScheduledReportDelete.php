@@ -1,27 +1,26 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerScheduledReportDelete extends CController {
 
-	protected function checkInput() {
+	protected function init(): void {
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+	}
+
+	protected function checkInput(): bool {
 		$fields = [
 			'reportids' => 'required|array_db report.reportid'
 		];
@@ -35,7 +34,7 @@ class CControllerScheduledReportDelete extends CController {
 		return $ret;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		if (!$this->checkAccess(CRoleHelper::UI_REPORTS_SCHEDULED_REPORTS)
 				|| !$this->checkAccess(CRoleHelper::ACTIONS_MANAGE_SCHEDULED_REPORTS)) {
 			return false;
@@ -49,29 +48,33 @@ class CControllerScheduledReportDelete extends CController {
 		return ($report_count == count($this->getInput('reportids')));
 	}
 
-	protected function doAction() {
+	protected function doAction(): void {
 		$reportids = $this->getInput('reportids');
 
 		$result = API::Report()->delete($reportids);
 
-		$response = new CControllerResponseRedirect(
-			(new CUrl('zabbix.php'))
-				->setArgument('action', 'scheduledreport.list')
-				->setArgument('page', CPagerHelper::loadPage('scheduledreport.list', null))
-		);
-
-		$deleted = count($reportids);
-
 		if ($result) {
-			$response->setFormData(['uncheck' => '1']);
-			CMessageHelper::setSuccessTitle(_n('Scheduled report deleted', 'Scheduled reports deleted', $deleted));
+			$output['success']['title'] = _n('Scheduled report deleted', 'Scheduled reports deleted', count($reportids));
+
+			if ($messages = get_and_clear_messages()) {
+				$output['success']['messages'] = array_column($messages, 'message');
+			}
 		}
 		else {
-			CMessageHelper::setErrorTitle(
-				_n('Cannot delete scheduled report', 'Cannot delete scheduled reports', $deleted)
-			);
+			$output['error'] = [
+				'title' => _n('Cannot delete scheduled report', 'Cannot delete scheduled reports', count($reportids)),
+				'messages' => array_column(get_and_clear_messages(), 'message')
+			];
+
+			$reports = API::Report()->get([
+				'output' => [],
+				'reportids' => $reportids,
+				'preservekeys' => true
+			]);
+
+			$output['keepids'] = array_keys($reports);
 		}
 
-		$this->setResponse($response);
+		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
 	}
 }

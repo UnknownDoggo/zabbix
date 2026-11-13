@@ -1,32 +1,29 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package memcached
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/uri"
-	"git.zabbix.com/ap/plugin-support/zbxerr"
-
-	"git.zabbix.com/ap/plugin-support/plugin"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/uri"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
 const pluginName = "Memcached"
@@ -45,7 +42,12 @@ var impl Plugin
 
 // Export implements the Exporter interface.
 func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider) (result interface{}, err error) {
-	params, _, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
+	params, _, hc, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
+	if err != nil {
+		return nil, err
+	}
+
+	err = metric.SetDefaults(params, hc, p.options.Default)
 	if err != nil {
 		return nil, err
 	}
@@ -60,12 +62,19 @@ func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider
 		return nil, err
 	}
 
+	connectionTimeout, err := p.getConnectionTimeout(params)
+	if err != nil {
+		return nil, err
+	}
+
+	p.Tracef("connection timeout set to: %d", connectionTimeout)
+
 	handleMetric := getHandlerFunc(key)
 	if handleMetric == nil {
 		return nil, zbxerr.ErrorUnsupportedMetric
 	}
 
-	result, err = handleMetric(p.connMgr.GetConnection(*uri), params)
+	result, err = handleMetric(p.connMgr.GetConnection(*uri, connectionTimeout), params)
 	if err != nil {
 		p.Errf(err.Error())
 	}
@@ -77,7 +86,6 @@ func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider
 func (p *Plugin) Start() {
 	p.connMgr = NewConnManager(
 		time.Duration(p.options.KeepAlive)*time.Second,
-		time.Duration(p.options.Timeout)*time.Second,
 		hkInterval*time.Second,
 	)
 }
@@ -86,4 +94,20 @@ func (p *Plugin) Start() {
 func (p *Plugin) Stop() {
 	p.connMgr.Destroy()
 	p.connMgr = nil
+}
+
+func (p *Plugin) getConnectionTimeout(params map[string]string) (int, error) {
+	connectionTimeout, err := strconv.Atoi(params["ConnectionTimeout"])
+	if err != nil {
+		p.Tracef("failed to convert parameter connection timeout %s", err.Error())
+
+		connectionTimeout, err = strconv.Atoi(p.options.Default.ConnectionTimeout)
+		if err != nil {
+			p.Tracef("failed to convert default connection timeout %s", err.Error())
+
+			return 0, errs.New("failed to get connection timeout")
+		}
+	}
+
+	return connectionTimeout, nil
 }

@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -53,16 +48,15 @@ class CScreenHttpTest extends CScreenBase {
 		$sort_field = $this->data['sort'];
 		$sort_order = $this->data['sortorder'];
 
-		$httptests = [];
-		$paging = [];
-
 		$options = [
 			'output' => ['httptestid', 'name', 'hostid'],
 			'selectHosts' => ['name', 'status'],
 			'selectTags' => ['tag', 'value'],
+			'selectInheritedTags' => ['tag', 'value'],
 			'selectSteps' => API_OUTPUT_COUNT,
 			'evaltype' => array_key_exists('evaltype', $this->data) ? $this->data['evaltype'] : TAG_EVAL_TYPE_AND_OR,
-			'tags' => array_key_exists('tags', $this->data) ? $this->data['tags'] : [],
+			'tags' => array_key_exists('tags', $this->data) && $this->data['tags'] ? $this->data['tags'] : null,
+			'inheritedTags' => true,
 			'templated' => false,
 			'preservekeys' => true,
 			'filter' => ['status' => HTTPTEST_STATUS_ACTIVE],
@@ -90,9 +84,11 @@ class CScreenHttpTest extends CScreenBase {
 		$httptests = resolveHttpTestMacros($httptests, true, false);
 		order_result($httptests, $sort_field, $sort_order);
 
-		$tags = array_key_exists('tags', $this->data)
-			? makeTags($httptests, true, 'httptestid', ZBX_TAG_COUNT_DEFAULT, $this->data['tags'])
-			: [];
+		CTagHelper::mergeOwnAndInheritedTags($httptests);
+
+		$tags = CTagHelper::getTagsHtml($httptests, ZBX_TAG_OBJECT_HTTPTEST, [
+			'filter_tags' => array_key_exists('tags', $this->data) ? $this->data['tags'] : []
+		]);
 
 		// Fetch the latest results of the web scenario.
 		$last_httptest_data = Manager::HttpTest()->getLastData(array_keys($httptests));
@@ -115,7 +111,8 @@ class CScreenHttpTest extends CScreenBase {
 				_('Last check'),
 				_('Status'),
 				_('Tags')
-			]);
+			])
+			->setPageNavigation($paging);
 
 		foreach ($httptests as $key => $httptest) {
 			if (array_key_exists('lastfailedstep', $httptest) && $httptest['lastfailedstep'] !== null) {
@@ -148,15 +145,20 @@ class CScreenHttpTest extends CScreenBase {
 			}
 
 			$table->addRow(new CRow([
-				(new CLinkAction($httptest['hostname']))->setMenuPopup(CMenuPopupHelper::getHost($httptest['hostid'])),
-				new CLink($httptest['name'], 'httpdetails.php?httptestid='.$httptest['httptestid']),
+				(new CCol(
+					(new CLinkAction($httptest['hostname']))
+						->setMenuPopup(CMenuPopupHelper::getHost($httptest['hostid']))
+				))->addClass(ZBX_STYLE_WORDBREAK),
+				(new CCol(
+					new CLink($httptest['name'], 'httpdetails.php?httptestid='.$httptest['httptestid'])
+				))->addClass(ZBX_STYLE_WORDBREAK),
 				$httptest['steps'],
 				$lastcheck,
-				$status,
-				array_key_exists($key, $tags) ? $tags[$key] : ''
+				(new CCol($status))->addClass(ZBX_STYLE_WORDBREAK),
+				array_key_exists($key, $tags) ? (new CDiv($tags[$key]))->addClass(ZBX_STYLE_TAGS_WRAPPER) : ''
 			]));
 		}
 
-		return $this->getOutput([$table, $paging], true, $this->data);
+		return $this->getOutput($table, true, $this->data);
 	}
 }

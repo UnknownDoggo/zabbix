@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -28,11 +23,12 @@ const TABFILTERITEM_EVENT_DELETE = 'delete.item.tabfilter';
 const TABFILTERITEM_EVENT_ACTION = 'action.item.tabfilter';
 
 const TABFILTERITEM_STYLE_UNSAVED = 'unsaved';
-const TABFILTERITEM_STYLE_EDIT_BTN = 'icon-edit';
+const TABFILTERITEM_STYLE_BTN_EDIT = 'tabfilter-edit';
 const TABFILTERITEM_STYLE_SELECTED = 'selected';
 const TABFILTERITEM_STYLE_EXPANDED = 'expanded';
 const TABFILTERITEM_STYLE_DISABLED = 'disabled';
 const TABFILTERITEM_STYLE_FOCUSED = 'focused';
+const TABFILTERITEM_STYLE_SEPARATED = 'separated';
 
 class CTabFilterItem extends CBaseComponent {
 
@@ -42,6 +38,8 @@ class CTabFilterItem extends CBaseComponent {
 		this._parent = options.parent || null;
 		this._idx_namespace = options.idx_namespace;
 		this._index = options.index;
+		this._unsaved = false;
+		this._unsaved_indicator = null;
 		this._content_container = options.container;
 		this._data = options.data || {};
 		this._template = options.template;
@@ -62,9 +60,25 @@ class CTabFilterItem extends CBaseComponent {
 			this.updateApplyUrl();
 		}
 
+		this._target.setAttribute('aria-expanded', this._expanded ? 'true' : 'false');
+
 		if (this._data.filter_show_counter) {
 			this.setCounter('');
 		}
+	}
+
+	/**
+	 * Initialize indicator DOM node for tab unsaved state.
+	 */
+	initUnsavedIndicator() {
+		let green_dot = document.createElement('span');
+
+		green_dot.setAttribute('data-indicator-value', '1');
+		green_dot.setAttribute('data-indicator', 'mark');
+		green_dot.classList.toggle('display-none', !this._unsaved);
+		this._target.appendChild(green_dot);
+
+		this._unsaved_indicator = green_dot;
 	}
 
 	/**
@@ -153,7 +167,7 @@ class CTabFilterItem extends CBaseComponent {
 		this.updateUnsavedState();
 
 		return PopUp('popup.tabfilter.edit', { ...defaults, ...params },
-			{dialogueid: 'tabfilter_dialogue', trigger_element}
+			{dialogueid: 'tabfilter_dialogue', dialogue_class: 'modal-popup-generic', trigger_element}
 		);
 	}
 
@@ -161,13 +175,23 @@ class CTabFilterItem extends CBaseComponent {
 	 * Add gear icon and bind click event.
 	 */
 	addActionIcons() {
-		if (this._target.parentNode.querySelector('.' + TABFILTERITEM_STYLE_EDIT_BTN)) {
+		if (this._target.parentNode.querySelector('.' + TABFILTERITEM_STYLE_BTN_EDIT)) {
 			return;
 		}
 
 		let edit = document.createElement('a');
-		edit.classList.add(TABFILTERITEM_STYLE_EDIT_BTN);
+
+		edit.classList.add(ZBX_STYLE_BTN_ICON, ZBX_ICON_COG_FILLED, TABFILTERITEM_STYLE_BTN_EDIT);
+		edit.setAttribute('aria-label', t('Edit filter properties'));
+		edit.setAttribute('tabindex', '0');
 		edit.addEventListener('click', () => this.openPropertiesDialog({}, this._target));
+		edit.addEventListener('keydown', e => {
+			if (e.key === 'Enter') {
+				e.preventDefault();
+				this.openPropertiesDialog({}, this._target);
+			}
+		});
+
 		this._target.parentNode.appendChild(edit);
 	}
 
@@ -175,7 +199,7 @@ class CTabFilterItem extends CBaseComponent {
 	 * Remove gear icon HTMLElement.
 	 */
 	removeActionIcons() {
-		let icon = this._target.parentNode.querySelector('.' + TABFILTERITEM_STYLE_EDIT_BTN);
+		let icon = this._target.parentNode.querySelector('.' + TABFILTERITEM_STYLE_BTN_EDIT);
 
 		if (icon) {
 			icon.remove();
@@ -192,10 +216,10 @@ class CTabFilterItem extends CBaseComponent {
 	}
 
 	/**
-	 * Set browser focus to filter label element.
+	 * Set focused state of item.
 	 */
 	setFocused() {
-		this._target.focus();
+		this._target.focus({preventScroll: true});
 	}
 
 	/**
@@ -233,6 +257,7 @@ class CTabFilterItem extends CBaseComponent {
 		let item_template = this._template || this._content_container.querySelector('[data-template]');
 
 		this._target.parentNode.classList.add(TABFILTERITEM_STYLE_EXPANDED);
+		this._target.setAttribute('aria-expanded', 'true');
 
 		if (item_template instanceof HTMLElement && !this._expanded) {
 			item_template.dispatchEvent(new CustomEvent(TABFILTERITEM_EVENT_EXPAND, {detail: this}));
@@ -250,6 +275,7 @@ class CTabFilterItem extends CBaseComponent {
 
 		this._expanded = false;
 		this._target.parentNode.classList.remove(TABFILTERITEM_STYLE_EXPANDED);
+		this._target.setAttribute('aria-expanded', 'false');
 		this._content_container.classList.add('display-none');
 
 		if (item_template instanceof HTMLElement) {
@@ -276,12 +302,30 @@ class CTabFilterItem extends CBaseComponent {
 	}
 
 	/**
+	 * Set item separated state (whether to visually separate the item from the previous one).
+	 *
+	 * @param {boolean} state
+	 */
+	setSeparated(state) {
+		this.toggleClass(TABFILTERITEM_STYLE_SEPARATED, state);
+	}
+
+	/**
 	 * Check if item have custom time interval.
 	 *
 	 * @return {boolean}
 	 */
 	hasCustomTime() {
 		return !!this._data.filter_custom_time;
+	}
+
+	/**
+	 * Get custom time label.
+	 *
+	 * @returns {string}
+	 */
+	getCustomTimeLabel() {
+		return this.hasCustomTime() ? this._data.filter_custom_time_label : '';
 	}
 
 	/**
@@ -298,6 +342,7 @@ class CTabFilterItem extends CBaseComponent {
 			};
 
 		if (data.filter_custom_time) {
+			this._data.filter_custom_time_label = data.filter_custom_time_label;
 			this._data.from = data.from;
 			this._data.to = data.to;
 		}
@@ -322,6 +367,7 @@ class CTabFilterItem extends CBaseComponent {
 		}
 
 		this._target.text = data.filter_name;
+		this.initUnsavedIndicator();
 		this.setBrowserLocationToApplyUrl();
 	}
 
@@ -329,14 +375,13 @@ class CTabFilterItem extends CBaseComponent {
 	 * Get filter parameters as URLSearchParams object, defining value of unchecked checkboxes equal to
 	 * 'unchecked-value' attribute value.
 	 *
+	 * @param {boolean} preserve_page  Parameter for resetting page.
+	 *
 	 * @return {URLSearchParams}
 	 */
-	getFilterParams() {
+	getFilterParams(preserve_page = true) {
 		let form = this.getForm(),
 			params = null;
-
-		const TAG_OPERATOR_EXISTS = '4';
-		const TAG_OPERATOR_NOT_EXISTS = '5';
 
 		if (form instanceof HTMLFormElement) {
 			var form_data = new FormData(form);
@@ -344,7 +389,7 @@ class CTabFilterItem extends CBaseComponent {
 			// Unset tag filter values for exists/not exists tag filters.
 			for (const [key, value] of form_data.entries()) {
 				let check_tag = key.match(/tags\[(\d+)\]\[operator\]/);
-				if (check_tag && (value === TAG_OPERATOR_EXISTS || value === TAG_OPERATOR_NOT_EXISTS)) {
+				if (check_tag && [TAG_OPERATOR_EXISTS, TAG_OPERATOR_NOT_EXISTS].includes(Number(value))) {
 					form_data.set('tags['+check_tag[1]+'][value]', '');
 				}
 			}
@@ -362,7 +407,7 @@ class CTabFilterItem extends CBaseComponent {
 				params.set('to', this._data.to);
 			}
 
-			if ('page' in this._data && this._data.page > 1) {
+			if (preserve_page && 'page' in this._data && this._data.page > 1) {
 				params.set('page', this._data.page);
 			}
 		}
@@ -377,7 +422,7 @@ class CTabFilterItem extends CBaseComponent {
 	 * @param {URLSearchParams} search_params  Filter field values to be set in URL.
 	 */
 	setBrowserLocation(search_params) {
-		let url = new Curl('', false);
+		let url = new Curl('');
 
 		search_params.set('action', url.getArgument('action'));
 		url.query = search_params.toString();
@@ -406,8 +451,8 @@ class CTabFilterItem extends CBaseComponent {
 	/**
 	 * Keep filter tab results request parameters.
 	 */
-	updateApplyUrl() {
-		this._apply_url = (this.getFilterParams()).toString();
+	updateApplyUrl(preserve_page = true) {
+		this._apply_url = (this.getFilterParams(preserve_page)).toString();
 	}
 
 	/**
@@ -424,11 +469,9 @@ class CTabFilterItem extends CBaseComponent {
 	/**
 	 * Checks difference between original form values and to be posted values.
 	 * Updates this._unsaved according to check results
-	 *
-	 * @param {URLSearchParams} search_params  Filter field values to compare against.
 	 */
-	updateUnsavedState() {
-		let search_params = this.getFilterParams(),
+	updateUnsavedState(preserve_page = true) {
+		let search_params = this.getFilterParams(preserve_page),
 			src_query = new URLSearchParams(this._src_url),
 			ignore_fields = ['filter_name', 'filter_custom_time', 'filter_show_counter', 'from', 'to', 'action', 'page'];
 
@@ -445,7 +488,10 @@ class CTabFilterItem extends CBaseComponent {
 		src_query.sort();
 		search_params.sort();
 		this._unsaved = (src_query.toString() !== search_params.toString());
-		this._target.parentNode.classList.toggle(TABFILTERITEM_STYLE_UNSAVED, this._unsaved);
+
+		if (this._unsaved_indicator) {
+			this._unsaved_indicator.classList.toggle('display-none', !this._unsaved);
+		}
 	}
 
 	/**
@@ -467,7 +513,10 @@ class CTabFilterItem extends CBaseComponent {
 		src_query.sort();
 
 		this._src_url = src_query.toString();
-		this._target.parentNode.classList.remove(TABFILTERITEM_STYLE_UNSAVED);
+
+		if (this._unsaved_indicator) {
+			this._unsaved_indicator.classList.add('display-none');
+		}
 	}
 
 	/**
@@ -564,7 +613,6 @@ class CTabFilterItem extends CBaseComponent {
 					return;
 				}
 
-				this.setFocused();
 				this.fire(TABFILTERITEM_EVENT_SELECT);
 			},
 

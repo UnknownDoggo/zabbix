@@ -1,75 +1,59 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerScheduledReportEdit extends CController {
 
-	protected $report = [];
+	protected array $report = [];
 
-	protected function init() {
-		$this->disableSIDValidation();
+	protected function init(): void {
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->disableCsrfValidation();
 	}
 
-	protected function checkInput() {
-		$fields = [
-			'reportid' =>			'db report.reportid',
-			'userid' =>				'db report.userid',
-			'name' =>				'db report.name',
-			'dashboardid' =>		'db report.dashboardid',
-			'old_dashboardid' =>	'db report.dashboardid',
-			'period' =>				'db report.period|in '.implode(',', [ZBX_REPORT_PERIOD_DAY, ZBX_REPORT_PERIOD_WEEK, ZBX_REPORT_PERIOD_MONTH, ZBX_REPORT_PERIOD_YEAR]),
-			'cycle' =>				'db report.cycle|in '.implode(',', [ZBX_REPORT_CYCLE_DAILY, ZBX_REPORT_CYCLE_WEEKLY, ZBX_REPORT_CYCLE_MONTHLY, ZBX_REPORT_CYCLE_YEARLY]),
-			'weekdays' =>			'array',
-			'hours' =>				'int32',
-			'minutes' =>			'int32',
-			'active_since' =>		'string',
-			'active_till' =>		'string',
-			'subject' =>			'string',
-			'message' =>			'string',
-			'subscriptions' =>		'array',
-			'description' =>		'db report.description',
-			'status' =>				'db report.status|in '.ZBX_REPORT_STATUS_DISABLED.','.ZBX_REPORT_STATUS_ENABLED,
-			'form_refresh' =>		'int32'
-		];
+	protected function checkInput(): bool {
+		$rules = ['object', 'fields' => [
+			'reportid' => ['db report.reportid'],
+			'dashboardid' => ['db report.dashboardid']
+		]];
 
-		$ret = $this->validateInput($fields);
+		$ret = $this->validateInput($rules, true);
 
 		if (!$ret) {
-			$this->setResponse(new CControllerResponseFatal());
+			$this->setResponse(
+				(new CControllerResponseData(['main_block' => json_encode([
+					'error' => [
+						'messages' => array_column(get_and_clear_messages(), 'message')
+					]
+				])]))->disableView()
+			);
 		}
 
 		return $ret;
 	}
 
-	protected function checkPermissions() {
-		if (!$this->checkAccess(CRoleHelper::UI_REPORTS_SCHEDULED_REPORTS)
-				|| (!$this->hasInput('reportid')
-					&& !$this->checkAccess(CRoleHelper::ACTIONS_MANAGE_SCHEDULED_REPORTS))) {
+	protected function checkPermissions(): bool {
+		if (!$this->checkAccess(CRoleHelper::UI_REPORTS_SCHEDULED_REPORTS)) {
 			return false;
 		}
 
-		if ($this->hasInput('reportid') && !$this->hasInput('form_refresh')) {
-			if (!$this->getInput('reportid', 0)) {
-				return false;
-			}
+		if (!$this->hasInput('reportid') && !$this->checkAccess(CRoleHelper::ACTIONS_MANAGE_SCHEDULED_REPORTS)) {
+			return false;
+		}
 
+		if ($this->hasInput('reportid')) {
 			$reports = API::Report()->get([
 				'output' => ['reportid', 'userid', 'name', 'description', 'status', 'dashboardid', 'period', 'cycle',
 					'weekdays', 'start_time', 'active_since', 'active_till', 'subject', 'message'
@@ -89,15 +73,14 @@ class CControllerScheduledReportEdit extends CController {
 		return true;
 	}
 
-	protected function doAction() {
+	protected function doAction(): void {
 		$db_defaults = DB::getDefaults('report');
 		$current_user_name = getUserFullname(CWebUser::$data);
 		$data = [
-			'reportid' => 0,
+			'reportid' => null,
 			'userid' => CWebUser::$data['userid'],
 			'name' => $db_defaults['name'],
 			'dashboardid' => 0,
-			'old_dashboardid' => 0,
 			'period' => $db_defaults['period'],
 			'cycle' => $db_defaults['cycle'],
 			'hours' => '00',
@@ -131,7 +114,6 @@ class CControllerScheduledReportEdit extends CController {
 			$data['userid'] = $this->report['userid'];
 			$data['name'] = $this->report['name'];
 			$data['dashboardid'] = $this->report['dashboardid'];
-			$data['old_dashboardid'] = $this->report['dashboardid'];
 			$data['period'] = $this->report['period'];
 			$data['cycle'] = $this->report['cycle'];
 			$data['hours'] = sprintf("%02d", floor($this->report['start_time'] / SEC_PER_HOUR));
@@ -208,6 +190,7 @@ class CControllerScheduledReportEdit extends CController {
 			}
 
 			if ($data['userid'] != CWebUser::$data['userid']) {
+				$data['owner_inaccessible'] = true;
 				$data['ms_user'] = [[
 					'id' => $data['userid'],
 					'name' => array_key_exists($data['userid'], $db_users)
@@ -261,7 +244,7 @@ class CControllerScheduledReportEdit extends CController {
 			CArrayHelper::sort($data['subscriptions'], ['recipient_name']);
 		}
 
-		$this->getInputs($data, ['reportid', 'name', 'dashboardid', 'old_dashboardid', 'period', 'cycle', 'hours',
+		$this->getInputs($data, ['reportid', 'name', 'dashboardid', 'period', 'cycle', 'hours',
 			'minutes', 'active_since', 'active_till', 'subject', 'message', 'description', 'status', 'form_refresh'
 		]);
 
@@ -305,8 +288,16 @@ class CControllerScheduledReportEdit extends CController {
 			}
 		}
 
-		$response = new CControllerResponseData($data);
-		$response->setTitle(_('Scheduled reports'));
-		$this->setResponse($response);
+		$data['user'] = ['debug_mode' => $this->getDebugMode()];
+		$data['js_validation_rules'] = (new CFormValidator($this->hasInput('reportid')
+			? CControllerScheduledReportUpdate::getValidationRules()
+			: CControllerScheduledReportCreate::getValidationRules()
+		))->getRules();
+
+		$data['js_validation_create_rules'] = $this->hasInput('reportid')
+			? (new CFormValidator(CControllerScheduledReportCreate::getValidationRules()))->getRules()
+			: $data['js_validation_rules'];
+
+		$this->setResponse(new CControllerResponseData($data));
 	}
 }

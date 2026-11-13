@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -26,7 +21,7 @@ require_once dirname(__FILE__).'/include/forms.inc.php';
 
 $page['title'] = _('Details of web scenario');
 $page['file'] = 'httpdetails.php';
-$page['scripts'] = ['class.calendar.js', 'gtlc.js', 'flickerfreescreen.js', 'layout.mode.js'];
+$page['scripts'] = ['gtlc.js', 'flickerfreescreen.js', 'layout.mode.js'];
 $page['type'] = detect_page_type(PAGE_TYPE_HTML);
 $page['web_layout_mode'] = CViewHelper::loadLayoutMode();
 
@@ -80,10 +75,19 @@ $details_screen = CScreenBuilder::getScreen([
 
 $graphs = [];
 
-// dims
-$graph_dims = getGraphDims();
-$graph_dims['width'] = -50;
-$graph_dims['graphHeight'] = 151;
+$httpstep_itemids = [HTTPSTEP_ITEM_TYPE_IN => [], HTTPSTEP_ITEM_TYPE_TIME => []];
+
+$db_httpstep_items = DBselect(
+	'SELECT hi.itemid,hi.type'.
+	' FROM httpstepitem hi,httpstep hs'.
+	' WHERE hi.httpstepid=hs.httpstepid'.
+		' AND hs.httptestid='.zbx_dbstr($httptest['httptestid']).
+		' AND '.dbConditionInt('hi.type', array_keys($httpstep_itemids))
+);
+
+while ($db_httpstep_item = DBfetch($db_httpstep_items)) {
+	$httpstep_itemids[$db_httpstep_item['type']][] = $db_httpstep_item['itemid'];
+}
 
 /*
  * Graph in
@@ -93,14 +97,6 @@ $graph_in = new CScreenBase([
 	'mode' => SCREEN_MODE_PREVIEW,
 	'dataId' => 'graph_in'
 ] + $timeline);
-
-$items = DBfetchArray(DBselect(
-	'SELECT i.itemid,i.value_type,i.history,i.trends,i.hostid'.
-	' FROM items i,httpstepitem hi,httpstep hs'.
-	' WHERE i.itemid=hi.itemid'.
-		' AND hi.httpstepid=hs.httpstepid'.
-		' AND hs.httptestid='.zbx_dbstr($httptest['httptestid'])
-));
 
 $url = (new CUrl('chart3.php'))
 	->setArgument('height', 150)
@@ -126,7 +122,10 @@ $time_control_data = [
 	'id' => 'graph_in',
 	'containerid' => 'graph_in_container',
 	'src' => $url,
-	'objDims' => $graph_dims,
+	'objDims' => array_merge(getGraphDims(null, $httpstep_itemids[HTTPSTEP_ITEM_TYPE_IN]), [
+		'width' => -50,
+		'graphHeight' => 151
+	]),
 	'loadSBox' => 1,
 	'loadImage' => 1
 ];
@@ -168,7 +167,10 @@ $time_control_data = [
 	'id' => 'graph_time',
 	'containerid' => 'graph_time_container',
 	'src' => $url,
-	'objDims' => $graph_dims,
+	'objDims' => array_merge(getGraphDims(null, $httpstep_itemids[HTTPSTEP_ITEM_TYPE_TIME]), [
+		'width' => -50,
+		'graphHeight' => 151
+	]),
 	'loadSBox' => 1,
 	'loadImage' => 1
 ];
@@ -181,12 +183,11 @@ $graph_time->insertFlickerfreeJs();
 CScreenBuilder::insertScreenStandardJs($graph_in->timeline);
 
 // Create graphs widget.
-$widget = (new CWidget())
+(new CHtmlPage())
 	->setTitle(_('Details of web scenario').': '.$http_test_name)
 	->setWebLayoutMode($page['web_layout_mode'])
 	->setControls((new CTag('nav', true,
 		(new CForm())
-			->cleanItems()
 			->addItem((new CList())->addItem(get_icon('kioskmode', ['mode' => $page['web_layout_mode']])))
 		))
 			->setAttribute('aria-label', _('Content controls'))

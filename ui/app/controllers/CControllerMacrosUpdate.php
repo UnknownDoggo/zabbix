@@ -1,42 +1,82 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerMacrosUpdate extends CController {
 
-	protected function checkInput() {
-		$fields = [
-			'macros' => 'array'
-		];
+	protected function init(): void {
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+	}
 
-		$ret = $this->validateInput($fields);
+	public static function getValidationRules(): array {
+		return ['object', 'fields' => [
+			'macros' => ['objects',
+				'uniq' => [['macro']],
+				'fields' => [
+					'globalmacroid' => ['db globalmacro.globalmacroid'],
+					'type' => ['db globalmacro.type', 'required',
+						'in' => [ZBX_MACRO_TYPE_TEXT, ZBX_MACRO_TYPE_SECRET, ZBX_MACRO_TYPE_VAULT]
+					],
+					'value' => [
+						['db globalmacro.value'],
+						['db globalmacro.value', 'required', 'not_empty',
+							'use' => [CVaultSecretParser::class,
+								['provider' => CSettingsHelper::get(CSettingsHelper::VAULT_PROVIDER)]
+							],
+							'when' => ['type', 'in' => [ZBX_MACRO_TYPE_VAULT]]
+						]
+					],
+					'description' => ['db globalmacro.description'],
+					'macro' => [
+						['db globalmacro.macro',
+							'use' => [CUserMacroParser::class, []],
+							'messages' => ['use' => _('Expected user macro format is "{$MACRO}".')]
+						],
+						['db globalmacro.macro', 'required', 'not_empty', 'when' => ['value', 'not_empty']],
+						['db globalmacro.macro', 'required', 'not_empty', 'when' => ['description', 'not_empty']]
+					]
+				],
+				'messages' => [
+					'uniq' => _('Macro name is not unique.')
+				]
+			]
+		]];
+	}
+
+	protected function checkInput(): bool {
+		$ret = $this->validateInput(self::getValidationRules());
 
 		if (!$ret) {
-			$this->setResponse(new CControllerResponseFatal());
+			$form_errors = $this->getValidationError();
+
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'title' => _('Cannot update macros'),
+					'messages' => array_column(get_and_clear_messages(), 'message')
+				]];
+
+			$this->setResponse(new CControllerResponseData(['main_block' => json_encode($response)]));
 		}
 
 		return $ret;
 	}
 
 	protected function checkPermissions() {
-		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
+		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_MACROS);
 	}
 
 	protected function doAction() {
@@ -124,17 +164,18 @@ class CControllerMacrosUpdate extends CController {
 			$result = DBend($result);
 		}
 
-		$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))->setArgument('action', 'macros.edit'));
+		$output = [];
+
 		if ($result) {
-			CMessageHelper::setSuccessTitle(_('Macros updated'));
+			$output['success']['title'] = _('Macros updated');
 		}
 		else {
-			CMessageHelper::setErrorTitle(_('Cannot update macros'));
-			$form_data = $this->getInputAll();
-			$form_data['macros'] = array_values($form_data['macros']);
-			$response->setFormData($form_data);
+			$output['error'] = [
+				'title' => _('Cannot update macros'),
+				'messages' => array_column(get_and_clear_messages(), 'message')
+			];
 		}
 
-		$this->setResponse($response);
+		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
 	}
 }

@@ -1,37 +1,35 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package mysql
 
 import (
-	"context"
+	"net/http"
+	"strconv"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"git.zabbix.com/ap/plugin-support/uri"
-	"git.zabbix.com/ap/plugin-support/zbxerr"
-	"zabbix.com/pkg/tlsconfig"
+	"github.com/omeid/go-yarn"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/uri"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
 const (
+	sqlExt     = ".sql"
 	pluginName = "Mysql"
-	hkInterval = 10
 )
 
 // Plugin inherits plugin.Base and store plugin-specific data.
@@ -45,21 +43,26 @@ type Plugin struct {
 var impl Plugin
 
 // Export implements the Exporter interface.
-func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider) (result interface{}, err error) {
-	params, _, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
-	if err != nil {
-		return nil, err
+//
+//nolint:gocyclo,cyclop // it's an export method, they are supposed to be heavy
+func (p *Plugin) Export(key string, rawParams []string, ctx plugin.ContextProvider) (any, error) {
+	if key == keyCustomQuery && !p.options.CustomQueriesEnabled {
+		return nil, errs.Errorf("key %q is disabled", keyCustomQuery)
 	}
 
-	details, err := tlsconfig.CreateDetails(params["sessionName"], params["TLSConnect"],
-		params["TLSCAFile"], params["TLSCertFile"], params["TLSKeyFile"], params["URI"])
+	params, extraParams, hc, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
 	if err != nil {
-		return nil, zbxerr.ErrorInvalidConfiguration.Wrap(err)
+		return nil, zbxerr.ErrorInvalidParams.Wrap(err)
+	}
+
+	err = metric.SetDefaults(params, hc, p.options.Default)
+	if err != nil {
+		return nil, zbxerr.ErrorInvalidParams.Wrap(err)
 	}
 
 	uri, err := uri.NewWithCreds(params["URI"], params["User"], params["Password"], uriDefaults)
 	if err != nil {
-		return nil, err
+		return nil, zbxerr.ErrorInvalidParams.Wrap(err)
 	}
 
 	handleMetric := getHandlerFunc(key)
@@ -67,7 +70,19 @@ func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider
 		return nil, zbxerr.ErrorUnsupportedMetric
 	}
 
-	conn, err := p.connMgr.GetConnection(*uri, details)
+	connectionTimeout, err := p.getConnectionTimeout(params)
+	if err != nil {
+		return nil, err
+	}
+
+	if ctx.LegacyTimeout() {
+		ctx = plugin.OverrideTimeout(ctx, time.Now(), p.options.LegacyItemTimeout)
+	}
+
+	p.Tracef("query timeout set to: %d", ctx.Timeout())
+	p.Tracef("connection timeout set to: %d", connectionTimeout)
+
+	conn, err := p.connMgr.GetConnection(uri, params, connectionTimeout)
 	if err != nil {
 		// Special logic of processing connection errors should be used if mysql.ping is requested
 		// because it must return pingFailed if any error occurred.
@@ -77,32 +92,63 @@ func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider
 
 		p.Errf(err.Error())
 
-		return nil, err
+		return nil, zbxerr.ErrorConnectionFailed.Wrap(err)
 	}
 
-	ctx := context.Background()
-
-	result, err = handleMetric(ctx, conn, params)
-
+	result, err := handleMetric(ctx, conn, params, extraParams...)
 	if err != nil {
 		p.Errf(err.Error())
+
+		return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
 	}
 
-	return result, err
+	return result, nil
 }
 
 // Start implements the Runner interface and performs initialization when plugin is activated.
 func (p *Plugin) Start() {
-	p.connMgr = NewConnManager(
-		time.Duration(p.options.KeepAlive)*time.Second,
-		time.Duration(p.options.Timeout)*time.Second,
-		time.Duration(p.options.CallTimeout)*time.Second,
-		hkInterval*time.Second,
-	)
+	options := &connectionManagerOptions{
+		keepAlive:    time.Duration(p.options.KeepAlive) * time.Second,
+		queryStorage: p.setCustomQuery(),
+		logger:       p.Logger,
+	}
+
+	p.connMgr = NewConnManager(options)
+}
+
+func (p *Plugin) setCustomQuery() yarn.Yarn {
+	if !p.options.CustomQueriesEnabled {
+		return yarn.NewFromMap(map[string]string{})
+	}
+
+	queryStorage, err := yarn.New(http.Dir(p.options.CustomQueriesPath), "*"+sqlExt)
+	if err != nil {
+		p.Errf(err.Error())
+		// create empty storage if error occurred
+		return yarn.NewFromMap(map[string]string{})
+	}
+
+	return queryStorage
 }
 
 // Stop implements the Runner interface and frees resources when plugin is deactivated.
 func (p *Plugin) Stop() {
 	p.connMgr.Destroy()
 	p.connMgr = nil
+}
+
+func (p *Plugin) getConnectionTimeout(params map[string]string) (int, error) {
+	connectionTimeout, err := strconv.Atoi(params["ConnectionTimeout"])
+	if err != nil {
+		p.Tracef("failed to convert parameter connection timeout %s", err.Error())
+
+		connectionTimeout, err = strconv.Atoi(p.options.Default.ConnectionTimeout)
+		if err != nil {
+			p.Tracef("failed to convert default connection timeout %s", err.Error())
+
+			return 0, errs.New("failed to get connection timeout")
+		}
+	}
+
+	return connectionTimeout, nil
 }

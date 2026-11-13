@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -23,10 +18,7 @@
 
 	function updateProperties(obj, $elm) {
 		obj.$hidden.prop('disabled', obj.options.disabled ? true : null);
-		obj.$input
-			.prop('disabled', obj.options.disabled ? true : null)
-			.prop('readonly', obj.options.disabled ? null : true)
-			.prop('title', obj.options.disabled ? '' : obj.options.hint);
+		obj.$preview.attr('title', obj.options.disabled ? '' : obj.options.hint);
 		obj.$button
 			.prop('disabled', obj.options.disabled ? true : null)
 			.prop('title', obj.options.disabled ? '' : obj.options.hint);
@@ -99,7 +91,7 @@
 			$line_numbers.append(li);
 
 			while (diff < 0) {
-				$line_numbers.find('li:eq(0)').remove();
+				$line_numbers[0].querySelector('li:last-child').remove();
 				diff++;
 			}
 
@@ -107,14 +99,15 @@
 			$textarea.css('margin-left', $line_numbers.outerWidth());
 		}
 
-		var height_offset = 190,
+		var height_offset = 216,
 			$content = $('<div>', {class: 'multilineinput-container'}),
 			monospace_font = obj.options.monospace_font ? ' monospace-font' : '',
 			$textarea = $('<textarea>', {
 				class: 'multilineinput-textarea' + monospace_font,
 				text: obj.$hidden.val(),
 				readonly: obj.options.readonly ? true : null,
-				placeholder: obj.options.placeholder_textarea
+				placeholder: obj.options.placeholder_textarea,
+				spellcheck: false
 			}).attr('wrap', 'off'),
 			$line_numbers = $('<ul>', {class: 'multilineinput-line-numbers' + monospace_font}).append('<li>'),
 			$footer = $('<div>', {class: 'multilineinput-char-count'});
@@ -127,12 +120,12 @@
 			$footer.html(sprintf(t('S_N_CHAR_COUNT'), '<span>0</span>'));
 		}
 
-		overlayDialogue({
-			'title': obj.options.title,
-			'class': 'modal-popup multilineinput-modal',
-			'content': $content,
-			'footer': $footer,
-			'buttons': [
+		const overlay = overlayDialogue({
+			title: obj.options.title,
+			class: 'modal-popup multilineinput-modal',
+			content: $content,
+			footer: $footer,
+			buttons: [
 				{
 					title: t('S_APPLY'),
 					action: function() {
@@ -146,7 +139,12 @@
 					action: function() {}
 				}
 			]
-		}, obj.$button);
+		}, {
+			trigger_element: obj.$button
+		});
+
+		// Display the close button after the screen reader announces the dialog title.
+		overlay.$dialogue.$head.$close_button.show();
 
 		if (obj.options.label_before.length) {
 			height_offset += $('<div>', {class: 'multilineinput-label' + monospace_font})
@@ -167,6 +165,26 @@
 			.css('max-height', 'calc(100vh - ' + (height_offset + 2) + 'px)');
 
 		$textarea[0].setSelectionRange(0, 0);
+
+		if (obj.options.use_tab) {
+			$textarea[0].addEventListener('keydown', e => {
+				if (e.key === 'Tab' && !e.shiftKey) {
+					e.preventDefault();
+
+					const input = e.target;
+					const value = input.value;
+
+					if (value.length < obj.options.maxlength) {
+						const startSelection = input.selectionStart;
+
+						input.value = value.substring(0, startSelection) + "\t" + value.substring(input.selectionEnd);
+
+						input.selectionStart = input.selectionEnd;
+						input.selectionEnd = startSelection + 1;
+					}
+				}
+			});
+		}
 
 		$textarea
 			.on('change contextmenu keydown keyup paste scroll', function() {
@@ -190,7 +208,7 @@
 						$node: $this,
 						options: $.extend({
 							title: '',
-							hint: t('S_CLICK_TO_VIEW_OR_EDIT'),
+							hint: t('Click to view or edit'),
 							value: '',
 							placeholder: '',
 							placeholder_textarea: '',
@@ -202,7 +220,8 @@
 							disabled: false,
 							autofocus: false,
 							line_numbers: true,
-							monospace_font: true
+							monospace_font: true,
+							use_tab: true
 						}, options)
 					};
 
@@ -211,25 +230,26 @@
 					name: $this.data('name')
 				});
 
-				obj.$input = $('<input>', {
-					type: 'text',
-					placeholder: obj.options.placeholder,
-					title: obj.options.hint,
-					tabindex: -1
+				obj.$preview = $('<span>', {
+					class: 'multilineinput-preview',
+					title: obj.options.hint
 				})
+					.attr('data-placeholder', obj.options.placeholder)
 					.toggleClass('monospace-font', obj.options.monospace_font)
-					.prop('readonly', obj.options.disabled ? null : true)
 					.on('mousedown', obj, openModal);
 
 				obj.$button = $('<button>', {
+					class: ZBX_ICON_PENCIL,
 					type: 'button',
 					title: obj.options.hint,
 					autofocus: obj.options.autofocus || null
-				}).on('click', obj, openModal);
+				})
+					.attr('aria-label', t('Click to view or edit'))
+					.on('click', obj, openModal);
 
 				$this
 					.data('multilineInput', obj)
-					.append(obj.$hidden, obj.$input, obj.$button)
+					.append(obj.$hidden, obj.$preview, obj.$button)
 					.on('disable enable', obj, setDisabled)
 					.on('readonly readwrite', obj, setReadOnly)
 					.trigger(obj.options.disabled ? 'disable' : 'enable');
@@ -253,10 +273,13 @@
 						value_lines = $.trim(value).split("\n");
 
 					obj.$hidden.val(value);
-					obj.$input.val(value_lines.length > 1
+
+					var preview = value_lines.length > 1
 						? value_lines[0] + String.fromCharCode(8230) // U+2026 Horizontal ellipsis character.
-						: value_lines[0]
-					);
+						: value_lines[0];
+					obj.$preview
+						.text(preview)
+						.toggleClass('multilineinput-preview-placeholder', preview === '');
 					$this.trigger('change');
 				});
 			}

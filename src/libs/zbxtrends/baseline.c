@@ -1,26 +1,23 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 #include "zbxtrends.h"
 #include "trends.h"
 
-#include "common.h"
-#include "log.h"
+#include "zbxalgo.h"
+#include "zbxtime.h"
+#include "zbxstr.h"
+#include "zbxhistory.h"
 
 /******************************************************************************
  *                                                                            *
@@ -49,11 +46,12 @@ static int	baseline_get_common_data(zbx_uint64_t itemid, const char *table, time
 		int season_num, zbx_time_unit_t season_unit, int skip, zbx_vector_dbl_t *values,
 		zbx_vector_uint64_t *index, char **error)
 {
-	int			i, start, end;
+	int			i;
+	time_t			start, end;
 	double			value_dbl;
 	struct tm		tm, tm_now;
 
-	tm_now = *localtime(&now);
+	tm_now = *zbx_localtime(&now, NULL);
 
 	for (i = 0; i < season_num; i++)
 	{
@@ -119,8 +117,8 @@ static int	baseline_get_common_data(zbx_uint64_t itemid, const char *table, time
 static int	baseline_get_isoyear_data(zbx_uint64_t itemid, const char *table, time_t now, const char *period,
 		int season_num, int skip, zbx_vector_dbl_t *values, zbx_vector_uint64_t *index, char **error)
 {
-	int		i, start, end, period_num;
-	time_t		time_tmp;
+	int		i, period_num;
+	time_t		start, end, time_tmp;
 	double		value_dbl;
 	struct tm	tm_end, tm_start;
 	size_t		len;
@@ -133,7 +131,7 @@ static int	baseline_get_isoyear_data(zbx_uint64_t itemid, const char *table, tim
 		return FAIL;
 
 	time_tmp = end;
-	tm_end = *localtime(&time_tmp);
+	tm_end = *zbx_localtime(&time_tmp, NULL);
 
 	for (i = 0; i < season_num; i++)
 	{
@@ -217,6 +215,12 @@ int	zbx_baseline_get_data(zbx_uint64_t itemid, unsigned char value_type, time_t 
 	const char	*table;
 
 	zabbix_log(LOG_LEVEL_DEBUG, "In %s()", __func__);
+
+	if (FAIL == ZBX_HISTORY_CHECK_TYPE_FLAGS(zbx_history_get_trends_flags(), value_type))
+	{
+		*error = zbx_strdup(*error, "history storage provider does not support trend functions");
+		goto out;
+	}
 
 	switch (value_type)
 	{

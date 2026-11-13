@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -28,34 +23,40 @@ require_once dirname(__FILE__).'/include/page_header.php';
 
 // VAR	TYPE	OPTIONAL	FLAGS	VALIDATION	EXCEPTION
 $fields = [
-	'type' =>           [T_ZBX_INT,			O_OPT, null,	IN([GRAPH_TYPE_NORMAL, GRAPH_TYPE_STACKED]), null],
-	'itemids' =>		[T_ZBX_INT,			O_MAND, P_SYS,	DB_ID,		null],
+	'type' =>			[T_ZBX_INT,			O_OPT, null,	IN([GRAPH_TYPE_NORMAL, GRAPH_TYPE_STACKED]), null],
+	'itemids' =>		[T_ZBX_INT,			O_MAND, P_SYS|P_ONLY_ARRAY,	DB_ID,	null],
 	'from' =>			[T_ZBX_RANGE_TIME,	O_OPT, P_SYS,	null,		null],
 	'to' =>				[T_ZBX_RANGE_TIME,	O_OPT, P_SYS,	null,		null],
 	'profileIdx' =>		[T_ZBX_STR,			O_OPT, null,	null,		null],
 	'profileIdx2' =>	[T_ZBX_STR,			O_OPT, null,	null,		null],
-	'width' =>			[T_ZBX_INT,			O_OPT, null,	BETWEEN(CLineGraphDraw::GRAPH_WIDTH_MIN, 65535),	null],
-	'height' =>			[T_ZBX_INT,			O_OPT, null,	BETWEEN(CLineGraphDraw::GRAPH_HEIGHT_MIN, 65535),	null],
+	'width' =>			[T_ZBX_INT,			O_OPT, P_NZERO,
+		BETWEEN(CGraphDraw::GRAPH_WIDTH_MIN, CGraphDraw::GRAPH_WIDTH_MAX),		null],
+	'height' =>			[T_ZBX_INT,			O_OPT, P_NZERO,
+		BETWEEN(CGraphDraw::GRAPH_HEIGHT_MIN, CGraphDraw::GRAPH_HEIGHT_MAX),	null],
 	'outer' =>			[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null],
 	'batch' =>			[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null],
 	'onlyHeight' =>		[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null],
 	'legend' =>			[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null],
-	'widget_view' =>	[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null]
+	'widget_view' =>	[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null],
+	'resolve_macros' =>	[T_ZBX_INT,			O_OPT, null,	IN('0,1'),	null]
 ];
 if (!check_fields($fields)) {
+	session_write_close();
 	exit();
 }
 validateTimeSelectorPeriod(getRequest('from'), getRequest('to'));
 
 $itemIds = getRequest('itemids');
+$resolve_macros = (bool) getRequest('resolve_macros', 0);
 
 /*
  * Permissions
  */
 $items = API::Item()->get([
-	'output' => ['itemid', 'type', 'master_itemid', 'name', 'delay', 'units', 'hostid', 'history', 'trends',
-		'value_type', 'key_'
+	'output' => ['itemid', 'type', 'master_itemid', $resolve_macros ? 'name_resolved' : 'name', 'delay', 'units',
+		'hostid', 'history', 'trends', 'value_type', 'key_'
 	],
+	'selectPreprocessing' => ['type', 'params'],
 	'selectHosts' => ['name', 'host'],
 	'itemids' => $itemIds,
 	'webitems' => true,
@@ -67,10 +68,15 @@ foreach ($itemIds as $itemId) {
 	}
 }
 
+if ($resolve_macros) {
+	$items = CArrayHelper::renameObjectsKeys($items, ['name_resolved' => 'name']);
+}
+
 $hostNames = [];
 foreach ($items as &$item) {
 	$item['hostname'] = $item['hosts'][0]['name'];
 	$item['host'] = $item['hosts'][0]['host'];
+	unset($item['hosts']);
 	if (!in_array($item['hostname'], $hostNames)) {
 		$hostNames[] = $item['hostname'];
 	}

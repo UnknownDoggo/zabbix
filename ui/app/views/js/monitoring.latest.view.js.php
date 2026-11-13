@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -25,79 +20,92 @@
 ?>
 
 <script>
-	const view = {
-		refresh_url: null,
-		refresh_data: null,
+	const view = new class {
+		#layout_mode = null;
+		#refresh_interval = 0;
+		#refresh_interval_id = null;
+		#filter_defaults = {};
+		#filter = null;
+		#filter_set = null;
+		#active_filter = null;
+		#checkbox_object = null;
+		#datatable = null;
+		#csrf_token = null;
+		#refresh_message_box = null;
+		#popup_message_box = null;
 
-		refresh_simple_url: null,
-		refresh_interval: null,
-		refresh_counters: null,
+		init({
+			checkbox_object,
+			csrf_token,
+			default_sort_field,
+			default_sort_order,
+			filter,
+			filter_defaults,
+			filter_options,
+			filter_set,
+			layout_mode,
+			page,
+			refresh_interval,
+			sort_field,
+			sort_order,
+			storage_idx,
+			user_configs
+		}) {
+			this.#layout_mode = layout_mode;
+			this.#refresh_interval = refresh_interval;
+			this.#filter_defaults = filter_defaults;
+			this.#checkbox_object = checkbox_object;
+			this.#filter_set = filter_set;
+			this.#csrf_token = csrf_token;
 
-		running: false,
-		timeout: null,
-		_refresh_message_box: null,
-		_popup_message_box: null,
-		active_filter: null,
+			this.#initTabFilter(filter_options);
+			this.#initExpandableSubfilter();
+			this.#initListActions();
+			this.#initPopupListeners();
+			this.#initDataTable({filter, page, default_sort_field, default_sort_order, sort_field, sort_order,
+				storage_idx, user_configs});
 
-		checkbox_object: null,
+			this.#scheduleRefresh();
+		}
 
-		init({refresh_url, refresh_data, refresh_interval, filter_options, checkbox_object}) {
-			this.refresh_url = new Curl(refresh_url, false);
-			this.refresh_data = refresh_data;
-			this.refresh_interval = refresh_interval;
-			this.checkbox_object = checkbox_object;
+		#initTabFilter(filter_options) {
+			/** @type {HTMLElement} */
+			const filter = document.getElementById('monitoring_latest_filter');
 
-			const url = new Curl('zabbix.php', false);
-			url.setArgument('action', 'latest.view.refresh');
-			this.refresh_simple_url = url.getUrl();
+			this.#filter = new CTabFilter(filter, filter_options);
+			this.#active_filter = this.#filter._active_item;
 
-			this.initTabFilter(filter_options);
-			this.initExpandableSubfilter();
+			this.#filter.on(TABFILTER_EVENT_URLSET, () => {
+				chkbxRange.clearSelectedOnFilterChange();
 
-			if (this.refresh_interval != 0) {
-				this.running = true;
-				this.scheduleRefresh();
-			}
-		},
+				const tabfilter_changed = this.#active_filter !== this.#filter._active_item;
 
-		initTabFilter(filter_options) {
-			if (!filter_options) {
-				return;
-			}
-
-			this.refresh_counters = this.createCountersRefresh(1);
-			this.filter = new CTabFilter(document.getElementById('monitoring_latest_filter'), filter_options);
-			this.active_filter = this.filter._active_item;
-
-			this.filter.on(TABFILTER_EVENT_URLSET, () => {
-				this.reloadPartialAndTabCounters();
-
-				if (this.active_filter !== this.filter._active_item) {
-					this.active_filter = this.filter._active_item;
+				if (tabfilter_changed) {
+					this.#active_filter = this.#filter._active_item;
 					chkbxRange.checkObjectAll(chkbxRange.pageGoName, false);
-					chkbxRange.clearSelectedOnFilterChange();
-				}
-			});
 
-			document.addEventListener('click', (event) => {
-				if (event.target.classList.contains('<?= ZBX_STYLE_BTN_TAG ?>')) {
-					view.setSubfilter(JSON.parse(event.target.dataset.subfilterTag));
+					this.#datatable.setTabFilterItem(this.#active_filter);
 				}
+
+				this.#scheduleRefresh();
+				this.#refresh({tabfilter_changed});
 			});
 
 			// Tags must be activated also using the enter button on keyboard.
-			document.addEventListener('keydown', (event) => {
-				if (event.which == 13 && event.target.classList.contains('<?= ZBX_STYLE_BTN_TAG ?>')) {
-					view.setSubfilter(JSON.parse(event.target.dataset.subfilterTag));
+			document.addEventListener('keydown', e => {
+				if (e.which == 13 && e.target.classList.contains('<?= ZBX_STYLE_BTN_TAG ?>')) {
+					this.setSubfilter([`subfilter_tags[${encodeURIComponent(e.target.dataset.key)}][]`,
+						e.target.dataset.value
+					]);
 				}
 			});
-		},
+		}
 
-		initExpandableSubfilter() {
+		#initExpandableSubfilter() {
 			document.querySelectorAll('.expandable-subfilter').forEach((element) => {
 				const subfilter = new CExpandableSubfilter(element);
 				subfilter.on(EXPANDABLE_SUBFILTER_EVENT_EXPAND, (e) => {
-					this.filter.setExpandedSubfilters(e.detail.name);
+					this.#filter.setExpandedSubfilters(e.detail.name);
 				});
 			});
 
@@ -108,270 +116,551 @@
 						element.classList.remove('display-none');
 					});
 
-					this.filter.setExpandedSubfilters(expand_tags.dataset['name']);
+					this.#filter.setExpandedSubfilters(expand_tags.dataset['name']);
 					expand_tags.remove();
 				});
 			}
-		},
+		}
 
-		createCountersRefresh(timeout) {
-			if (this.refresh_counters) {
-				clearTimeout(this.refresh_counters);
-				this.refresh_counters = null;
-			}
+		#initListActions() {
+			let form = this.#getCurrentForm().get(0);
 
-			return setTimeout(() => this.getFiltersCounters(), timeout);
-		},
+			form.querySelector('.js-massexecute-item').addEventListener('click', e => {
+				this.executeNow(e.target, {itemids: Object.keys(chkbxRange.getSelectedIds())});
+			});
+		}
 
-		getFiltersCounters() {
-			return $.post(this.refresh_simple_url, {
-				filter_counters: 1
-			})
-			.done((json) => {
-				if (json.filter_counters) {
-					this.filter.updateCounters(json.filter_counters);
-				}
-			})
-			.always(() => {
-				if (this.refresh_interval > 0) {
-					this.refresh_counters = this.createCountersRefresh(this.refresh_interval);
+		#initPopupListeners() {
+			ZABBIX.EventHub.subscribe({
+				require: {
+					context: CPopupManager.EVENT_CONTEXT,
+					event: CPopupManagerEvent.EVENT_OPEN
+				},
+				callback: () => this.#unscheduleRefresh()
+			});
+
+			ZABBIX.EventHub.subscribe({
+				require: {
+					context: CPopupManager.EVENT_CONTEXT,
+					event: CPopupManagerEvent.EVENT_CANCEL
+				},
+				callback: () => this.#scheduleRefresh()
+			});
+
+			ZABBIX.EventHub.subscribe({
+				require: {
+					context: CPopupManager.EVENT_CONTEXT,
+					event: CPopupManagerEvent.EVENT_SUBMIT
+				},
+				callback: ({data, event}) => {
+					event.preventDefault();
+
+					if ('success' in data.submit) {
+						this.#addPopupMessage(
+							makeMessageBox('good', data.submit.success.messages, data.submit.success.title)
+						);
+					}
+
+					uncheckTableRows('latest');
+					this.#refresh();
 				}
 			});
-		},
+		}
 
-		reloadPartialAndTabCounters() {
-			this.refresh_url = new Curl('', false);
+		#initDataTable({filter, page, default_sort_field, default_sort_order, sort_field, sort_order, storage_idx,
+				user_configs}) {
 
-			this.unscheduleRefresh();
-			this.refresh();
+			const data_provider_url = zabbixUrl({
+				action: 'latest.view.data',
+				[CSRF_TOKEN_NAME]: this.#csrf_token
+			});
 
-			// Filter is not present in Kiosk mode.
-			if (this.filter) {
-				const filter_item = this.filter._active_item;
+			const data_provider = new CDefaultDataProvider(data_provider_url);
 
-				if (this.filter._active_item.hasCounter()) {
-					$.post(this.refresh_simple_url, {
-						filter_counters: 1,
-						counter_index: filter_item._index
-					}).done((json) => {
-						if (json.filter_counters) {
-							filter_item.updateCounter(json.filter_counters.pop());
+			this.#datatable = new CDataTable(document.getElementById('datatable-latest'), data_provider)
+				.setColumns([
+					new CDataTableColumn('host', <?= json_encode(_('Host')); ?>)
+						.setFields(['host', 'maintenance', 'maintenanceid', 'maintenance_type', 'maintenance_status'])
+						.setRenderer('host')
+						.setSortable(true)
+						.setWidth('auto'),
+					new CDataTableColumn('name', <?= json_encode(_('Name')); ?>)
+						.setColumnOptions({
+							show_item_key: filter.show_item_key == 1
+						})
+						.setOptionsPopupHandler('name')
+						.setFields(['itemid', 'description_expanded', 'name', 'key_expanded'])
+						.setRenderer('name')
+						.setSortable(true)
+						.setTogglable(false)
+						.setWidth('auto'),
+					new CDataTableColumn('interval', <?= json_encode(_('Interval')); ?>)
+						.setFields(['interval'])
+						.setRenderer('interval')
+						.setVisible(false),
+					new CDataTableColumn('history', <?= json_encode(_('History')); ?>)
+						.setFields(['history'])
+						.setRenderer('history')
+						.setVisible(false),
+					new CDataTableColumn('trends', <?= json_encode(_('Trends')); ?>)
+						.setFields(['trends'])
+						.setRenderer('trends')
+						.setVisible(false),
+					new CDataTableColumn('type', <?= json_encode(_('Type')); ?>)
+						.setFields(['type', 'state'])
+						.setRenderer('type')
+						.setVisible(false),
+					new CDataTableColumn('last_check', <?= json_encode(_('Last check')); ?>)
+						.setFields(['last_check']),
+					new CDataTableColumn('last_value', <?= json_encode(_('Last value')); ?>)
+						.setFields(['value_type', 'last_value', 'last_history_value'])
+						.setRenderer('last_value')
+						.setWidth('20%'),
+					new CDataTableColumn('change', <?= json_encode(_('Change')); ?>)
+						.setFields(['change'])
+						.setRenderer('change'),
+					new CDataTableColumnTags('tags', <?= json_encode(_('Tags')); ?>)
+						.setColumnOptions({
+							object_type: ZBX_TAG_OBJECT_ITEM
+						}),
+					new CDataTableColumnTagValue('tagvalue', <?= json_encode(_('Tag value')); ?>),
+					new CDataTableColumn('actions', <?= json_encode(_('Actions')); ?>)
+						.setFields(['itemid', 'is_graph', 'show_link'])
+						.setRenderer('actions'),
+					new CDataTableColumn('info', <?= json_encode(_('Info')); ?>)
+						.setFields(['item_icons']),
+					new CDataTableColumnCustomText('custom_text', <?= json_encode(_('Custom text')); ?>)
+				])
+				.setPage(page)
+				.setFilter(filter)
+				.setSelectable('items', 'itemids', ['itemid', 'data_actions'])
+				.setDefaultSortField(default_sort_field)
+				.setDefaultSortOrder(default_sort_order)
+				.setSortField(sort_field)
+				.setSortOrder(sort_order)
+				.setStorageIdx(storage_idx)
+				.setTabFilterItem(this.#active_filter)
+				.setStickyHeader(true)
+				.setStickyFooter(true)
+				.setCellRenderer('host', ({cell_data, cell}) => {
+					const [host, maintenance] = cell_data;
+
+					const host_link = document.createElement('a');
+					host_link.classList.add(ZBX_STYLE_LINK_ACTION, ZBX_STYLE_WORDBREAK);
+					host_link.setAttribute('data-menu-popup', JSON.stringify({
+						type: 'host',
+						data: {
+							hostid: host.hostid
 						}
-					});
-				}
-			}
-		},
+					}));
+					host_link.setAttribute('aria-expanded', 'false');
+					host_link.setAttribute('aria-haspopup', 'true');
+					host_link.setAttribute('role', 'button');
+					host_link.setAttribute('href', 'javascript:void(0);');
+					host_link.textContent = host.name;
 
-		getCurrentForm() {
-			return $('form[name=items]');
-		},
+					cell.appendChild(host_link);
 
-		getCurrentSubfilter() {
-			return $('#latest-data-subfilter');
-		},
+					if (maintenance && host.status == HOST_STATUS_MONITORED) {
+						const maintenance_icon = document.createElement('button');
+						maintenance_icon.classList.add(ZBX_STYLE_BTN_ICON, ZBX_ICON_WRENCH_ALT_SMALL,
+							ZBX_STYLE_COLOR_WARNING, ZBX_STYLE_NO_INDENT);
+						maintenance_icon.setAttribute('type', 'button');
+						maintenance_icon.setAttribute('role', 'button');
 
-		_addRefreshMessage(messages) {
-			this._removeRefreshMessage();
+						if (host.maintenance_status == HOST_MAINTENANCE_STATUS_ON) {
+							let hint = `${escapeHtml(maintenance.name)} [${
+								maintenance.maintenance_type == MAINTENANCE_TYPE_NODATA
+									? <?= json_encode(_('Maintenance without data collection')); ?>
+									: <?= json_encode(_('Maintenance with data collection')); ?>}]`;
 
-			this._refresh_message_box = $($.parseHTML(messages));
-			addMessage(this._refresh_message_box);
-		},
+							if (maintenance.description != '') {
+								hint += "\n" + escapeHtml(maintenance.description);
+							}
 
-		_removeRefreshMessage() {
-			if (this._refresh_message_box !== null) {
-				this._refresh_message_box.remove();
-				this._refresh_message_box = null;
-			}
-		},
+							maintenance_icon.setAttribute('data-hintbox-html', hint);
+						}
+						else {
+							maintenance_icon.setAttribute('data-hintbox-html',
+								<?= json_encode(_('Inaccessible maintenance')); ?>);
+						}
 
-		_addPopupMessage(message_box) {
-			this._removePopupMessage();
+						maintenance_icon.setAttribute('data-hintbox', '1');
+						maintenance_icon.setAttribute('data-hintbox-class', ZBX_STYLE_HINTBOX_WRAP);
+						maintenance_icon.setAttribute('data-hintbox-static', '1');
+						maintenance_icon.setAttribute('aria-expanded', 'false');
 
-			this._popup_message_box = message_box;
-			addMessage(this._popup_message_box);
-		},
+						cell.appendChild(maintenance_icon);
+					}
+				})
+				.setCellRenderer('name', ({column, cell_data, cell}) => {
+					const [itemid, description_expanded, name, key_expanded] = cell_data;
 
-		_removePopupMessage() {
-			if (this._popup_message_box !== null) {
-				this._popup_message_box.remove();
-				this._popup_message_box = null;
-			}
-		},
+					cell.innerHTML = '';
 
-		refresh() {
-			this.setLoading();
+					const url_params = objectToSearchParams({action: 'latest.view', context: 'host'});
 
-			const params = this.refresh_url.getArgumentsObject();
-			const exclude = ['action', 'filter_src', 'filter_show_counter', 'filter_custom_time', 'filter_name'];
-			const post_data = Object.keys(params)
-				.filter(key => !exclude.includes(key))
-				.reduce((post_data, key) => {
-					if (key === 'subfilter_tags') {
-						post_data[key] = {...params[key]};
+					const name_link = document.createElement('a');
+					name_link.classList.add(ZBX_STYLE_LINK_ACTION, ZBX_STYLE_WORDBREAK);
+					name_link.setAttribute('data-menu-popup', JSON.stringify({
+						type: 'item',
+						data: {
+							itemid,
+							backurl: `zabbix.php?${url_params}`,
+						},
+						context: 'host'
+					}));
+					name_link.setAttribute('aria-expanded', 'false');
+					name_link.setAttribute('aria-haspopup', 'true');
+					name_link.setAttribute('role', 'button');
+					name_link.setAttribute('href', 'javascript:void(0);');
+					name_link.textContent = name;
+
+					cell.appendChild(name_link);
+
+					if (description_expanded) {
+						const description_icon = document.createElement('button');
+						description_icon.classList.add(ZBX_STYLE_BTN_ICON, ZBX_ICON_ALERT_WITH_CONTENT);
+						description_icon.setAttribute('type', 'button');
+						description_icon.setAttribute('role', 'button');
+						description_icon.setAttribute('data-content', '?');
+						description_icon.setAttribute('data-hintbox-html', description_expanded);
+						description_icon.setAttribute('data-hintbox', '1');
+						description_icon.setAttribute('data-hintbox-class', ZBX_STYLE_HINTBOX_WRAP);
+						description_icon.setAttribute('data-hintbox-static', '1');
+						description_icon.setAttribute('aria-expanded', 'false');
+
+						cell.appendChild(description_icon);
+					}
+
+					const {show_item_key} = column.getColumnOptions();
+
+					if (show_item_key == 1) {
+						const item_key = document.createElement('div');
+						item_key.classList.add(ZBX_STYLE_WORDBREAK, ZBX_STYLE_GREEN);
+						item_key.textContent = key_expanded;
+
+						cell.appendChild(item_key);
+					}
+				})
+				.setCellRenderer('interval', ({cell_data, cell}) => {
+					const [interval] = cell_data;
+
+					const wordbreak = document.createElement('div');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+					wordbreak.textContent = interval;
+
+					cell.appendChild(wordbreak);
+				})
+				.setCellRenderer('history', ({cell_data, cell}) => {
+					const [history] = cell_data;
+
+					const wordbreak = document.createElement('div');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+					wordbreak.textContent = history;
+
+					cell.appendChild(wordbreak);
+				})
+				.setCellRenderer('trends', ({cell_data, cell}) => {
+					const [trends] = cell_data;
+
+					const wordbreak = document.createElement('div');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+					wordbreak.textContent = trends;
+
+					cell.appendChild(wordbreak);
+				})
+				.setCellRenderer('type', ({cell_data, cell}) => {
+					const [type, state] = cell_data;
+
+					const wordbreak = document.createElement('div');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+
+					if (state == ITEM_STATE_NOTSUPPORTED) {
+						const type_container = document.createElement('span');
+						type_container.textContent = type;
+						type_container.classList.add(ZBX_STYLE_GREY);
+
+						wordbreak.appendChild(type_container);
 					}
 					else {
-						post_data[key] = (typeof params[key] === 'object')
-							? [...params[key]].filter(i => i)
-							: params[key];
+						wordbreak.textContent = type;
 					}
 
-					return post_data;
-				}, {});
-
-			post_data['subfilters_expanded'] = this.filter.getExpandedSubfilters();
-
-			var deferred = $.ajax({
-				url: this.refresh_simple_url,
-				data: post_data,
-				type: 'post',
-				dataType: 'json'
-			});
-
-			return this.bindDataEvents(deferred);
-		},
-
-		setLoading() {
-			this.getCurrentForm().addClass('is-loading is-loading-fadein delayed-15s');
-		},
-
-		clearLoading() {
-			this.getCurrentForm().removeClass('is-loading is-loading-fadein delayed-15s');
-		},
-
-		doRefresh(body, subfilter) {
-			this.getCurrentForm().replaceWith(body);
-			this.getCurrentSubfilter().replaceWith(subfilter);
-			chkbxRange.init();
-		},
-
-		bindDataEvents(deferred) {
-			var that = this;
-
-			deferred
-				.done(function(response) {
-					that.onDataDone.call(that, response);
+					cell.appendChild(wordbreak);
 				})
-				.fail(function(jqXHR) {
-					that.onDataFail.call(that, jqXHR);
+				.setCellRenderer('last_value', ({cell_data, cell}) => {
+					const [value_type, last_value, last_history_value] = cell_data;
+
+					const flex_wrapper = document.createElement('div');
+					flex_wrapper.classList.add(ZBX_STYLE_FLEX_WRAPPER);
+
+					if (value_type == ITEM_VALUE_TYPE_BINARY) {
+						const italic = document.createElement('i');
+						italic.classList.add(ZBX_STYLE_GREY);
+						italic.textContent = last_value;
+
+						flex_wrapper.appendChild(italic);
+					}
+					else {
+						const span = document.createElement('span');
+						span.classList.add(ZBX_STYLE_CURSOR_POINTER, ZBX_STYLE_OVERFLOW_ELLIPSIS);
+						span.textContent = last_value;
+
+						const hint = document.createElement('span');
+						hint.classList.add(ZBX_STYLE_HINTBOX_RAW_DATA, ZBX_STYLE_HINTBOX_WRAP);
+						hint.textContent = last_history_value;
+
+						if (last_history_value !== null
+								&& Array.from(last_history_value).length === ZBX_HINTBOX_HTML_LIMIT) {
+							hint.classList.add(ZBX_STYLE_TRIMMED_CONTENT);
+						}
+
+						span.setAttribute('data-hintbox-html', hint.outerHTML);
+						span.setAttribute('data-hintbox', '1');
+						span.setAttribute('data-hintbox-static', '1');
+						span.setAttribute('aria-expanded', 'false');
+
+						flex_wrapper.appendChild(span);
+					}
+
+					cell.appendChild(flex_wrapper);
 				})
-				.always(this.onDataAlways.bind(this));
+				.setCellRenderer('change', ({cell_data, cell}) => {
+					const [change] = cell_data;
 
-			return deferred;
-		},
+					const wordbreak = document.createElement('span');
+					wordbreak.classList.add(ZBX_STYLE_WORDBREAK);
+					wordbreak.textContent = change;
 
-		onDataDone(response) {
-			this.clearLoading();
-			this._removeRefreshMessage();
-			this.doRefresh(response.body, response.subfilter);
+					cell.appendChild(wordbreak);
+				})
+				.setCellRenderer('actions', ({cell_data, cell}) => {
+					const [itemid, is_graph, show_link] = cell_data;
 
-			if ('messages' in response) {
-				this._addRefreshMessage(response.messages);
+					if (!show_link) {
+						return;
+					}
+
+					const data_link = document.createElement('a');
+					data_link.classList.add(ZBX_STYLE_WORDBREAK);
+
+					if (is_graph) {
+						const url = zabbixUrl({
+							action: 'showgraph',
+							itemids: [itemid]
+						}, 'history.php');
+
+						data_link.setAttribute('href', url);
+						data_link.textContent = <?= json_encode(_('Graph')); ?>;
+					}
+					else {
+						const url = zabbixUrl({
+							action: 'showvalues',
+							itemids: [itemid]
+						}, 'history.php');
+
+						data_link.setAttribute('href', url);
+						data_link.textContent = <?= json_encode(_('History')); ?>;
+					}
+
+					cell.appendChild(data_link);
+				})
+				.setOptionsHandler('name', CDataTableOptionsPopupMonitoringLatestName)
+				.on(CMessageHelper.EVENT_MESSAGE, e => {
+					e.stopPropagation();
+
+					const {type, title, messages} = e.detail;
+
+					clearMessages();
+					addMessage(makeMessageBox(type, messages, title));
+				})
+				.on(CPager.EVENT_SELECT, () => this.#scheduleRefresh())
+				.on(CPager.EVENT_STATE_CHANGE, e => {
+					const {page} = e.detail;
+
+					new CState().setParams({page});
+				})
+				.on(CDataTable.EVENT_RENDER, e => {
+					const response = e.detail.response;
+
+					this.#refreshCounters(response);
+
+					if ('debug' in response) {
+						this.#refreshDebug(response.debug);
+					}
+				})
+				.on(CDataTable.EVENT_DATA_SORT, () => this.#scheduleRefresh())
+				.on(CDataTable.EVENT_OPTIONS_POPUP_OPEN, () => this.#unscheduleRefresh())
+				.on(CDataTable.EVENT_OPTIONS_POPUP_CLOSE, () => this.#scheduleRefresh())
+				.on(CDataTable.EVENT_COLUMN_RESIZE_START, () => this.#unscheduleRefresh())
+				.on(CDataTable.EVENT_COLUMN_RESIZE_END, () => this.#scheduleRefresh())
+				.init(user_configs);
+		}
+
+		#getCurrentForm() {
+			return $('form[name=items]');
+		}
+
+		#getCurrentSubfilter() {
+			const latest_data_subfilter = document.getElementById('latest-data-subfilter');
+
+			if (latest_data_subfilter) {
+				return latest_data_subfilter;
+			}
+			else {
+				const table = document.createElement('table');
+
+				table.classList.add('list-table', 'tabfilter-subfilter');
+				table.id = 'latest-data-subfilter';
+
+				return document.querySelector('.tabfilter-content-container').appendChild(table);
+			}
+		}
+
+		#addRefreshMessage(messages) {
+			this.#removeRefreshMessage();
+
+			this.#refresh_message_box = $($.parseHTML(messages));
+			addMessage(this.#refresh_message_box);
+		}
+
+		#removeRefreshMessage() {
+			this.#refresh_message_box?.remove();
+			this.#refresh_message_box = null;
+		}
+
+		#addPopupMessage(message_box) {
+			this.#removePopupMessage();
+
+			this.#popup_message_box = message_box;
+			addMessage(this.#popup_message_box);
+		}
+
+		#removePopupMessage() {
+			if (this.#popup_message_box !== null) {
+				this.#popup_message_box.remove();
+				this.#popup_message_box = null;
+			}
+		}
+
+		#refreshDebug(debug) {
+			const debug_output = document
+				.querySelector(`.wrapper > main > .${ZBX_STYLE_DEBUG_OUTPUT_TABLE_REFRESH}`);
+
+			if (debug_output) {
+				debug_output.classList.add(ZBX_STYLE_DEBUG_OUTPUT);
+				debug_output.innerHTML = new DOMParser().parseFromString(debug, 'text/html')
+					.querySelector(`.${ZBX_STYLE_DEBUG_OUTPUT}`).innerHTML;
+			}
+		}
+
+		#refresh({tabfilter_changed = false, loading_fadein = false} = {}) {
+			closeDialogHandler({which: KEY_ESCAPE});
+
+			this.#unscheduleRefresh();
+
+			const search_params = new URLSearchParams(location.search.substring(1));
+			const url_filter = searchParamsToObject(search_params);
+			const filter = {...this.#filter_defaults, ...url_filter};
+
+			if (!tabfilter_changed) {
+				this.#datatable.updateUserConfig();
 			}
 
-			this.initExpandableSubfilter();
-		},
+			this.#datatable.setFilter(filter)
+				.dispatchEvent(CDataTable.EVENT_INIT, {
+					check_changes: false,
+					force_load: true,
+					loading_fadein,
+					onSuccess: response => this.#onSuccess(response),
+					onFinally: () => this.#scheduleRefresh()
+				});
+		}
 
-		onDataFail(jqXHR) {
-			// Ignore failures caused by page unload.
-			if (jqXHR.status == 0) {
+		#refreshCounters(response) {
+			if (this.#layout_mode === ZBX_LAYOUT_KIOSKMODE) {
 				return;
 			}
 
-			this.clearLoading();
+			if ('filter_counters' in response) {
+				this.#filter.updateCounters(response.filter_counters);
+			}
+		}
 
-			var messages = $(jqXHR.responseText).find('.msg-global');
+		#doRefresh(subfilter = null) {
+			const colapsed_tabfilter = document.querySelector('.tabfilter-collapsed');
 
-			if (messages.length) {
-				this.getCurrentForm().html(messages);
+			if (subfilter !== null) {
+				this.#getCurrentSubfilter().innerHTML = subfilter;
+
+				if (colapsed_tabfilter !== null) {
+					colapsed_tabfilter.classList.remove('display-none');
+				}
 			}
 			else {
-				this.getCurrentForm().html(jqXHR.responseText);
-			}
-		},
+				this.#getCurrentSubfilter().remove();
 
-		onDataAlways() {
-			if (this.running) {
-				this.scheduleRefresh();
-			}
-		},
-
-		scheduleRefresh() {
-			this.unscheduleRefresh();
-
-			if (this.refresh_interval > 0) {
-				this.timeout = setTimeout((function () {
-					this.timeout = null;
-					this.refresh();
-				}).bind(this), this.refresh_interval);
-			}
-		},
-
-		unscheduleRefresh() {
-			if (this.timeout !== null) {
-				clearTimeout(this.timeout);
-				this.timeout = null;
+				if (colapsed_tabfilter !== null) {
+					colapsed_tabfilter.classList.add('display-none');
+				}
 			}
 
-			if (this.deferred) {
-				this.deferred.abort();
+			chkbxRange.init();
+			this.#initListActions();
+		}
+
+		#onSuccess(response) {
+			this.#removeRefreshMessage();
+
+			this.#doRefresh(response.subfilter || null);
+
+			if ('messages' in response) {
+				this.#addRefreshMessage(response.messages);
 			}
-		},
 
-		massCheckNow(button) {
-			button.classList.add('is-loading');
+			this.#refreshCounters(response);
 
+			this.#initExpandableSubfilter();
+		}
+
+		#scheduleRefresh() {
+			if (this.#refresh_interval === 0) {
+				return;
+			}
+
+			this.#unscheduleRefresh();
+			this.#refresh_interval_id = setInterval(() => {
+				if (this.#datatable.isUserInteracting()) {
+					return;
+				}
+
+				this.#refresh({loading_fadein: true});
+			}, this.#refresh_interval);
+		}
+
+		#unscheduleRefresh() {
+			clearInterval(this.#refresh_interval_id);
+			this.#refresh_interval_id = null;
+		}
+
+		executeNow(button, data) {
+			if (button instanceof Element) {
+				button.classList.add('is-loading');
+			}
+
+			let clear_checkboxes = false;
 			const curl = new Curl('zabbix.php');
-			curl.setArgument('action', 'item.masscheck_now');
+			curl.setArgument('action', 'item.execute');
+			data[CSRF_TOKEN_NAME] = <?= json_encode(CCsrfTokenHelper::get('item')); ?>;
 
 			fetch(curl.getUrl(), {
 				method: 'POST',
 				headers: {'Content-Type': 'application/json'},
-				body: JSON.stringify({itemids: Object.keys(chkbxRange.getSelectedIds())})
+				body: JSON.stringify(data)
 			})
 				.then((response) => response.json())
 				.then((response) => {
-					clearMessages();
-
-					if ('error' in response) {
-						addMessage(makeMessageBox('bad', [response.error.messages], response.error.title, true, true));
-					}
-					else if('success' in response) {
-						addMessage(makeMessageBox('good', [], response.success.title, true, false));
-
-						const uncheckids = Object.keys(chkbxRange.getSelectedIds());
-						uncheckTableRows('latest', []);
-						chkbxRange.checkObjects(this.checkbox_object, uncheckids, false);
-						chkbxRange.update(this.checkbox_object);
-					}
-				})
-				.catch(() => {
-					const title = <?= json_encode(_('Unexpected server error.')) ?>;
-					const message_box = makeMessageBox('bad', [], title)[0];
-
-					clearMessages();
-					addMessage(message_box);
-				})
-				.finally(() => {
-					button.classList.remove('is-loading');
-
-					// Deselect the "Execute now" button in both success and error cases, since there is no page reload.
-					button.blur();
-				});
-		},
-
-		checkNow(itemid) {
-			const curl = new Curl('zabbix.php');
-			curl.setArgument('action', 'item.masscheck_now');
-
-			fetch(curl.getUrl(), {
-				method: 'POST',
-				headers: {'Content-Type': 'application/json'},
-				body: JSON.stringify({itemids: [itemid]})
-			})
-				.then((response) => response.json())
-				.then((response) => {
-					clearMessages();
-
 					/*
 					 * Using postMessageError or postMessageOk would mean that those messages are stored in session
 					 * messages and that would mean to reload the page and show them. Also postMessageError would be
@@ -379,91 +668,44 @@
 					 * in postMessageOk case. Instead show message directly that comes from controller.
 					 */
 					if ('error' in response) {
-						addMessage(makeMessageBox('bad', [response.error.messages], response.error.title, true, true));
+						CMessageHelper.error(this.#datatable.getElement(), [response.error.messages],
+							response.error.title, {show_close_box: true, show_details: true});
 					}
-					else if('success' in response) {
-						addMessage(makeMessageBox('good', [], response.success.title, true, false));
+					else if ('success' in response) {
+						clear_checkboxes = true;
+
+						CMessageHelper.success(this.#datatable.getElement(), [], response.success.title,
+							{show_close_box: true, show_details: false});
 					}
 				})
 				.catch(() => {
-					const title = <?= json_encode(_('Unexpected server error.')) ?>;
-					const message_box = makeMessageBox('bad', [], title)[0];
+					const title = <?= json_encode(_('Unexpected server error.')); ?>;
 
-					clearMessages();
-					addMessage(message_box);
+					CMessageHelper.error(this.#datatable.getElement(), [], title);
+				})
+				.finally(() => {
+					if (!(button instanceof Element)) {
+						return;
+					}
+
+					if (clear_checkboxes) {
+						const uncheckids = Object.keys(chkbxRange.getSelectedIds());
+						uncheckTableRows('latest', []);
+						chkbxRange.checkObjects(this.#checkbox_object, uncheckids, false);
+						chkbxRange.update(this.#checkbox_object);
+					}
+
+					button.classList.remove('is-loading');
+					button.blur();
 				});
-		},
-
-		editHost(hostid) {
-			const host_data = {hostid};
-
-			this.openHostPopup(host_data);
-		},
-
-		openHostPopup(host_data) {
-			this._removePopupMessage();
-
-			const original_url = location.href;
-			const overlay = PopUp('popup.host.edit', host_data, {
-				dialogueid: 'host_edit',
-				dialogue_class: 'modal-popup-large',
-				prevent_navigation: true
-			});
-
-			this.unscheduleRefresh();
-
-			overlay.$dialogue[0].addEventListener('dialogue.create', this.events.hostSuccess, {once: true});
-			overlay.$dialogue[0].addEventListener('dialogue.update', this.events.hostSuccess, {once: true});
-			overlay.$dialogue[0].addEventListener('dialogue.delete', this.events.hostDelete, {once: true});
-			overlay.$dialogue[0].addEventListener('overlay.close', () => {
-				history.replaceState({}, '', original_url);
-				this.scheduleRefresh();
-			}, {once: true});
-		},
+		}
 
 		setSubfilter(field) {
-			this.filter.setSubfilter(field[0], field[1]);
-		},
+			this.#filter.setSubfilter(field[0], field[1]);
+		}
 
 		unsetSubfilter(field) {
-			this.filter.unsetSubfilter(field[0], field[1]);
-		},
-
-		events: {
-			hostSuccess(e) {
-				const data = e.detail;
-
-				if ('success' in data) {
-					const title = data.success.title;
-					let messages = [];
-
-					if ('messages' in data.success) {
-						messages = data.success.messages;
-					}
-
-					view._addPopupMessage(makeMessageBox('good', messages, title));
-				}
-
-				view.refresh();
-			},
-
-			hostDelete(e) {
-				const data = e.detail;
-
-				if ('success' in data) {
-					const title = data.success.title;
-					let messages = [];
-
-					if ('messages' in data.success) {
-						messages = data.success.messages;
-					}
-
-					view._addPopupMessage(makeMessageBox('good', messages, title));
-				}
-
-				uncheckTableRows('latest');
-				view.refresh();
-			}
+			this.#filter.unsetSubfilter(field[0], field[1]);
 		}
 	};
 </script>

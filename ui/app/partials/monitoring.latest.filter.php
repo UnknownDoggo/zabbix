@@ -1,21 +1,16 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2021 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -29,7 +24,7 @@ $filter_view_data = array_key_exists('filter_view_data', $data) ? $data['filter_
 $left_column = (new CFormGrid())
 	->addClass(CFormGrid::ZBX_STYLE_FORM_GRID_LABEL_WIDTH_TRUE)
 	->addItem([
-		new CLabel(_('Host groups'), 'groupids__ms'),
+		new CLabel(_('Host groups'), 'groupids_#{uniqid}_ms'),
 		new CFormField(
 			(new CMultiSelect([
 				'name' => 'groupids[]',
@@ -41,9 +36,9 @@ $left_column = (new CFormGrid())
 					'parameters' => [
 						'srctbl' => 'host_groups',
 						'srcfld1' => 'groupid',
-						'dstfrm' => 'zbx_filter',
+						'dstfrm' => CFilter::FORM_NAME,
 						'dstfld1' => 'groupids_',
-						'real_hosts' => true,
+						'with_hosts' => true,
 						'enrich_parent_groups' => true
 					]
 				]
@@ -53,7 +48,7 @@ $left_column = (new CFormGrid())
 		)
 	])
 	->addItem([
-		new CLabel(_('Hosts'), 'hostids__ms'),
+		new CLabel(_('Hosts'), 'hostids_#{uniqid}_ms'),
 		new CFormField(
 			(new CMultiSelect([
 				'name' => 'hostids[]',
@@ -62,13 +57,14 @@ $left_column = (new CFormGrid())
 					? $filter_view_data['hosts_multiselect']
 					: [],
 				'popup' => [
-					'filter_preselect_fields' => [
-						'hostgroups' => 'groupids_'
+					'filter_preselect' => [
+						'id' => 'groupids_',
+						'submit_as' => 'groupid'
 					],
 					'parameters' => [
 						'srctbl' => 'hosts',
 						'srcfld1' => 'hostid',
-						'dstfrm' => 'zbx_filter',
+						'dstfrm' => CFilter::FORM_NAME,
 						'dstfld1' => 'hostids_'
 					]
 				]
@@ -90,12 +86,16 @@ $filter_tags_table->setId('tags_#{uniqid}');
 $filter_tags_table->addRow(
 	(new CCol(
 		(new CRadioButtonList('evaltype', (int) $data['evaltype']))
-			->addValue(_('And/Or'), TAG_EVAL_TYPE_AND_OR, 'evaltype_0#{uniqid}')
-			->addValue(_('Or'), TAG_EVAL_TYPE_OR, 'evaltype_2#{uniqid}')
+			->addValue(_('And/Or'), TAG_EVAL_TYPE_AND_OR, 'evaltype_'.TAG_EVAL_TYPE_AND_OR.'#{uniqid}')
+			->addValue(_('Or'), TAG_EVAL_TYPE_OR, 'evaltype_'.TAG_EVAL_TYPE_OR.'#{uniqid}')
 			->setModern(true)
 			->setId('evaltype_#{uniqid}')
 	))->setColSpan(4)
 );
+
+if(!$data['tags']) {
+	$data['tags'] = [['tag' => '', 'value' => '', 'operator' => TAG_OPERATOR_LIKE]];
+}
 
 $i = 0;
 foreach ($data['tags'] as $tag) {
@@ -138,26 +138,6 @@ $filter_tags_table->addRow(
 	))->setColSpan(3)
 );
 
-$tag_format_line = (new CHorList())
-	->addItem((new CRadioButtonList('show_tags', (int) $data['show_tags']))
-		->addValue(_('None'), SHOW_TAGS_NONE, 'show_tags_0#{uniqid}')
-		->addValue(SHOW_TAGS_1, SHOW_TAGS_1, 'show_tags_1#{uniqid}')
-		->addValue(SHOW_TAGS_2, SHOW_TAGS_2, 'show_tags_2#{uniqid}')
-		->addValue(SHOW_TAGS_3, SHOW_TAGS_3, 'show_tags_3#{uniqid}')
-		->setModern(true)
-		->setId('show_tags_#{uniqid}')
-	)
-	->addItem((new CDiv())->addClass(ZBX_STYLE_FORM_INPUT_MARGIN))
-	->addItem(new CLabel(_('Tag name')))
-	->addItem((new CRadioButtonList('tag_name_format', (int) $data['tag_name_format']))
-		->addValue(_('Full'), TAG_NAME_FULL, 'tag_name_format_0#{uniqid}')
-		->addValue(_('Shortened'), TAG_NAME_SHORTENED, 'tag_name_format_1#{uniqid}')
-		->addValue(_('None'), TAG_NAME_NONE, 'tag_name_format_2#{uniqid}')
-		->setModern(true)
-		->setEnabled((int) $data['show_tags'] !== SHOW_TAGS_NONE)
-		->setId('tag_name_format_#{uniqid}')
-	);
-
 $right_column = (new CFormGrid())
 	->addClass(CFormGrid::ZBX_STYLE_FORM_GRID_LABEL_WIDTH_TRUE)
 	->addItem([
@@ -165,27 +145,15 @@ $right_column = (new CFormGrid())
 		new CFormField($filter_tags_table)
 	])
 	->addItem([
-		new CLabel(_('Show tags')),
-		new CFormField($tag_format_line)
-	])
-	->addItem([
-		new CLabel(_('Tag display priority')),
+		new CLabel(_('State'), 'state_#{uniqid}'),
 		new CFormField(
-			(new CTextBox('tag_priority', $data['tag_priority']))
-				->setWidth(ZBX_TEXTAREA_FILTER_STANDARD_WIDTH)
-				->setAttribute('placeholder', _('comma-separated list'))
-				->setEnabled((int) $data['show_tags'] !== SHOW_TAGS_NONE)
-				->setId('tag_priority_#{uniqid}')
+			(new CRadioButtonList('state', (int) $data['state']))
+				->addValue(_('All'), -1, 'state_all#{uniqid}')
+				->addValue(_('Normal'), ITEM_STATE_NORMAL, 'state_'.ITEM_STATE_NORMAL.'#{uniqid}')
+				->addValue(_('Not supported'), ITEM_STATE_NOTSUPPORTED, 'state_'.ITEM_STATE_NOTSUPPORTED.'#{uniqid}')
+				->setModern()
+				->setId('state_#{uniqid}')
 		)
-	])
-	->addItem([
-		new CLabel(_('Show details')),
-		new CFormField([
-			(new CCheckBox('show_details'))
-				->setChecked($data['show_details'] == 1)
-				->setUncheckedValue(0)
-				->removeId()
-		])
 	]);
 
 $filter_template = (new CDiv())
@@ -197,16 +165,13 @@ $filter_template = (new CDiv())
 	]);
 
 $template = (new CForm('get'))
-	->cleanItems()
-	->setName('zbx_filter')
+	->setName(CFilter::FORM_NAME)
 	->addItem([
 		$filter_template,
-		(new CSubmitButton(null))->addClass(ZBX_STYLE_DISPLAY_NONE),
+		(new CSubmitButton())->addClass(ZBX_STYLE_FORM_SUBMIT_HIDDEN),
 		(new CVar('filter_name', '#{filter_name}'))->removeId(),
 		(new CVar('filter_show_counter', '#{filter_show_counter}'))->removeId(),
-		(new CVar('filter_custom_time', '#{filter_custom_time}'))->removeId(),
-		(new CVar('sort', '#{sort}'))->removeId(),
-		(new CVar('sortorder', '#{sortorder}'))->removeId()
+		(new CVar('filter_custom_time', '#{filter_custom_time}'))->removeId()
 	]);
 
 if (array_key_exists('render_html', $data)) {
@@ -220,12 +185,12 @@ if (array_key_exists('render_html', $data)) {
 	return;
 }
 
-(new CScriptTemplate('filter-monitoring-latest'))
+(new CTemplateTag('filter-monitoring-latest'))
 	->setAttribute('data-template', 'monitoring.latest.filter')
 	->addItem($template)
 	->show();
 
-(new CScriptTemplate('filter-tag-row-tmpl'))
+(new CTemplateTag('filter-tag-row-tmpl'))
 	->addItem(
 		(new CRow([
 			(new CTextBox('tags[#{rowNum}][tag]', '#{tag}'))
@@ -265,8 +230,8 @@ if (array_key_exists('render_html', $data)) {
 
 	function render(data, container) {
 		// "Save as" can contain only home tab, also home tab cannot contain "Update" button.
-		$('[name="filter_new"],[name="filter_update"]').hide()
-			.filter(data.filter_configurable ? '[name="filter_update"]' : '[name="filter_new"]').show();
+		document.querySelector('[name="filter_new"]').style.display = data.filter_configurable ? 'none' : '';
+		document.querySelector('[name="filter_update"]').style.display = data.filter_configurable ? '' : 'none';
 
 		// host groups multiselect
 		$('#groupids_' + data.uniqid, container).multiSelectHelper({
@@ -275,7 +240,7 @@ if (array_key_exists('render_html', $data)) {
 			name: 'groupids[]',
 			data: data.filter_view_data.groups_multiselect || [],
 			objectOptions: {
-				real_hosts: 1,
+				with_hosts: 1,
 				enrich_parent_groups: 1
 			},
 			popup: {
@@ -283,9 +248,9 @@ if (array_key_exists('render_html', $data)) {
 					multiselect: '1',
 					srctbl: 'host_groups',
 					srcfld1: 'groupid',
-					dstfrm: 'zbx_filter',
+					dstfrm: '<?= CFilter::FORM_NAME; ?>',
 					dstfld1: 'groupids_' + data.uniqid,
-					real_hosts: 1,
+					with_hosts: 1,
 					enrich_parent_groups: 1
 				}
 			}
@@ -298,21 +263,24 @@ if (array_key_exists('render_html', $data)) {
 			name: 'hostids[]',
 			data: (data.filter_view_data.hosts_multiselect || []),
 			popup: {
-				filter_preselect_fields: {
-					hostgroups: 'groupids_' + data.uniqid
+				filter_preselect: {
+					id: 'groupids_' + data.uniqid,
+					submit_as: 'groupid'
 				},
 				parameters: {
 					multiselect: 1,
 					srctbl: 'hosts',
 					srcfld1: 'hostid',
-					dstfrm: 'zbx_filter',
+					dstfrm: '<?= CFilter::FORM_NAME; ?>',
 					dstfld1: 'hostids_' + data.uniqid,
 				}
 			}
 		});
 
 		// tags table
-		if (data.tags.length == 0) {
+		$('#tags_' + data.uniqid, container).find('.form_row').remove();
+
+		if (data.tags.length === 0) {
 			data.tags.push({'tag': '', 'value': '', 'operator': <?= TAG_OPERATOR_LIKE ?>, uniqid: data.uniqid});
 		}
 
@@ -338,7 +306,7 @@ if (array_key_exists('render_html', $data)) {
 		});
 
 		// Input, radio and single checkboxes.
-		const fields = ['name', 'evaltype', 'show_details', 'show_tags', 'tag_name_format', 'tag_priority'];
+		const fields = ['name', 'evaltype', 'show_details', 'show_tags', 'state', 'tag_name_format', 'tag_priority'];
 
 		fields.forEach(key => {
 			const elm = $('[name="' + key + '"]', container);
@@ -356,7 +324,9 @@ if (array_key_exists('render_html', $data)) {
 
 		// Render subfilter fields.
 		const form = container.querySelector('form');
-		const subfilter_fields = ['subfilter_hostids', 'subfilter_tagnames', 'subfilter_tags', 'subfilter_data'];
+		const subfilter_fields = ['subfilter_hostids', 'subfilter_tagnames', 'subfilter_tags','subfilter_state',
+			'subfilter_data'
+		];
 
 		subfilter_fields.forEach(key => {
 			if ((key in data) && data[key].length != 0) {
@@ -399,10 +369,10 @@ if (array_key_exists('render_html', $data)) {
 		this.resetUnsavedState();
 	}
 
-	function expand(data, container) {
+	function expand(data) {
 		// "Save as" can contain only home tab, also home tab cannot contain "Update" button.
-		$('[name="filter_new"],[name="filter_update"]').hide()
-			.filter(data.filter_configurable ? '[name="filter_update"]' : '[name="filter_new"]').show();
+		document.querySelector('[name="filter_new"]').style.display = data.filter_configurable ? 'none' : '';
+		document.querySelector('[name="filter_update"]').style.display = data.filter_configurable ? '' : 'none';
 	}
 
 	function select(data, container) {
@@ -414,7 +384,7 @@ if (array_key_exists('render_html', $data)) {
 		render.call(ev.detail, ev.detail._data, ev.detail._content_container);
 	});
 	template.addEventListener(TABFILTERITEM_EVENT_EXPAND, function (ev) {
-		expand.call(ev.detail, ev.detail._data, ev.detail._content_container);
+		expand.call(ev.detail, ev.detail._data);
 	});
 	template.addEventListener(TABFILTERITEM_EVENT_SELECT, function (ev) {
 		select.call(ev.detail, ev.detail._data, ev.detail._content_container);

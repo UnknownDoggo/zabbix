@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -58,7 +53,7 @@ class CMaintenance extends CApiService {
 
 		$sqlParts = [
 			'select'	=> ['maintenance' => 'm.maintenanceid'],
-			'from'		=> ['maintenances' => 'maintenances m'],
+			'from'		=> 'maintenances m',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -80,7 +75,7 @@ class CMaintenance extends CApiService {
 			'searchWildcardsEnabled'	=> null,
 			// output
 			'output'					=> API_OUTPUT_EXTEND,
-			'selectGroups'				=> null,
+			'selectHostGroups'			=> null,
 			'selectHosts'				=> null,
 			'selectTags'				=> null,
 			'selectTimeperiods'			=> null,
@@ -93,120 +88,107 @@ class CMaintenance extends CApiService {
 		];
 		$options = zbx_array_merge($defOptions, $options);
 
+		self::validateGet($options);
+
 		// editable + PERMISSION CHECK
-		$maintenanceids = [];
-		if (self::$userData['type'] == USER_TYPE_SUPER_ADMIN || $options['nopermissions']) {
-			if (!is_null($options['groupids']) || !is_null($options['hostids'])) {
-				if (!is_null($options['groupids'])) {
-					zbx_value2array($options['groupids']);
-					$res = DBselect(
-						'SELECT mmg.maintenanceid'.
-						' FROM maintenances_groups mmg'.
-						' WHERE '.dbConditionInt('mmg.groupid', $options['groupids'])
-					);
-					while ($maintenance = DBfetch($res)) {
-						$maintenanceids[] = $maintenance['maintenanceid'];
-					}
-				}
-
-				$sql = 'SELECT mmh.maintenanceid'.
-						' FROM maintenances_hosts mmh,hosts_groups hg'.
-						' WHERE hg.hostid=mmh.hostid';
-
-				if (!is_null($options['groupids'])) {
-					zbx_value2array($options['groupids']);
-					$sql .= ' AND '.dbConditionInt('hg.groupid', $options['groupids']);
-				}
-
-				if (!is_null($options['hostids'])) {
-					zbx_value2array($options['hostids']);
-					$sql .= ' AND '.dbConditionInt('hg.hostid', $options['hostids']);
-				}
-				$res = DBselect($sql);
-				while ($maintenance = DBfetch($res)) {
-					$maintenanceids[] = $maintenance['maintenanceid'];
-				}
-				$sqlParts['where'][] = dbConditionInt('m.maintenanceid', $maintenanceids);
+		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
+			if (self::$userData['ugsetid'] == 0) {
+				return $options['countOutput'] ? '0' : [];
 			}
-		}
-		else {
-			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
+
+			$permission_condition = $options['editable']
+				? ' AND (p.hgsetid IS NULL OR p.permission<'.PERM_READ_WRITE.')'
+				: ' AND p.hgsetid IS NULL';
+
+			$sqlParts['where'][] = 'NOT EXISTS ('.
+				'SELECT NULL'.
+				' FROM maintenances_hosts mh'.
+				' JOIN host_hgset hh ON mh.hostid=hh.hostid'.
+				' LEFT JOIN permission p ON hh.hgsetid=p.hgsetid'.
+					' AND p.ugsetid='.self::$userData['ugsetid'].
+				' WHERE m.maintenanceid=mh.maintenanceid'.
+					$permission_condition.
+			')';
+
+			$permission_condition = $options['editable']
+				? ' OR MAX(p.permission)<'.PERM_READ_WRITE
+				: '';
+
+			$sqlParts['where'][] = 'NOT EXISTS ('.
+				'SELECT NULL'.
+				' FROM maintenance_trigger mt'.
+				' JOIN functions f ON mt.triggerid=f.triggerid'.
+				' JOIN items i ON f.itemid=i.itemid'.
+				' JOIN host_hgset hh ON i.hostid=hh.hostid'.
+				' LEFT JOIN permission p ON hh.hgsetid=p.hgsetid'.
+					' AND p.ugsetid='.self::$userData['ugsetid'].
+				' WHERE m.maintenanceid=mt.maintenanceid'.
+				' GROUP by mt.triggerid'.
+				' HAVING COUNT(p.permission)<COUNT(*)'.
+					$permission_condition.
+			')';
+
 			$userGroups = getUserGroupsByUserId(self::$userData['userid']);
+			$permission = $options['editable'] ? PERM_READ_WRITE : PERM_READ;
 
-			$sql = 'SELECT m.maintenanceid'.
-					' FROM maintenances m'.
-					' WHERE NOT EXISTS ('.
-						'SELECT NULL'.
-						' FROM maintenances_hosts mh,hosts_groups hg'.
-							' LEFT JOIN rights r'.
-								' ON r.id=hg.groupid'.
-									' AND '.dbConditionInt('r.groupid', $userGroups).
-						' WHERE m.maintenanceid=mh.maintenanceid'.
-							' AND mh.hostid=hg.hostid'.
-						' GROUP by mh.hostid'.
-						' HAVING MIN(r.permission) IS NULL'.
-							' OR MIN(r.permission)='.PERM_DENY.
-							' OR MAX(r.permission)<'.zbx_dbstr($permission).
-						')'.
-					' AND NOT EXISTS ('.
-						'SELECT NULL'.
-						' FROM maintenances_groups mg'.
-							' LEFT JOIN rights r'.
-								' ON r.id=mg.groupid'.
-									' AND '.dbConditionInt('r.groupid', $userGroups).
-						' WHERE m.maintenanceid=mg.maintenanceid'.
-						' GROUP by mg.groupid'.
-						' HAVING MIN(r.permission) IS NULL'.
-							' OR MIN(r.permission)='.PERM_DENY.
-							' OR MAX(r.permission)<'.zbx_dbstr($permission).
-						')';
+			$sqlParts['where'][] = 'NOT EXISTS ('.
+				'SELECT NULL'.
+				' FROM maintenances_groups mg'.
+				' LEFT JOIN rights r ON mg.groupid=r.id'.
+					' AND '.dbConditionId('r.groupid', $userGroups).
+				' WHERE m.maintenanceid=mg.maintenanceid'.
+				' GROUP by mg.groupid'.
+				' HAVING MIN(r.permission) IS NULL'.
+					' OR MIN(r.permission)='.PERM_DENY.
+					' OR MAX(r.permission)<'.zbx_dbstr($permission).
+			')';
+		}
 
-			if (!is_null($options['groupids'])) {
-				zbx_value2array($options['groupids']);
-				$sql .= ' AND ('.
-						'EXISTS ('.
-							'SELECT NULL'.
-								' FROM maintenances_groups mg'.
-								' WHERE m.maintenanceid=mg.maintenanceid'.
-								' AND '.dbConditionInt('mg.groupid', $options['groupids']).
-							')'.
-						' OR EXISTS ('.
-							'SELECT NULL'.
-								' FROM maintenances_hosts mh,hosts_groups hg'.
-								' WHERE m.maintenanceid=mh.maintenanceid'.
-									' AND mh.hostid=hg.hostid'.
-									' AND '.dbConditionInt('hg.groupid', $options['groupids']).
-							')'.
-						')';
-			}
+		if ($options['groupids'] !== null) {
+			zbx_value2array($options['groupids']);
 
-			if (!is_null($options['hostids'])) {
-				zbx_value2array($options['hostids']);
-				$sql .= ' AND EXISTS ('.
-						'SELECT NULL'.
-							' FROM maintenances_hosts mh'.
-							' WHERE m.maintenanceid=mh.maintenanceid'.
-								' AND '.dbConditionInt('mh.hostid', $options['hostids']).
-						')';
-			}
+			$sqlParts['where'][] = '('.
+				'EXISTS ('.
+					'SELECT NULL'.
+					' FROM maintenances_groups mg'.
+					' WHERE m.maintenanceid=mg.maintenanceid'.
+						' AND '.dbConditionId('mg.groupid', $options['groupids']).
+				')'.
+				' OR EXISTS ('.
+					'SELECT NULL'.
+					' FROM maintenances_hosts mh,hosts_groups hg'.
+					' WHERE m.maintenanceid=mh.maintenanceid'.
+						' AND mh.hostid=hg.hostid'.
+						' AND '.dbConditionId('hg.groupid', $options['groupids']).
+				')'.
+			')';
+		}
 
-			if (!is_null($options['maintenanceids'])) {
-				zbx_value2array($options['maintenanceids']);
-				$sql .= ' AND '.dbConditionInt('m.maintenanceid', $options['maintenanceids']);
-			}
+		if ($options['hostids'] !== null) {
+			zbx_value2array($options['hostids']);
 
-			$res = DBselect($sql);
-			while ($maintenance = DBfetch($res)) {
-				$maintenanceids[] = $maintenance['maintenanceid'];
-			}
-			$sqlParts['where'][] = dbConditionInt('m.maintenanceid', $maintenanceids);
+			$sqlParts['where'][] = 'EXISTS ('.
+				'SELECT NULL'.
+				' FROM maintenances_hosts mh'.
+				' WHERE m.maintenanceid=mh.maintenanceid'.
+					' AND '.dbConditionId('mh.hostid', $options['hostids']).
+			')';
 		}
 
 		// maintenanceids
-		if (!is_null($options['maintenanceids'])) {
+		if ($options['maintenanceids'] !== null) {
 			zbx_value2array($options['maintenanceids']);
 
 			$sqlParts['where'][] = dbConditionInt('m.maintenanceid', $options['maintenanceids']);
+		}
+
+		if ($options['triggerids'] !== null) {
+			$sqlParts['where'][] = 'EXISTS ('.
+				'SELECT NULL'.
+				' FROM maintenance_trigger mt'.
+				' WHERE m.maintenanceid=mt.maintenanceid'.
+				' AND '.dbConditionId('mt.triggerid', $options['triggerids']).
+			')';
 		}
 
 		// filter
@@ -247,12 +229,27 @@ class CMaintenance extends CApiService {
 
 		if ($result) {
 			$result = $this->addRelatedObjects($options, $result);
+
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
-		}
 		return $result;
+	}
+
+	private static function validateGet(array &$options): void {
+		$api_input_rules = ['type' => API_OBJECT, 'flags' => API_ALLOW_UNEXPECTED, 'fields' => [
+			// Filters.
+			'triggerids' =>			['type' => API_IDS, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'default' => null],
+			// Output.
+			'selectTriggers' =>		['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', CTrigger::OUTPUT_FIELDS), 'default' => null],
+			'selectEventNames' =>	['type' => API_OUTPUT, 'flags' => API_ALLOW_NULL | API_NORMALIZE, 'in' => implode(',', ['operator', 'value']), 'default' => null]
+		]];
+
+		if (!CApiInputValidator::validate($api_input_rules, $options, '/', $error)) {
+			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+		}
 	}
 
 	/**
@@ -277,6 +274,8 @@ class CMaintenance extends CApiService {
 		self::updateTags($maintenances);
 		self::updateGroups($maintenances);
 		self::updateHosts($maintenances);
+		self::updateTriggers($maintenances);
+		self::updateEventNames($maintenances);
 		self::updateTimeperiods($maintenances);
 
 		self::addAuditLog(CAudit::ACTION_ADD, CAudit::RESOURCE_MAINTENANCE, $maintenances);
@@ -303,21 +302,32 @@ class CMaintenance extends CApiService {
 			'tags' =>				['type' => API_MULTIPLE, 'rules' => [
 										['if' => ['field' => 'maintenance_type', 'in' => implode(',', [MAINTENANCE_TYPE_NORMAL])], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['tag', 'operator', 'value']], 'fields' => [
 				'tag' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('maintenance_tag', 'tag')],
-				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_TAG_OPERATOR_EQUAL, MAINTENANCE_TAG_OPERATOR_LIKE]), 'default' => DB::getDefault('maintenance_tag', 'operator')],
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_TAG_OPERATOR_EQUAL, MAINTENANCE_TAG_OPERATOR_NOT_EQUAL, MAINTENANCE_TAG_OPERATOR_LIKE, MAINTENANCE_TAG_OPERATOR_NOT_LIKE]), 'default' => DB::getDefault('maintenance_tag', 'operator')],
 				'value' =>					['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('maintenance_tag', 'value'), 'default' => DB::getDefault('maintenance_tag', 'value')]
 										]],
 										['else' => true, 'type' => API_UNEXPECTED]
 			]],
-			'groupids' =>			['type' => API_IDS, 'flags' => API_DEPRECATED, 'uniq' => true],
-			'hostids' =>			['type' => API_IDS, 'flags' => API_DEPRECATED, 'uniq' => true],
 			'groups' =>				['type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['groupid']], 'fields' => [
 				'groupid' =>			['type' => API_ID, 'flags' => API_REQUIRED]
 			]],
 			'hosts' =>				['type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['hostid']], 'fields' => [
 				'hostid' =>				['type' => API_ID, 'flags' => API_REQUIRED]
 			]],
+			'triggers' =>			['type' => API_MULTIPLE, 'rules' => [
+										['if' => ['field' => 'maintenance_type', 'in' => MAINTENANCE_TYPE_NORMAL], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['triggerid']], 'fields' => [
+				'triggerid' =>				['type' => API_ID, 'flags' => API_REQUIRED]
+										]],
+										['else' => true, 'type' => API_OBJECTS, 'length' => 0]
+			]],
+			'event_names' =>		['type' => API_MULTIPLE, 'rules' => [
+										['if' => ['field' => 'maintenance_type', 'in' => MAINTENANCE_TYPE_NORMAL], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['operator', 'value']], 'fields' => [
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_EVENT_NAME_OPERATOR_LIKE, MAINTENANCE_EVENT_NAME_OPERATOR_NOT_LIKE]), 'default' => DB::getDefault('maintenance_eventname', 'operator')],
+				'value' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('maintenance_eventname', 'value')]
+										]],
+										['else' => true, 'type' => API_OBJECTS, 'length' => 0]
+			]],
 			'timeperiods' =>		['type' => API_OBJECTS, 'flags' => API_REQUIRED | API_NOT_EMPTY | API_NORMALIZE, 'fields' => [
-				'period' =>				['type' => API_TIME_UNIT, 'in' => implode(':', [5 * SEC_PER_MIN, ZBX_MAX_INT32]), 'default' => SEC_PER_HOUR],
+				'period' =>				['type' => API_TIME_UNIT, 'in' => implode(':', [5 * SEC_PER_MIN, CMaintenanceHelper::MAX_TIMEPERIOD]), 'default' => SEC_PER_HOUR],
 				'timeperiod_type' =>	['type' => API_INT32, 'in' => implode(',', [TIMEPERIOD_TYPE_ONETIME, TIMEPERIOD_TYPE_DAILY, TIMEPERIOD_TYPE_WEEKLY, TIMEPERIOD_TYPE_MONTHLY]), 'default' => DB::getDefault('timeperiods', 'timeperiod_type')],
 				'start_date' =>			['type' => API_MULTIPLE, 'rules' => [
 											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_ONETIME])], 'type' => API_TIMESTAMP, 'default' => time()],
@@ -328,7 +338,8 @@ class CMaintenance extends CApiService {
 											['else' => true, 'type' => API_UNEXPECTED]
 				]],
 				'every' =>				['type' => API_MULTIPLE, 'rules' => [
-											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_DAILY, TIMEPERIOD_TYPE_WEEKLY])], 'type' => API_INT32, 'in' => implode(':', [1, ZBX_MAX_INT32]), 'default' => DB::getDefault('timeperiods', 'every')],
+											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_DAILY])], 'type' => API_INT32, 'in' => implode(':', [1, 999]), 'default' => DB::getDefault('timeperiods', 'every')],
+											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_WEEKLY])], 'type' => API_INT32, 'in' => implode(':', [1, 99]), 'default' => DB::getDefault('timeperiods', 'every')],
 											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_MONTHLY])], 'type' => API_INT32, 'in' => implode(',', [MONTH_WEEK_FIRST, MONTH_WEEK_SECOND, MONTH_WEEK_THIRD, MONTH_WEEK_FOURTH, MONTH_WEEK_LAST]), 'default' => DB::getDefault('timeperiods', 'every')],
 											['else' => true, 'type' => API_UNEXPECTED]
 				]],
@@ -353,42 +364,18 @@ class CMaintenance extends CApiService {
 		}
 
 		foreach ($maintenances as &$maintenance) {
-			if (array_key_exists('groupids', $maintenance)) {
-				if (array_key_exists('groups', $maintenance)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Parameter "%1$s" is deprecated.', 'groupids'));
-				}
-
-				$maintenance['groups'] = zbx_toObject($maintenance['groupids'], 'groupid');
-				unset($maintenance['groupids']);
-			}
-
-			if (array_key_exists('hostids', $maintenance)) {
-				if (array_key_exists('hosts', $maintenance)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Parameter "%1$s" is deprecated.', 'hostids'));
-				}
-
-				$maintenance['hosts'] = zbx_toObject($maintenance['hostids'], 'hostid');
-				unset($maintenance['hostids']);
-			}
-		}
-		unset($maintenance);
-
-		foreach ($maintenances as &$maintenance) {
 			$maintenance['active_since'] -= $maintenance['active_since'] % SEC_PER_MIN;
 			$maintenance['active_till'] -= $maintenance['active_till'] % SEC_PER_MIN;
-
-			if ((!array_key_exists('groups', $maintenance) || !$maintenance['groups'])
-					&& (!array_key_exists('hosts', $maintenance) || !$maintenance['hosts'])) {
-				self::exception(ZBX_API_ERROR_PARAMETERS, _('At least one host group or host must be selected.'));
-			}
 		}
 		unset($maintenance);
 
+		self::checkAnyTargetSpecified($maintenances);
 		$maintenances = self::validateTimePeriods($maintenances);
 
 		self::checkDuplicates($maintenances);
 		self::checkGroups($maintenances);
 		self::checkHosts($maintenances);
+		self::checkTriggers($maintenances);
 	}
 
 	/**
@@ -402,6 +389,8 @@ class CMaintenance extends CApiService {
 		}
 
 		$this->validateUpdate($maintenances, $db_maintenances);
+
+		self::addFieldDefaultsByMaintenanceType($maintenances, $db_maintenances);
 
 		$upd_maintenances = [];
 
@@ -425,6 +414,8 @@ class CMaintenance extends CApiService {
 		self::updateTags($maintenances, $db_maintenances);
 		self::updateGroups($maintenances, $db_maintenances);
 		self::updateHosts($maintenances, $db_maintenances);
+		self::updateTriggers($maintenances, $db_maintenances);
+		self::updateEventNames($maintenances, $db_maintenances);
 		self::updateTimeperiods($maintenances, $db_maintenances);
 
 		self::addAuditLog(CAudit::ACTION_UPDATE, CAudit::RESOURCE_MAINTENANCE, $maintenances, $db_maintenances);
@@ -438,37 +429,14 @@ class CMaintenance extends CApiService {
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	protected function validateUpdate(array &$maintenances, array &$db_maintenances = null): void {
+	protected function validateUpdate(array &$maintenances, ?array &$db_maintenances = null): void {
 		$api_input_rules = ['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE | API_ALLOW_UNEXPECTED, 'uniq' => [['maintenanceid']], 'fields' => [
-			'maintenanceid' =>	['type' => API_ID, 'flags' => API_REQUIRED],
-			'groupids' =>		['type' => API_IDS, 'flags' => API_DEPRECATED, 'uniq' => true],
-			'hostids' =>		['type' => API_IDS, 'flags' => API_DEPRECATED, 'uniq' => true]
+			'maintenanceid' =>	['type' => API_ID, 'flags' => API_REQUIRED]
 		]];
 
 		if (!CApiInputValidator::validate($api_input_rules, $maintenances, '/', $error)) {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
-
-		foreach ($maintenances as &$maintenance) {
-			if (array_key_exists('groupids', $maintenance)) {
-				if (array_key_exists('groups', $maintenance)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Parameter "%1$s" is deprecated.', 'groupids'));
-				}
-
-				$maintenance['groups'] = zbx_toObject($maintenance['groupids'], 'groupid');
-				unset($maintenance['groupids']);
-			}
-
-			if (array_key_exists('hostids', $maintenance)) {
-				if (array_key_exists('hosts', $maintenance)) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _s('Parameter "%1$s" is deprecated.', 'hostids'));
-				}
-
-				$maintenance['hosts'] = zbx_toObject($maintenance['hostids'], 'hostid');
-				unset($maintenance['hostids']);
-			}
-		}
-		unset($maintenance);
 
 		$db_maintenances = $this->get([
 			'output' => ['maintenanceid', 'name', 'maintenance_type', 'description', 'active_since', 'active_till',
@@ -501,7 +469,7 @@ class CMaintenance extends CApiService {
 			'tags' =>				['type' => API_MULTIPLE, 'rules' => [
 										['if' => ['field' => 'maintenance_type', 'in' => implode(',', [MAINTENANCE_TYPE_NORMAL])], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['tag', 'operator', 'value']], 'fields' => [
 				'tag' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('maintenance_tag', 'tag')],
-				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_TAG_OPERATOR_EQUAL, MAINTENANCE_TAG_OPERATOR_LIKE]), 'default' => DB::getDefault('maintenance_tag', 'operator')],
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_TAG_OPERATOR_EQUAL, MAINTENANCE_TAG_OPERATOR_NOT_EQUAL, MAINTENANCE_TAG_OPERATOR_LIKE, MAINTENANCE_TAG_OPERATOR_NOT_LIKE]), 'default' => DB::getDefault('maintenance_tag', 'operator')],
 				'value' =>					['type' => API_STRING_UTF8, 'length' => DB::getFieldLength('maintenance_tag', 'value'), 'default' => DB::getDefault('maintenance_tag', 'value')]
 										]],
 										['else' => true, 'type' => API_UNEXPECTED]
@@ -512,8 +480,21 @@ class CMaintenance extends CApiService {
 			'hosts' =>				['type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['hostid']], 'fields' => [
 				'hostid' =>				['type' => API_ID, 'flags' => API_REQUIRED]
 			]],
+			'triggers' =>			['type' => API_MULTIPLE, 'rules' => [
+										['if' => ['field' => 'maintenance_type', 'in' => MAINTENANCE_TYPE_NORMAL], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['triggerid']], 'fields' => [
+				'triggerid' =>				['type' => API_ID, 'flags' => API_REQUIRED]
+										]],
+										['else' => true, 'type' => API_OBJECTS, 'length' => 0]
+			]],
+			'event_names' =>		['type' => API_MULTIPLE, 'rules' => [
+										['if' => ['field' => 'maintenance_type', 'in' => MAINTENANCE_TYPE_NORMAL], 'type' => API_OBJECTS, 'flags' => API_NORMALIZE, 'uniq' => [['operator', 'value']], 'fields' => [
+				'operator' =>				['type' => API_INT32, 'in' => implode(',', [MAINTENANCE_EVENT_NAME_OPERATOR_LIKE, MAINTENANCE_EVENT_NAME_OPERATOR_NOT_LIKE]), 'default' => DB::getDefault('maintenance_eventname', 'operator')],
+				'value' =>					['type' => API_STRING_UTF8, 'flags' => API_REQUIRED | API_NOT_EMPTY, 'length' => DB::getFieldLength('maintenance_eventname', 'value')]
+										]],
+										['else' => true, 'type' => API_OBJECTS, 'length' => 0]
+			]],
 			'timeperiods' =>		['type' => API_OBJECTS, 'flags' => API_NOT_EMPTY | API_NORMALIZE, 'fields' => [
-				'period' =>				['type' => API_TIME_UNIT, 'in' => implode(':', [5 * SEC_PER_MIN, ZBX_MAX_INT32]), 'default' => SEC_PER_HOUR],
+				'period' =>				['type' => API_TIME_UNIT, 'in' => implode(':', [5 * SEC_PER_MIN, CMaintenanceHelper::MAX_TIMEPERIOD]), 'default' => SEC_PER_HOUR],
 				'timeperiod_type' =>	['type' => API_INT32, 'in' => implode(',', [TIMEPERIOD_TYPE_ONETIME, TIMEPERIOD_TYPE_DAILY, TIMEPERIOD_TYPE_WEEKLY, TIMEPERIOD_TYPE_MONTHLY]), 'default' => DB::getDefault('timeperiods', 'timeperiod_type')],
 				'start_date' =>			['type' => API_MULTIPLE, 'rules' => [
 											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_ONETIME])], 'type' => API_TIMESTAMP, 'default' => time()],
@@ -524,7 +505,8 @@ class CMaintenance extends CApiService {
 											['else' => true, 'type' => API_UNEXPECTED]
 				]],
 				'every' =>				['type' => API_MULTIPLE, 'rules' => [
-											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_DAILY, TIMEPERIOD_TYPE_WEEKLY])], 'type' => API_INT32, 'in' => implode(':', [1, ZBX_MAX_INT32]), 'default' => DB::getDefault('timeperiods', 'every')],
+											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_DAILY])], 'type' => API_INT32, 'in' => implode(':', [1, 999]), 'default' => DB::getDefault('timeperiods', 'every')],
+											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_WEEKLY])], 'type' => API_INT32, 'in' => implode(':', [1, 99]), 'default' => DB::getDefault('timeperiods', 'every')],
 											['if' => ['field' => 'timeperiod_type', 'in' => implode(',', [TIMEPERIOD_TYPE_MONTHLY])], 'type' => API_INT32, 'in' => implode(',', [MONTH_WEEK_FIRST, MONTH_WEEK_SECOND, MONTH_WEEK_THIRD, MONTH_WEEK_FOURTH, MONTH_WEEK_LAST]), 'default' => DB::getDefault('timeperiods', 'every')],
 											['else' => true, 'type' => API_UNEXPECTED]
 				]],
@@ -548,38 +530,36 @@ class CMaintenance extends CApiService {
 			self::exception(ZBX_API_ERROR_PARAMETERS, $error);
 		}
 
-		$maintenances = self::validateTimePeriods($maintenances);
-
 		self::addAffectedObjects($maintenances, $db_maintenances);
+
+		self::checkAnyTargetSpecified($maintenances, $db_maintenances);
+		$maintenances = self::validateTimePeriods($maintenances);
 
 		foreach ($maintenances as &$maintenance) {
 			$maintenance['active_since'] -= $maintenance['active_since'] % SEC_PER_MIN;
 			$maintenance['active_till'] -= $maintenance['active_till'] % SEC_PER_MIN;
-
-			if ($maintenance['maintenance_type'] != $db_maintenances[$maintenance['maintenanceid']]['maintenance_type']
-					&& $maintenance['maintenance_type'] == MAINTENANCE_TYPE_NODATA) {
-				$maintenance['tags_evaltype'] = DB::getDefault('maintenances', 'tags_evaltype');
-			}
-
-			if (array_key_exists('groups', $maintenance) || array_key_exists('hosts', $maintenance)) {
-				$groups = array_key_exists('groups', $maintenance)
-					? $maintenance['groups']
-					: $db_maintenances[$maintenance['maintenanceid']]['groups'];
-
-				$hosts = array_key_exists('hosts', $maintenance)
-					? $maintenance['hosts']
-					: $db_maintenances[$maintenance['maintenanceid']]['hosts'];
-
-				if (!$groups && !$hosts) {
-					self::exception(ZBX_API_ERROR_PARAMETERS, _('At least one host group or host must be selected.'));
-				}
-			}
 		}
 		unset($maintenance);
 
 		self::checkDuplicates($maintenances, $db_maintenances);
 		self::checkGroups($maintenances, $db_maintenances);
 		self::checkHosts($maintenances, $db_maintenances);
+		self::checkTriggers($maintenances, $db_maintenances);
+	}
+
+	private static function addFieldDefaultsByMaintenanceType(array &$maintenances, array $db_maintenances): void {
+		foreach ($maintenances as &$maintenance) {
+			if ($maintenance['maintenance_type'] != $db_maintenances[$maintenance['maintenanceid']]['maintenance_type']
+					&& $maintenance['maintenance_type'] != MAINTENANCE_TYPE_NORMAL) {
+				$maintenance += [
+					'tags_evaltype' => DB::getDefault('maintenances', 'tags_evaltype'),
+					'tags' => [],
+					'triggers' => [],
+					'event_names' => []
+				];
+			}
+		}
+		unset($maintenance);
 	}
 
 	/**
@@ -613,11 +593,7 @@ class CMaintenance extends CApiService {
 			'where' => ['maintenanceid' => $maintenanceids]
 		]);
 
-		DB::delete('maintenances_windows', ['maintenanceid' => $maintenanceids]);
 		DB::delete('timeperiods', ['timeperiodid' => array_column($maintenances_windows, 'timeperiodid')]);
-		DB::delete('maintenances_hosts', ['maintenanceid' => $maintenanceids]);
-		DB::delete('maintenances_groups', ['maintenanceid' => $maintenanceids]);
-		DB::delete('maintenance_tag', ['maintenanceid' => $maintenanceids]);
 		DB::delete('maintenances', ['maintenanceid' => $maintenanceids]);
 
 		self::addAuditLog(CAudit::ACTION_DELETE, CAudit::RESOURCE_MAINTENANCE, $db_maintenances);
@@ -631,7 +607,7 @@ class CMaintenance extends CApiService {
 	 *
 	 * @throws APIException if the input is invalid.
 	 */
-	private function validateDelete(array $maintenanceids, array &$db_maintenances = null): void {
+	private function validateDelete(array $maintenanceids, ?array &$db_maintenances = null): void {
 		$api_input_rules = ['type' => API_IDS, 'flags' => API_NOT_EMPTY, 'uniq' => true];
 
 		if (!CApiInputValidator::validate($api_input_rules, $maintenanceids, '/', $error)) {
@@ -666,7 +642,7 @@ class CMaintenance extends CApiService {
 			}
 
 			foreach ($maintenance['timeperiods'] as &$timeperiod) {
-				$timeperiod['period'] = timeUnitToSeconds($timeperiod['period'], true);
+				$timeperiod['period'] = timeUnitToSeconds($timeperiod['period']);
 				$timeperiod['period'] -= $timeperiod['period'] % SEC_PER_MIN;
 
 				if ($timeperiod['timeperiod_type'] == TIMEPERIOD_TYPE_ONETIME) {
@@ -698,6 +674,43 @@ class CMaintenance extends CApiService {
 		return $maintenances;
 	}
 
+	private static function checkAnyTargetSpecified(array $maintenances, ?array $db_maintenances = null): void {
+		foreach ($maintenances as $maintenance) {
+			$target_types = $maintenance['maintenance_type'] == MAINTENANCE_TYPE_NORMAL
+				? ['groups', 'hosts', 'triggers']
+				: ['groups', 'hosts'];
+
+			$maintenance_targets = array_intersect_key($maintenance, array_flip($target_types));
+
+			if (!$maintenance_targets) {
+				if ($db_maintenances === null) {
+					$error = $maintenance['maintenance_type'] == MAINTENANCE_TYPE_NORMAL
+						? _('At least one host group, host or trigger must be selected.')
+						: _('At least one host group or host must be selected.');
+
+					self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+				}
+
+				if ($maintenance['maintenance_type']
+						== $db_maintenances[$maintenance['maintenanceid']]['maintenance_type']) {
+					continue;
+				}
+			}
+
+			$maintenance_targets += $db_maintenances === null
+				? array_fill_keys($target_types, [])
+				: array_intersect_key($db_maintenances[$maintenance['maintenanceid']], array_flip($target_types));
+
+			if (!array_filter($maintenance_targets)) {
+				$error = $maintenance['maintenance_type'] == MAINTENANCE_TYPE_NORMAL
+					? _('At least one host group, host or trigger must be selected.')
+					: _('At least one host group or host must be selected.');
+
+				self::exception(ZBX_API_ERROR_PARAMETERS, $error);
+			}
+		}
+	}
+
 	/**
 	 * Check for unique maintenance names.
 	 *
@@ -706,7 +719,7 @@ class CMaintenance extends CApiService {
 	 *
 	 * @throws APIException if maintenance names are not unique.
 	 */
-	protected static function checkDuplicates(array $maintenances, array $db_maintenances = null): void {
+	protected static function checkDuplicates(array $maintenances, ?array $db_maintenances = null): void {
 		$names = [];
 
 		foreach ($maintenances as $maintenance) {
@@ -743,8 +756,8 @@ class CMaintenance extends CApiService {
 	 *
 	 * @throws APIException if groups are not valid.
 	 */
-	private static function checkGroups(array $maintenances, array $db_maintenances = null): void {
-		$edit_groupids = [];
+	private static function checkGroups(array $maintenances, ?array $db_maintenances = null): void {
+		$ins_groupids = [];
 
 		foreach ($maintenances as $maintenance) {
 			if (!array_key_exists('groups', $maintenance)) {
@@ -754,29 +767,26 @@ class CMaintenance extends CApiService {
 			$groupids = array_column($maintenance['groups'], 'groupid');
 
 			if ($db_maintenances === null) {
-				$edit_groupids += array_flip($groupids);
+				$ins_groupids += array_flip($groupids);
 			}
 			else {
 				$db_groupids = array_column($db_maintenances[$maintenance['maintenanceid']]['groups'], 'groupid');
 
-				$ins_groupids = array_flip(array_diff($groupids, $db_groupids));
-				$del_groupids = array_flip(array_diff($db_groupids, $groupids));
-
-				$edit_groupids += $ins_groupids + $del_groupids;
+				$ins_groupids += array_flip(array_diff($groupids, $db_groupids));
 			}
 		}
 
-		if (!$edit_groupids) {
+		if (!$ins_groupids) {
 			return;
 		}
 
 		$count = API::HostGroup()->get([
 			'countOutput' => true,
-			'groupids' => array_keys($edit_groupids),
+			'groupids' => array_keys($ins_groupids),
 			'editable' => true
 		]);
 
-		if ($count != count($edit_groupids)) {
+		if ($count != count($ins_groupids)) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
 	}
@@ -789,8 +799,8 @@ class CMaintenance extends CApiService {
 	 *
 	 * @throws APIException if hosts are not valid.
 	 */
-	private static function checkHosts(array $maintenances, array $db_maintenances = null): void {
-		$edit_hostids = [];
+	private static function checkHosts(array $maintenances, ?array $db_maintenances = null): void {
+		$ins_hostids = [];
 
 		foreach ($maintenances as $maintenance) {
 			if (!array_key_exists('hosts', $maintenance)) {
@@ -800,33 +810,65 @@ class CMaintenance extends CApiService {
 			$hostids = array_column($maintenance['hosts'], 'hostid');
 
 			if ($db_maintenances === null) {
-				$edit_hostids += array_flip($hostids);
+				$ins_hostids += array_flip($hostids);
 			}
 			else {
 				$db_hostids = array_column($db_maintenances[$maintenance['maintenanceid']]['hosts'], 'hostid');
 
-				$ins_hostids = array_flip(array_diff($hostids, $db_hostids));
-				$del_hostids = array_flip(array_diff($db_hostids, $hostids));
-
-				$edit_hostids += $ins_hostids + $del_hostids;
+				$ins_hostids += array_flip(array_diff($hostids, $db_hostids));
 			}
 		}
 
-		if (!$edit_hostids) {
+		if (!$ins_hostids) {
 			return;
 		}
 
 		$count = API::Host()->get([
 			'countOutput' => true,
-			'hostids' => array_keys($edit_hostids),
+			'hostids' => array_keys($ins_hostids),
 			'editable' => true
 		]);
 
-		if ($count != count($edit_hostids)) {
+		if ($count != count($ins_hostids)) {
 			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
 		}
 	}
 
+	private static function checkTriggers(array $maintenances, ?array $db_maintenances = null): void {
+		$ins_triggerids = [];
+
+		foreach ($maintenances as $maintenance) {
+			if (!array_key_exists('triggers', $maintenance)) {
+				continue;
+			}
+
+			$triggerids = array_column($maintenance['triggers'], 'triggerid');
+
+			if ($db_maintenances === null) {
+				$ins_triggerids += array_flip($triggerids);
+			}
+			else {
+				$db_triggerids = array_column($db_maintenances[$maintenance['maintenanceid']]['triggers'], 'triggerid');
+
+				$ins_triggerids += array_flip(array_diff($triggerids, $db_triggerids));
+			}
+		}
+
+		if (!$ins_triggerids) {
+			return;
+		}
+
+		$count = API::Trigger()->get([
+			'countOutput' => true,
+			'triggerids' => array_keys($ins_triggerids),
+			'templated' => false,
+			'editable' => true
+		]);
+
+		if ($count != count($ins_triggerids)) {
+			self::exception(ZBX_API_ERROR_PERMISSIONS, _('No permissions to referred object or it does not exist!'));
+		}
+	}
 
 	/**
 	 * Update table "maintenance_tag".
@@ -834,19 +876,13 @@ class CMaintenance extends CApiService {
 	 * @param array      $maintenances
 	 * @param array|null $db_maintenances
 	 */
-	private static function updateTags(array &$maintenances, array $db_maintenances = null): void {
+	private static function updateTags(array &$maintenances, ?array $db_maintenances = null): void {
 		$ins_maintenance_tags = [];
 		$del_maintenancetagids = [];
 
 		foreach ($maintenances as &$maintenance) {
-			if (($db_maintenances === null && !array_key_exists('tags', $maintenance))
-					|| ($db_maintenances !== null
-						&& !array_key_exists('tags', $db_maintenances[$maintenance['maintenanceid']]))) {
+			if (!array_key_exists('tags', $maintenance)) {
 				continue;
-			}
-
-			if ($db_maintenances !== null && !array_key_exists('tags', $maintenance)) {
-				$maintenance['tags'] = [];
 			}
 
 			$db_tags = ($db_maintenances !== null) ? $db_maintenances[$maintenance['maintenanceid']]['tags'] : [];
@@ -902,7 +938,7 @@ class CMaintenance extends CApiService {
 	 * @param array      $maintenances
 	 * @param array|null $db_maintenances
 	 */
-	private static function updateGroups(array &$maintenances, array $db_maintenances = null): void {
+	private static function updateGroups(array &$maintenances, ?array $db_maintenances = null): void {
 		$ins_groups = [];
 		$del_groupids = [];
 
@@ -964,7 +1000,7 @@ class CMaintenance extends CApiService {
 	 * @param array      $maintenances
 	 * @param array|null $db_maintenances
 	 */
-	private static function updateHosts(array &$maintenances, array $db_maintenances = null): void {
+	private static function updateHosts(array &$maintenances, ?array $db_maintenances = null): void {
 		$ins_maintenances_hosts = [];
 		$del_maintenance_hostids = [];
 
@@ -1022,13 +1058,129 @@ class CMaintenance extends CApiService {
 		unset($maintenance);
 	}
 
+	private static function updateTriggers(array &$maintenances, ?array $db_maintenances = null): void {
+		$ins_maintenance_triggers = [];
+		$del_maintenance_triggerids = [];
+
+		foreach ($maintenances as &$maintenance) {
+			if (!array_key_exists('triggers', $maintenance)) {
+				continue;
+			}
+
+			$maintenanceid = $maintenance['maintenanceid'];
+
+			$db_triggers = ($db_maintenances !== null)
+				? array_column($db_maintenances[$maintenanceid]['triggers'], null, 'triggerid')
+				: [];
+
+			foreach ($maintenance['triggers'] as &$trigger) {
+				if (array_key_exists($trigger['triggerid'], $db_triggers)) {
+					$trigger['maintenance_triggerid'] = $db_triggers[$trigger['triggerid']]['maintenance_triggerid'];
+					unset($db_triggers[$trigger['triggerid']]);
+				}
+				else {
+					$ins_maintenance_triggers[] = [
+						'maintenanceid' => $maintenanceid,
+						'triggerid' => $trigger['triggerid']
+					];
+				}
+			}
+			unset($trigger);
+
+			$del_maintenance_triggerids = array_merge($del_maintenance_triggerids,
+				array_column($db_triggers, 'maintenance_triggerid')
+			);
+		}
+		unset($maintenance);
+
+		if ($del_maintenance_triggerids) {
+			DB::delete('maintenance_trigger', ['maintenance_triggerid' => $del_maintenance_triggerids]);
+		}
+
+		if ($ins_maintenance_triggers) {
+			$maintenance_triggerids = DB::insertBatch('maintenance_trigger', $ins_maintenance_triggers);
+		}
+
+		foreach ($maintenances as &$maintenance) {
+			if (!array_key_exists('triggers', $maintenance)) {
+				continue;
+			}
+
+			foreach ($maintenance['triggers'] as &$trigger) {
+				if (!array_key_exists('maintenance_triggerid', $trigger)) {
+					$trigger['maintenance_triggerid'] = array_shift($maintenance_triggerids);
+				}
+			}
+			unset($trigger);
+		}
+		unset($maintenance);
+	}
+
+	private static function updateEventNames(array &$maintenances, ?array $db_maintenances = null): void {
+		$ins_event_names = [];
+		$del_maintenance_eventnameids = [];
+
+		foreach ($maintenances as &$maintenance) {
+			if (!array_key_exists('event_names', $maintenance)) {
+				continue;
+			}
+
+			$db_event_names = ($db_maintenances !== null)
+				? $db_maintenances[$maintenance['maintenanceid']]['event_names']
+				: [];
+
+			foreach ($maintenance['event_names'] as &$event_name) {
+				$db_maintenance_eventnameid = key(
+					array_filter($db_event_names, static function (array $db_event_name) use ($event_name): bool {
+						return $event_name['operator'] == $db_event_name['operator']
+							&& $event_name['value'] === $db_event_name['value'];
+					})
+				);
+
+				if ($db_maintenance_eventnameid !== null) {
+					$event_name['maintenance_eventnameid'] = $db_maintenance_eventnameid;
+					unset($db_event_names[$db_maintenance_eventnameid]);
+				}
+				else {
+					$ins_event_names[] = ['maintenanceid' => $maintenance['maintenanceid']] + $event_name;
+				}
+			}
+			unset($event_name);
+
+			$del_maintenance_eventnameids = array_merge($del_maintenance_eventnameids, array_keys($db_event_names));
+		}
+		unset($maintenance);
+
+		if ($del_maintenance_eventnameids) {
+			DB::delete('maintenance_eventname', ['maintenance_eventnameid' => $del_maintenance_eventnameids]);
+		}
+
+		if ($ins_event_names) {
+			$maintenance_eventnameids = DB::insert('maintenance_eventname', $ins_event_names);
+		}
+
+		foreach ($maintenances as &$maintenance) {
+			if (!array_key_exists('event_names', $maintenance)) {
+				continue;
+			}
+
+			foreach ($maintenance['event_names'] as &$event_name) {
+				if (!array_key_exists('maintenance_eventnameid', $event_name)) {
+					$event_name['maintenance_eventnameid'] = array_shift($maintenance_eventnameids);
+				}
+			}
+			unset($event_name);
+		}
+		unset($maintenance);
+	}
+
 	/**
 	 * Update tables "periods" and "maintenances_windows".
 	 *
 	 * @param array      $maintenances
 	 * @param array|null $db_maintenances
 	 */
-	private static function updateTimeperiods(array &$maintenances, array $db_maintenances = null): void {
+	private static function updateTimeperiods(array &$maintenances, ?array $db_maintenances = null): void {
 		$ins_timeperiods = [];
 		$ins_maintenances_windows = [];
 		$del_timeperiodids = [];
@@ -1113,7 +1265,8 @@ class CMaintenance extends CApiService {
 	 */
 	private static function addAffectedObjects(array $maintenances, array &$db_maintenances): void {
 		self::addAffectedTags($maintenances, $db_maintenances);
-		self::addAffectedGroupsAndHosts($maintenances, $db_maintenances);
+		self::addAffectedTargets($maintenances, $db_maintenances);
+		self::addAffectedEventNames($maintenances, $db_maintenances);
 		self::addAffectedTimeperiods($maintenances, $db_maintenances);
 	}
 
@@ -1155,18 +1308,90 @@ class CMaintenance extends CApiService {
 		}
 	}
 
-	/**
-	 * @param array $maintenances
-	 * @param array $db_maintenances
-	 */
-	private static function addAffectedGroupsAndHosts(array $maintenances, array &$db_maintenances): void {
+	private static function addAffectedTargets(array $maintenances, array &$db_maintenances): void {
+		$target_maintenanceids = [];
+
+		foreach ($maintenances as $maintenance) {
+			$target_types = $maintenance['maintenance_type'] == MAINTENANCE_TYPE_NORMAL
+				? ['groups', 'hosts', 'triggers']
+				: ['groups', 'hosts'];
+			$db_maintenance = $db_maintenances[$maintenance['maintenanceid']];
+			$is_type_changed = $maintenance['maintenance_type'] != $db_maintenance['maintenance_type'];
+
+			if ($is_type_changed || array_intersect_key($maintenance, array_flip($target_types))) {
+				foreach ($target_types as $target_type) {
+					$target_maintenanceids[$target_type][] = $maintenance['maintenanceid'];
+					$db_maintenances[$maintenance['maintenanceid']][$target_type] = [];
+				}
+			}
+
+			if (!array_key_exists('triggers', $db_maintenances[$maintenance['maintenanceid']])
+					&& (array_key_exists('triggers', $maintenance)
+						|| ($is_type_changed && $maintenance['maintenance_type'] != MAINTENANCE_TYPE_NORMAL))) {
+				$target_maintenanceids['triggers'][] = $maintenance['maintenanceid'];
+
+				$db_maintenances[$maintenance['maintenanceid']]['triggers'] = [];
+			}
+		}
+
+		if (array_key_exists('groups', $target_maintenanceids)) {
+			$options = [
+				'output' => ['maintenance_groupid', 'maintenanceid', 'groupid'],
+				'filter' => ['maintenanceid' => $target_maintenanceids['groups']]
+			];
+			$resource = DBselect(DB::makeSql('maintenances_groups', $options));
+
+			while ($db_group = DBfetch($resource)) {
+				$db_maintenances[$db_group['maintenanceid']]['groups'][$db_group['maintenance_groupid']] = [
+					'maintenance_groupid' => $db_group['maintenance_groupid'],
+					'groupid' => $db_group['groupid']
+				];
+			}
+
+		}
+
+		if (array_key_exists('hosts', $target_maintenanceids)) {
+			$options = [
+				'output' => ['maintenance_hostid', 'maintenanceid', 'hostid'],
+				'filter' => ['maintenanceid' => $target_maintenanceids['hosts']]
+			];
+			$resource = DBselect(DB::makeSql('maintenances_hosts', $options));
+
+			while ($db_host = DBfetch($resource)) {
+				$db_maintenances[$db_host['maintenanceid']]['hosts'][$db_host['maintenance_hostid']] = [
+					'maintenance_hostid' => $db_host['maintenance_hostid'],
+					'hostid' => $db_host['hostid']
+				];
+			}
+		}
+
+		if (array_key_exists('triggers', $target_maintenanceids)) {
+			$options = [
+				'output' => ['maintenance_triggerid', 'maintenanceid', 'triggerid'],
+				'filter' => ['maintenanceid' => $target_maintenanceids['triggers']]
+			];
+			$resource = DBselect(DB::makeSql('maintenance_trigger', $options));
+
+			while ($db_trigger = DBfetch($resource)) {
+				$db_maintenances[$db_trigger['maintenanceid']]['triggers'][$db_trigger['maintenance_triggerid']] = [
+					'maintenance_triggerid' => $db_trigger['maintenance_triggerid'],
+					'triggerid' => $db_trigger['triggerid']
+				];
+			}
+		}
+	}
+
+	private static function addAffectedEventNames(array $maintenances, array &$db_maintenances): void {
 		$maintenanceids = [];
 
 		foreach ($maintenances as $maintenance) {
-			if (array_key_exists('groups', $maintenance) || array_key_exists('hosts', $maintenance)) {
+			$db_maintenance = $db_maintenances[$maintenance['maintenanceid']];
+
+			if (array_key_exists('event_names', $maintenance)
+					|| ($maintenance['maintenance_type'] != $db_maintenance['maintenance_type']
+						&& $maintenance['maintenance_type'] != MAINTENANCE_TYPE_NORMAL)) {
 				$maintenanceids[] = $maintenance['maintenanceid'];
-				$db_maintenances[$maintenance['maintenanceid']]['groups'] = [];
-				$db_maintenances[$maintenance['maintenanceid']]['hosts'] = [];
+				$db_maintenances[$maintenance['maintenanceid']]['event_names'] = [];
 			}
 		}
 
@@ -1175,28 +1400,17 @@ class CMaintenance extends CApiService {
 		}
 
 		$options = [
-			'output' => ['maintenance_groupid', 'maintenanceid', 'groupid'],
+			'output' => ['maintenance_eventnameid', 'maintenanceid', 'value', 'operator'],
 			'filter' => ['maintenanceid' => $maintenanceids]
 		];
-		$db_groups = DBselect(DB::makeSql('maintenances_groups', $options));
+		$resource = DBselect(DB::makeSql('maintenance_eventname', $options));
 
-		while ($db_group = DBfetch($db_groups)) {
-			$db_maintenances[$db_group['maintenanceid']]['groups'][$db_group['maintenance_groupid']] = [
-				'maintenance_groupid' => $db_group['maintenance_groupid'],
-				'groupid' => $db_group['groupid']
-			];
-		}
-
-		$options = [
-			'output' => ['maintenance_hostid', 'maintenanceid', 'hostid'],
-			'filter' => ['maintenanceid' => $maintenanceids]
-		];
-		$db_hosts = DBselect(DB::makeSql('maintenances_hosts', $options));
-
-		while ($db_host = DBfetch($db_hosts)) {
-			$db_maintenances[$db_host['maintenanceid']]['hosts'][$db_host['maintenance_hostid']] = [
-				'maintenance_hostid' => $db_host['maintenance_hostid'],
-				'hostid' => $db_host['hostid']
+		while ($db_event_name = DBfetch($resource)) {
+			$db_maintenances[$db_event_name['maintenanceid']]['event_names']
+					[$db_event_name['maintenance_eventnameid']] = [
+				'maintenance_eventnameid' => $db_event_name['maintenance_eventnameid'],
+				'operator' => $db_event_name['operator'],
+				'value' => $db_event_name['value']
 			];
 		}
 	}
@@ -1236,22 +1450,9 @@ class CMaintenance extends CApiService {
 	protected function addRelatedObjects(array $options, array $result): array {
 		$result = parent::addRelatedObjects($options, $result);
 
-		// selectGroups
-		if ($options['selectGroups'] !== null && $options['selectGroups'] != API_OUTPUT_COUNT) {
-			$groups = [];
-			$relationMap = $this->createRelationMap($result, 'maintenanceid', 'groupid', 'maintenances_groups');
-			$related_ids = $relationMap->getRelatedIds();
-
-			if ($related_ids) {
-				$groups = API::HostGroup()->get([
-					'output' => $options['selectGroups'],
-					'hostgroupids' => $related_ids,
-					'preservekeys' => true
-				]);
-			}
-
-			$result = $relationMap->mapMany($result, $groups, 'groups');
-		}
+		$this->addRelatedHostGroups($options, $result);
+		self::addRelatedTriggers($options, $result);
+		self::addRelatedEventNames($options, $result);
 
 		// selectHosts
 		if ($options['selectHosts'] !== null && $options['selectHosts'] != API_OUTPUT_COUNT) {
@@ -1295,5 +1496,85 @@ class CMaintenance extends CApiService {
 		}
 
 		return $result;
+	}
+
+	private function addRelatedHostGroups(array $options, array &$result): void {
+		if ($options['selectHostGroups'] === null || $options['selectHostGroups'] === API_OUTPUT_COUNT) {
+			return;
+		}
+
+		$relation_map = $this->createRelationMap($result, 'maintenanceid', 'groupid', 'maintenances_groups');
+		$related_ids = $relation_map->getRelatedIds();
+		$groups = $related_ids
+			? API::HostGroup()->get([
+				'output' => $options['selectHostGroups'],
+				'groupids' => $related_ids,
+				'preservekeys' => true
+			])
+			: [];
+
+		$result = $relation_map->mapMany($result, $groups, 'hostgroups');
+	}
+
+	private static function addRelatedTriggers(array $options, array &$result): void {
+		if ($options['selectTriggers'] === null) {
+			return;
+		}
+
+		foreach ($result as &$maintenance) {
+			$maintenance['triggers'] = [];
+		}
+		unset($maintenance);
+
+		$sql_options = [
+			'output' => ['maintenanceid', 'triggerid'],
+			'filter' => ['maintenanceid' => array_keys($result)]
+		];
+
+		$resource = DBSelect(DB::makeSql('maintenance_trigger', $sql_options));
+		$trigger_maintenances = [];
+
+		while ($row = DBfetch($resource)) {
+			$trigger_maintenances[$row['triggerid']][] = $row['maintenanceid'];
+		}
+
+		if (!$trigger_maintenances) {
+			return;
+		}
+
+		$triggers = API::Trigger()->get([
+			'output' => $options['selectTriggers'],
+			'triggerids' => array_keys($trigger_maintenances),
+			'preservekeys' => true
+		]);
+
+		foreach ($triggers as $triggerid => $trigger) {
+			foreach ($trigger_maintenances[$triggerid] as $maintenanceid) {
+				$result[$maintenanceid]['triggers'][] = $trigger;
+			}
+		}
+	}
+
+	private static function addRelatedEventNames(array $options, array &$result): void {
+		if ($options['selectEventNames'] === null) {
+			return;
+		}
+
+		foreach ($result as &$maintenance) {
+			$maintenance['event_names'] = [];
+		}
+		unset($maintenance);
+
+		$sql_options = [
+			'output' => array_merge($options['selectEventNames'], ['maintenanceid']),
+			'filter' => ['maintenanceid' => array_keys($result)]
+		];
+
+		$resource = DBSelect(DB::makeSql('maintenance_eventname', $sql_options));
+
+		while ($event_name = DBFetch($resource)) {
+			$result[$event_name['maintenanceid']]['event_names'][] =
+				array_diff_key($event_name, array_flip(['maintenanceid', 'maintenance_eventnameid']));
+		}
 	}
 }

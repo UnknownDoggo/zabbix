@@ -1,81 +1,146 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerCorrelationUpdate extends CController {
 
-	protected function checkInput() {
-		$fields = [
-			'correlationid' => 'db correlation.correlationid|required',
-			'name'          => 'db correlation.name|required|not_empty',
-			'description'   => 'db correlation.description',
-			'evaltype'      => 'db correlation.evaltype|required|in '.implode(',', [CONDITION_EVAL_TYPE_AND_OR, CONDITION_EVAL_TYPE_AND, CONDITION_EVAL_TYPE_OR, CONDITION_EVAL_TYPE_EXPRESSION]),
-			'status'        => 'db correlation.status|required|in '.implode(',', [ZBX_CORRELATION_ENABLED, ZBX_CORRELATION_DISABLED]),
-			'formula'       => 'db correlation.formula',
-			'op_close_new'  => 'in 1',
-			'op_close_old'  => 'in 1',
-			'conditions'    => 'array',
-			'form_refresh'  => 'int32'
+	protected function init(): void {
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+	}
+
+	protected function checkPermissions(): bool {
+		return $this->checkAccess(CRoleHelper::UI_CONFIGURATION_CEPRULES);
+	}
+
+	public static function getValidationRules(): array {
+		$api_uniq = [
+			['correlation.get', ['name' => '{name}'], 'correlationid']
 		];
 
-		$ret = $this->validateInput($fields);
-		$error = $this->getValidationError();
+		return ['object', 'api_uniq' => $api_uniq, 'fields' => [
+			'correlationid' =>	['db correlation.correlationid', 'required'],
+			'name' => ['db correlation.name', 'required', 'not_empty'],
+			'description' => ['db correlation.description'],
+			'evaltype' => ['db correlation.evaltype', 'required',
+				'in' => [CONDITION_EVAL_TYPE_AND_OR, CONDITION_EVAL_TYPE_AND, CONDITION_EVAL_TYPE_OR,
+					CONDITION_EVAL_TYPE_EXPRESSION
+				]
+			],
+			'status' => ['db correlation.status', 'required',
+				'in' => [ZBX_CORRELATION_ENABLED, ZBX_CORRELATION_DISABLED]
+			],
+			'formula' => ['db correlation.formula', 'required', 'not_empty',
+				'use' => [CConditionFormulaParser::class, []],
+				'when' => ['evaltype', 'in' => [CONDITION_EVAL_TYPE_EXPRESSION]]
+			],
+			'operations' => ['array', 'required', 'not_empty',
+				'field' => ['boolean'],
+				'messages' => ['not_empty' => _('At least one operation must be selected.')]
+			],
+			'conditions' => ['objects', 'required', 'not_empty',
+				'uniq' => ['type', 'operator', 'tag', 'oldtag', 'newtag', 'value', 'groupid'],
+				'fields' => [
+					'type' => ['db corr_condition.type', 'required',
+						'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG, ZBX_CORR_CONDITION_NEW_EVENT_TAG,
+							ZBX_CORR_CONDITION_NEW_EVENT_HOSTGROUP, ZBX_CORR_CONDITION_EVENT_TAG_PAIR,
+							ZBX_CORR_CONDITION_OLD_EVENT_TAG_VALUE, ZBX_CORR_CONDITION_NEW_EVENT_TAG_VALUE
+						]
+					],
+					'operator' => [
+						['db corr_condition_group.operator', 'required',
+							'in' => [CONDITION_OPERATOR_EQUAL, CONDITION_OPERATOR_NOT_EQUAL],
+							'when' => ['type', 'in' => [ZBX_CORR_CONDITION_NEW_EVENT_HOSTGROUP]]
+						],
+						['db corr_condition_tagvalue.operator', 'required',
+							'in' => [CONDITION_OPERATOR_EQUAL, CONDITION_OPERATOR_NOT_EQUAL, CONDITION_OPERATOR_LIKE,
+								CONDITION_OPERATOR_NOT_LIKE
+							],
+							'when' => ['type', 'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG_VALUE,
+								ZBX_CORR_CONDITION_NEW_EVENT_TAG_VALUE
+							]]
+						]
+					],
+					'tag' => [
+						['db corr_condition_tag.tag', 'required', 'not_empty',
+							'when' => ['type', 'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG,
+								ZBX_CORR_CONDITION_NEW_EVENT_TAG
+							]]
+						],
+						['db corr_condition_tagvalue.tag', 'required', 'not_empty',
+							'when' => ['type', 'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG_VALUE,
+								ZBX_CORR_CONDITION_NEW_EVENT_TAG_VALUE
+							]]
+						]
+					],
+					'oldtag' => ['db corr_condition_tagpair.oldtag', 'required', 'not_empty',
+						'when' => ['type', 'in' => [ZBX_CORR_CONDITION_EVENT_TAG_PAIR]]
+					],
+					'newtag' => ['db corr_condition_tagpair.newtag', 'required', 'not_empty',
+						'when' => ['type', 'in' => [ZBX_CORR_CONDITION_EVENT_TAG_PAIR]]
+					],
+					'value' => [
+						['db corr_condition_tagvalue.value', 'required',
+							'when' => ['type', 'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG_VALUE,
+								ZBX_CORR_CONDITION_NEW_EVENT_TAG_VALUE
+							]]
+						],
+						['db corr_condition_tagvalue.value', 'required', 'not_empty',
+							'when' => [
+								['type', 'in' => [ZBX_CORR_CONDITION_OLD_EVENT_TAG_VALUE,
+									ZBX_CORR_CONDITION_NEW_EVENT_TAG_VALUE
+								]],
+								['operator', 'in' => [CONDITION_OPERATOR_LIKE, CONDITION_OPERATOR_NOT_LIKE]]
+							]
+						]
+					],
+					'groupid' => ['db corr_condition_group.groupid', 'required',
+						'when' => ['type', 'in' => [ZBX_CORR_CONDITION_NEW_EVENT_HOSTGROUP]]
+					],
+					'formulaid' => ['string']
+				]
+			]
+		]];
+	}
+
+	protected function checkInput(): bool {
+		$ret = $this->validateInput(self::getValidationRules());
 
 		if (!$ret) {
-			switch ($error) {
-				case self::VALIDATION_ERROR:
-					$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
-						->setArgument('action', 'correlation.edit')
-					);
-					$response->setFormData($this->getInputAll());
-					CMessageHelper::setErrorTitle(_('Cannot update correlation'));
-					$this->setResponse($response);
-					break;
+			$form_errors = $this->getValidationError();
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'title' => _('Cannot update event correlation'),
+					'messages' => array_column(get_and_clear_messages(), 'message')
+				]];
 
-				case self::VALIDATION_FATAL_ERROR:
-					$this->setResponse(new CControllerResponseFatal());
-					break;
-			}
+			$this->setResponse(
+				new CControllerResponseData(['main_block' => json_encode($response)])
+			);
 		}
 
 		return $ret;
 	}
 
-	protected function checkPermissions() {
-		if (!$this->checkAccess(CRoleHelper::UI_CONFIGURATION_EVENT_CORRELATION)) {
-			return false;
-		}
-
-		return (bool) API::Correlation()->get([
-			'output' => [],
-			'correlationid' => $this->getInput('correlationid'),
-			'editable' => true
-		]);
-	}
-
-	protected function doAction() {
+	protected function doAction(): void {
 		$correlation = [
 			'correlationid' => $this->getInput('correlationid'),
 			'name' => $this->getInput('name'),
 			'description' => $this->getInput('description', ''),
-			'status' => $this->getInput('status'),
+			'status' => $this->getInput('status', ZBX_CORRELATION_DISABLED),
 			'filter' => [
 				'evaltype' => $this->getInput('evaltype'),
 				'conditions' => $this->getInput('conditions', [])
@@ -98,33 +163,28 @@ class CControllerCorrelationUpdate extends CController {
 			unset($condition);
 		}
 
-		if ($this->hasInput('op_close_old')) {
-			$correlation['operations'][] = ['type' => ZBX_CORR_OPERATION_CLOSE_OLD];
-		}
-
-		if ($this->hasInput('op_close_new')) {
-			$correlation['operations'][] = ['type' => ZBX_CORR_OPERATION_CLOSE_NEW];
+		foreach ($this->getInput('operations') as $operation) {
+			$correlation['operations'][] = ['type' => $operation];
 		}
 
 		$result = API::Correlation()->update($correlation);
 
+		$output = [];
+
 		if ($result) {
-			$response = new CControllerResponseRedirect(
-				(new CUrl('zabbix.php'))
-					->setArgument('action', 'correlation.list')
-					->setArgument('page', CPagerHelper::loadPage('correlation.list', null))
-			);
-			$response->setFormData(['uncheck' => '1']);
-			CMessageHelper::setSuccessTitle(_('Correlation updated'));
+			$output['success']['title'] = _('Event correlation updated');
+
+			if ($messages = get_and_clear_messages()) {
+				$output['success']['messages'] = array_column($messages, 'message');
+			}
 		}
 		else {
-			$response = new CControllerResponseRedirect(
-				(new CUrl('zabbix.php'))->setArgument('action', 'correlation.edit')
-			);
-			$response->setFormData($this->getInputAll());
-			CMessageHelper::setErrorTitle(_('Cannot update correlation'));
+			$output['error'] = [
+				'title' => _('Cannot update event correlation'),
+				'messages' => array_column(get_and_clear_messages(), 'message')
+			];
 		}
 
-		$this->setResponse($response);
+		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
 	}
 }

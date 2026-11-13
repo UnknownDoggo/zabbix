@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -45,6 +40,9 @@ class CControllerPopupItemTestSend extends CControllerPopupItemTest {
 	 */
 	protected $get_value_from_host;
 
+	private const SUPPORTED_STATE = 0;
+	private const NOT_SUPPORTED_STATE = 1;
+
 	/**
 	 * Time suffixes supported by Zabbix server.
 	 *
@@ -52,402 +50,514 @@ class CControllerPopupItemTestSend extends CControllerPopupItemTest {
 	 */
 	protected static $supported_time_suffixes = ['w', 'd', 'h', 'm', 's'];
 
-	protected function checkInput() {
-		$fields = [
-			'authtype'				=> 'in '.implode(',', [HTTPTEST_AUTH_NONE, HTTPTEST_AUTH_BASIC, HTTPTEST_AUTH_NTLM, HTTPTEST_AUTH_KERBEROS, HTTPTEST_AUTH_DIGEST, ITEM_AUTHTYPE_PASSWORD, ITEM_AUTHTYPE_PUBLICKEY]),
-			'get_value'				=> 'in 0,1',
-			'eol'					=> 'in '.implode(',', [ZBX_EOL_LF, ZBX_EOL_CRLF]),
-			'headers'				=> 'array',
-			'proxy_hostid'			=> 'id',
-			'hostid'				=> 'db hosts.hostid',
-			'http_authtype'			=> 'in '.implode(',', [HTTPTEST_AUTH_NONE, HTTPTEST_AUTH_BASIC, HTTPTEST_AUTH_NTLM, HTTPTEST_AUTH_KERBEROS, HTTPTEST_AUTH_DIGEST, ITEM_AUTHTYPE_PASSWORD, ITEM_AUTHTYPE_PUBLICKEY]),
-			'http_password'			=> 'string',
-			'http_proxy'			=> 'string',
-			'http_username'			=> 'string',
-			'flags'					=> 'in '. implode(',', [ZBX_FLAG_DISCOVERY_NORMAL, ZBX_FLAG_DISCOVERY_RULE, ZBX_FLAG_DISCOVERY_PROTOTYPE, ZBX_FLAG_DISCOVERY_CREATED]),
-			'follow_redirects'		=> 'in 0,1',
-			'key'					=> 'string',
-			'interface'				=> 'array',
-			'ipmi_sensor'			=> 'string',
-			'item_type'				=> 'in '.implode(',', [ITEM_TYPE_ZABBIX, ITEM_TYPE_TRAPPER, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL, ITEM_TYPE_ZABBIX_ACTIVE, ITEM_TYPE_HTTPTEST, ITEM_TYPE_EXTERNAL, ITEM_TYPE_DB_MONITOR, ITEM_TYPE_IPMI, ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_CALCULATED, ITEM_TYPE_JMX, ITEM_TYPE_SNMPTRAP, ITEM_TYPE_DEPENDENT, ITEM_TYPE_HTTPAGENT, ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT]),
-			'jmx_endpoint'			=> 'string',
-			'macros'				=> 'array',
-			'output_format'			=> 'in '.implode(',', [HTTPCHECK_STORE_RAW, HTTPCHECK_STORE_JSON]),
-			'params_ap'				=> 'string',
-			'params_es'				=> 'string',
-			'params_f'				=> 'string',
-			'script'				=> 'string',
-			'password'				=> 'string',
-			'post_type'				=> 'in '.implode(',', [ZBX_POSTTYPE_RAW, ZBX_POSTTYPE_JSON, ZBX_POSTTYPE_XML]),
-			'posts'					=> 'string',
-			'prev_time'				=> 'string',
-			'prev_value'			=> 'string',
-			'privatekey'			=> 'string',
-			'publickey'				=> 'string',
-			'query_fields'			=> 'array',
-			'parameters'			=> 'array',
-			'request_method'		=> 'in '.implode(',', [HTTPCHECK_REQUEST_GET, HTTPCHECK_REQUEST_POST, HTTPCHECK_REQUEST_PUT, HTTPCHECK_REQUEST_HEAD]),
-			'retrieve_mode'			=> 'in '.implode(',', [HTTPTEST_STEP_RETRIEVE_MODE_CONTENT, HTTPTEST_STEP_RETRIEVE_MODE_HEADERS, HTTPTEST_STEP_RETRIEVE_MODE_BOTH]),
-			'show_final_result'		=> 'in 0,1',
-			'snmp_oid'				=> 'string',
-			'steps'					=> 'array',
-			'ssl_cert_file'			=> 'string',
-			'ssl_key_file'			=> 'string',
-			'ssl_key_password'		=> 'string',
-			'status_codes'			=> 'string',
-			'test_type'				=> 'required|in '.implode(',', [self::ZBX_TEST_TYPE_ITEM, self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD]),
-			'time_change'			=> 'int32',
-			'timeout'				=> 'string',
-			'username'				=> 'string',
-			'url'					=> 'string',
-			'value'					=> 'string',
-			'value_type'			=> 'in '.implode(',', [ITEM_VALUE_TYPE_UINT64, ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_LOG, ITEM_VALUE_TYPE_TEXT]),
-			'valuemapid'			=> 'id',
-			'verify_host'			=> 'in 0,1',
-			'verify_peer'			=> 'in 0,1',
-			'not_supported'			=> 'in 1'
-		];
+	protected function init(): void {
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+	}
 
-		$ret = $this->validateInput($fields);
+	public static function getValidationRules(): array {
+		return ['object', 'fields' => [
+			'item_type' => [
+				['db items.type',
+					'in' => [ITEM_TYPE_ZABBIX, ITEM_TYPE_SIMPLE, ITEM_TYPE_INTERNAL, ITEM_TYPE_EXTERNAL,
+						ITEM_TYPE_DB_MONITOR, ITEM_TYPE_HTTPAGENT, ITEM_TYPE_SSH, ITEM_TYPE_TELNET, ITEM_TYPE_JMX,
+						ITEM_TYPE_CALCULATED, ITEM_TYPE_SNMP, ITEM_TYPE_SCRIPT, ITEM_TYPE_BROWSER, ITEM_TYPE_IPMI,
+						ITEM_TYPE_TELEMETRY_QUERY
+					]
+				]
+			],
+			'test_type' => ['integer', 'required',
+				'in' => [self::ZBX_TEST_TYPE_ITEM, self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD,
+					self::ZBX_TEST_TYPE_LLD_PROTOTYPE
+				]
+			],
+			'show_final_result' => ['boolean'],
+			'get_value' => ['boolean'],
+			'test_with' => ['integer', 'in' => [self::TEST_WITH_SERVER, self::TEST_WITH_PROXY]],
+			'proxyid' => ['db proxy.proxyid', 'required', 'when' => [
+				['get_value', 'in' => [1]],
+				['test_with', 'in'  => [self::TEST_WITH_PROXY]]
+			]],
+			'interface' => ['object',
+				'fields' => [
+					'useip' => ['boolean'],
+					'details' => ['object',
+						'fields' => [
+							'version' => ['integer', 'required', 'in' => [SNMP_V1, SNMP_V2C, SNMP_V3]],
+							'community' => ['string', 'required', 'not_empty',
+								'when' => ['version', 'in' => [SNMP_V1, SNMP_V2C]]
+							],
+							'max_repetitions' => ['db interface_snmp.max_repetitions', 'required', 'not_empty',
+								'use' => [CNumberValidator::class, ['with_float' => false,
+									'min' => 1, 'max' => ZBX_MAX_INT32
+								]],
+								'when' => ['version', 'in' => [SNMP_V2C, SNMP_V3]]
+							],
+							'retries' => ['db interface_snmp.retries', 'not_empty',
+								'use' => [CNumberValidator::class, ['with_float' => false,
+									'min' => SNMP_RETRIES_MIN, 'max' => SNMP_RETRIES_MAX
+								]]
+							],
+							'contextname' => ['db interface_snmp.contextname', 'when' => ['version', 'in' => [SNMP_V3]]],
+							'securityname' => ['db interface_snmp.securityname', 'when' => ['version', 'in' => [SNMP_V3]]],
+							'securitylevel' => [
+								'db interface_snmp.securitylevel', 'required',
+								'in' => [ITEM_SNMPV3_SECURITYLEVEL_NOAUTHNOPRIV, ITEM_SNMPV3_SECURITYLEVEL_AUTHNOPRIV,
+									ITEM_SNMPV3_SECURITYLEVEL_AUTHPRIV
+								],
+								'when' => ['version', 'in' => [SNMP_V3]]
+							],
+							'authprotocol' => [
+								'db interface_snmp.authprotocol', 'required',
+								'in' => [ITEM_SNMPV3_AUTHPROTOCOL_MD5, ITEM_SNMPV3_AUTHPROTOCOL_SHA1,
+									ITEM_SNMPV3_AUTHPROTOCOL_SHA224, ITEM_SNMPV3_AUTHPROTOCOL_SHA256,
+									ITEM_SNMPV3_AUTHPROTOCOL_SHA384, ITEM_SNMPV3_AUTHPROTOCOL_SHA512
+								],
+								'when' => ['securitylevel', 'in' => [ITEM_SNMPV3_SECURITYLEVEL_AUTHNOPRIV,
+									ITEM_SNMPV3_SECURITYLEVEL_AUTHPRIV
+								]]
+							],
+							'authpassphrase' => ['db interface_snmp.authpassphrase', 'when' => [
+								'securitylevel',
+								'in' => [ITEM_SNMPV3_SECURITYLEVEL_AUTHNOPRIV, ITEM_SNMPV3_SECURITYLEVEL_AUTHPRIV]
+							]],
+							'privprotocol' => [
+								'db interface_snmp.privprotocol', 'required',
+								'in' => [ITEM_SNMPV3_PRIVPROTOCOL_DES, ITEM_SNMPV3_PRIVPROTOCOL_AES128,
+									ITEM_SNMPV3_PRIVPROTOCOL_AES192, ITEM_SNMPV3_PRIVPROTOCOL_AES256,
+									ITEM_SNMPV3_PRIVPROTOCOL_AES192C, ITEM_SNMPV3_PRIVPROTOCOL_AES256C
+								],
+								'when' => ['securitylevel', 'in' => [ITEM_SNMPV3_SECURITYLEVEL_AUTHPRIV]]
+							],
+							'privpassphrase' => ['db interface_snmp.privpassphrase', 'when' => [
+								'securitylevel',
+								'in' => [ITEM_SNMPV3_SECURITYLEVEL_AUTHPRIV]
+							]]
+						],
+						'when' => ['../item_type', 'in' => [ITEM_TYPE_SNMP]]
+					],
+					'address' => ['db interface.dns', 'not_empty', 'required',
+						'when' => ['../item_type', 'in' => [ITEM_TYPE_ZABBIX, ITEM_TYPE_IPMI, ITEM_TYPE_SIMPLE,
+							ITEM_TYPE_SNMP, ITEM_TYPE_SSH, ITEM_TYPE_TELNET
+						]]
+					],
+					'port' => ['db interface.port', 'not_empty', 'required',
+						'use' => [CNumberValidator::class, ['with_float' => false,
+							'min' => ZBX_MIN_PORT_NUMBER, 'max' => ZBX_MAX_PORT_NUMBER
+						]],
+						'when' => ['../item_type', 'in' => [ITEM_TYPE_ZABBIX, ITEM_TYPE_IPMI, ITEM_TYPE_SNMP]]
+					]
+				],
+				'when' => ['get_value', 'in' => [1]]
+			],
+			'value' => ['string'],
+			'not_supported' => ['integer', 'in' => [self::SUPPORTED_STATE, self::NOT_SUPPORTED_STATE]],
+			'runtime_error' => ['string'],
+			'prev_value' => ['string'],
+			'prev_time'	=> ['string',
+				'use' => [CRelativeTimeValidator::class, ['allowed_suffixes' => self::$supported_time_suffixes,
+					'allowed_types' => [CRelativeTimeParser::ZBX_TOKEN_OFFSET], 'max_now' => true, 'max_tokens' => 1
+				]]
+			],
+			'eol' => ['integer', 'in' => [ZBX_EOL_LF, ZBX_EOL_CRLF]],
+			'macros' => ['objects', 'fields' => [
+				'name' => ['db globalmacro.macro', 'required'],
+				'value' => ['db globalmacro.value', 'required']
+			]],
+			'time_change' => ['integer'],
+
+			// Hidden form input data: passed from item form
+			'hostid' => ['db hosts.hostid'],
+			'authtype' => ['integer',
+				'in' => [ZBX_HTTP_AUTH_NONE, ZBX_HTTP_AUTH_BASIC, ZBX_HTTP_AUTH_NTLM, ZBX_HTTP_AUTH_KERBEROS,
+					ZBX_HTTP_AUTH_DIGEST, ITEM_AUTHTYPE_PASSWORD, ITEM_AUTHTYPE_PUBLICKEY
+				]
+			],
+			'headers' => ['objects', 'fields' => [
+				'name' => ['string', 'required'],
+				'value' => ['string', 'required']
+			]],
+			'http_authtype' => ['db items.authtype',
+				'in' => [ZBX_HTTP_AUTH_NONE, ZBX_HTTP_AUTH_BASIC, ZBX_HTTP_AUTH_NTLM, ZBX_HTTP_AUTH_KERBEROS,
+					ZBX_HTTP_AUTH_DIGEST
+				]
+			],
+			'http_password' => ['string'],
+			'http_proxy' => ['string'],
+			'http_username' => ['string'],
+			'flags' => ['integer',
+				'in' => [ZBX_FLAG_DISCOVERY_NORMAL, ZBX_FLAG_DISCOVERY_RULE,ZBX_FLAG_DISCOVERY_PROTOTYPE,
+					ZBX_FLAG_DISCOVERY_CREATED, ZBX_FLAG_DISCOVERY_RULE_CREATED, ZBX_FLAG_DISCOVERY_RULE_PROTOTYPE,
+					ZBX_FLAG_DISCOVERY_RULE_PROTOTYPE_CREATED
+				]
+			],
+			'follow_redirects' => ['boolean'],
+			'key' => [
+				['db items.key_'],
+				[
+					'db items.key_', 'required', 'not_empty', 'use' => [CItemKey::class, []],
+					'when' => [
+						['get_value', 'in' => [1]],
+						['item_type', 'in' => self::$item_types_has_key_mandatory]
+					]
+				],
+				[
+					'db items.key_', 'regex' => '/^(?!(vmware\\.|icmpping))/',
+					'when' => [
+						['get_value', 'in' => [1]],
+						['item_type', 'in' => [ITEM_TYPE_SIMPLE]]
+					]
+				]
+			],
+			'ipmi_sensor' => ['string'],
+			'jmx_endpoint' => ['string'],
+			'output_format' => ['integer', 'in' => [HTTPCHECK_STORE_RAW, HTTPCHECK_STORE_JSON]],
+			'params_ap' => ['string'],
+			'params_es' => ['string'],
+			'params_f' => [
+				['db items.params', 'required', 'not_empty',
+					'use' => [CCalcFormulaValidator::class, []],
+					'when' => [
+						['item_type', 'in' => [ITEM_TYPE_CALCULATED]],
+						['test_type',
+							'not_in' => [self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]
+						]
+					]
+				],
+				['db items.params', 'required', 'not_empty',
+					'use' => [CCalcFormulaValidator::class, ['lldmacros' => true]],
+					'when' => [
+						['item_type', 'in' => [ITEM_TYPE_CALCULATED]],
+						['test_type', 'in' => [self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]]
+					]
+				]
+			],
+			'script' => ['string'],
+			'browser_script' => ['string'],
+			'password' => ['string'],
+			'post_type' => ['integer', 'in' => [ZBX_POSTTYPE_RAW, ZBX_POSTTYPE_JSON, ZBX_POSTTYPE_XML]],
+			'posts' => ['string'],
+			'privatekey' => ['string'],
+			'publickey' => ['string'],
+			'query_fields' => ['objects', 'fields' => [
+				'name' => ['string', 'required'],
+				'value' => ['string', 'required']
+			]],
+			'parameters' => ['objects', 'fields' => [
+				'name' => ['string', 'required'],
+				'value' => ['string', 'required']
+			]],
+			'request_method' => ['integer',
+				'in' => [HTTPCHECK_REQUEST_GET, HTTPCHECK_REQUEST_POST, HTTPCHECK_REQUEST_PUT, HTTPCHECK_REQUEST_HEAD]
+			],
+			'retrieve_mode' => ['integer',
+				'in' => [HTTPTEST_STEP_RETRIEVE_MODE_CONTENT, HTTPTEST_STEP_RETRIEVE_MODE_HEADERS,
+					HTTPTEST_STEP_RETRIEVE_MODE_BOTH
+				]
+			],
+			'snmp_oid' => ['string'],
+			'ssl_cert_file' => ['string'],
+			'ssl_key_password' => ['string'],
+			'status_codes' => ['string'],
+			'steps' => [
+				array_merge(CItemGeneralHelper::getPreprocessingValidationRules(false),
+					['when' => ['test_type', 'in' => [self::ZBX_TEST_TYPE_ITEM, self::ZBX_TEST_TYPE_LLD]]]
+				),
+				array_merge(CItemGeneralHelper::getPreprocessingValidationRules(true),
+					['when' => ['test_type',
+						'in' => [self::ZBX_TEST_TYPE_ITEM_PROTOTYPE, self::ZBX_TEST_TYPE_LLD_PROTOTYPE]
+					]]
+				)
+			],
+			'timeout' => ['string'],
+			'username' => ['string'],
+			'url' => ['string'],
+			'value_type' => ['integer',
+				'in' => [ITEM_VALUE_TYPE_UINT64, ITEM_VALUE_TYPE_FLOAT, ITEM_VALUE_TYPE_STR, ITEM_VALUE_TYPE_LOG,
+					ITEM_VALUE_TYPE_TEXT, ITEM_VALUE_TYPE_JSON
+				]
+			],
+			'valuemapid' => ['db valuemap.valuemapid'],
+			'query' => ['string'],
+			'time_shift' => ['string'],
+			'lookback_limit' => ['string'],
+			'granularity' => ['string'],
+			'verify_host' => ['boolean'],
+			'verify_peer' => ['boolean']
+		]];
+	}
+
+	protected function checkInput() {
+		$ret = $this->validateInput(self::getValidationRules());
+
+		if ($ret && $this->getInput('get_value', 0) == 1
+				&& $this->getInput('test_with', self::TEST_WITH_SERVER) == self::TEST_WITH_PROXY
+				&& $this->getInput('proxyid', 0) == 0) {
+			error(_('Proxy is not assigned yet.'));
+			$ret = false;
+		}
 
 		if ($ret) {
 			$testable_item_types = self::getTestableItemTypes($this->getInput('hostid', '0'));
 			$this->get_value_from_host = (bool) $this->getInput('get_value');
 			$this->item_type = $this->hasInput('item_type') ? $this->getInput('item_type') : -1;
-			$this->preproc_item = self::getPreprocessingItemClassInstance($this->getInput('test_type'));
+			$this->test_type = $this->getInput('test_type');
 			$this->is_item_testable = in_array($this->item_type, $testable_item_types);
 
-			$interface = $this->getInput('interface', []);
 			$steps = $this->getInput('steps', []);
 			$prepr_types = zbx_objectValues($steps, 'type');
 			$this->use_prev_value = (count(array_intersect($prepr_types, self::$preproc_steps_using_prev_value)) > 0);
 			$this->show_final_result = ($this->getInput('show_final_result') == 1);
-
-			// If 'get value from host' is checked, check if key is valid for item types it's mandatory.
-			if ($this->get_value_from_host && in_array($this->item_type, $this->item_types_has_key_mandatory)) {
-				$key = $this->getInput('key', '');
-
-				/*
-				 * VMware and icmpping simple checks are not supported.
-				 * This normally cannot be achieved from UI so no need for error message.
-				 */
-				if ($this->item_type == ITEM_TYPE_SIMPLE
-						&& (substr($key, 0, 7) === 'vmware.' || substr($key, 0, 8) === 'icmpping')) {
-					$this->get_value_from_host = false;
-					$ret = false;
-				}
-				else {
-					$item_key_parser = new CItemKey();
-
-					if ($item_key_parser->parse($key) != CParser::PARSE_SUCCESS) {
-						error(_s('Incorrect value for field "%1$s": %2$s.', 'key_', $item_key_parser->getError()));
-						$ret = false;
-					}
-				}
-			}
-
-			// Test if item is testable and check interface properties.
-			if ($this->get_value_from_host && !$this->is_item_testable) {
-				error(_s('Test of "%1$s" items is not supported.', item_type2str($this->item_type)));
-				$ret = false;
-			}
-			elseif ($this->get_value_from_host && array_key_exists($this->item_type, $this->items_require_interface)) {
-				if (!$this->validateInterface($interface)) {
-					$ret = false;
-				}
-			}
-
-			// Check preprocessing steps.
-			if ($steps && ($error = $this->preproc_item->validateItemPreprocessingSteps($steps)) !== true) {
-				error($error);
-				$ret = false;
-			}
-
-			// Check previous time.
-			if ($this->use_prev_value && $this->getInput('prev_value', '') !== '') {
-				$prev_time = $this->getInput('prev_time', '');
-
-				$relative_time_parser = new CRelativeTimeParser();
-				if ($relative_time_parser->parse($prev_time) != CParser::PARSE_SUCCESS) {
-					error(_s('Incorrect value for field "%1$s": %2$s.', _('Prev. time'),
-						_('a relative time is expected')
-					));
-					$ret = false;
-				}
-				else {
-					$tokens = $relative_time_parser->getTokens();
-
-					if (count($tokens) > 1) {
-						error(_s('Incorrect value for field "%1$s": %2$s.', _('Prev. time'),
-							_('only one time unit is allowed')
-						));
-					}
-					elseif ($tokens && $tokens[0]['type'] == CRelativeTimeParser::ZBX_TOKEN_PRECISION) {
-						error(_s('Incorrect value for field "%1$s": %2$s.', _('Prev. time'),
-							_('a relative time is expected')
-						));
-					}
-					elseif ($tokens && !in_array($tokens[0]['suffix'], self::$supported_time_suffixes)) {
-						error(_s('Incorrect value for field "%1$s": %2$s.', _('Prev. time'),
-							_('unsupported time suffix')
-						));
-					}
-					elseif ($tokens && $tokens[0]['sign'] !== '-') {
-						error(_s('Incorrect value for field "%1$s": %2$s.', _('Prev. time'),
-							_('should be less than current time')
-						));
-					}
-				}
-			}
 		}
 
-		if ($messages = array_column(get_and_clear_messages(), 'message')) {
-			$this->setResponse(
-				new CControllerResponseData(['main_block' => json_encode([
-					'error' => [
-						'messages' => $messages
-					]
-				])])
-			);
+		$messages = array_column(get_and_clear_messages(), 'message');
 
-			$ret = false;
+		if (!$ret || $messages) {
+			$form_errors = $this->getValidationError();
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'messages' => $messages
+				]];
+
+			$this->setResponse(
+				new CControllerResponseData(['main_block' => json_encode($response)])
+			);
 		}
 
 		return $ret;
 	}
 
+	protected function checkPermissions() {
+		if (!parent::checkPermissions()) {
+			return false;
+		}
+
+		if ($this->host && $this->host['status'] != HOST_STATUS_TEMPLATE
+				&& $this->getInput('test_with', self::TEST_WITH_SERVER) == self::TEST_WITH_PROXY) {
+			$proxyid = $this->getInput('proxyid', 0);
+
+			return bccomp($proxyid, $this->host['proxyid']) == 0
+				|| ($proxyid != 0 && !CProxyHelper::resolveProxyOption($proxyid)['inaccessible']);
+		}
+
+		return true;
+	}
+
 	protected function doAction() {
 		global $ZBX_SERVER, $ZBX_SERVER_PORT;
 
-		/*
-		 * Define values used to test preprocessing steps.
-		 * Steps array can be empty if only value conversion is tested.
-		 */
-		$preproc_test_data = [
-			'value' => $this->getInput('value', ''),
-			'steps' => $this->getInput('steps', []),
-			'single' => !$this->show_final_result,
-			'state' => 0
-		];
-
-		// Get previous value and time.
-		if ($this->use_prev_value) {
-			$prev_value = $this->getInput('prev_value', '');
-			$prev_time = $this->getInput('prev_time', '');
-
-			if ($prev_value !== '' || $prev_time !== '') {
-				$preproc_test_data['history'] = [
-					'value' => $prev_value,
-					'timestamp' => $prev_time
-				];
-			}
-		}
-
-		$output = [
-			'steps' => [],
-			'user' => [
-				'debug_mode' => $this->getDebugMode()
+		$data = [
+			'options' => [
+				'single' => !$this->show_final_result,
+				'state' => self::SUPPORTED_STATE
 			]
 		];
 
-		$valuemap = ($this->getInput('valuemapid', 0) != 0)
-			? API::ValueMap()->get([
-				'output' => [],
-				'selectMappings' => ['type', 'newvalue', 'value'],
-				'valuemapids' => $this->getInput('valuemapid')
-			])[0]
-			: [];
-
-		// Get value from host.
 		if ($this->get_value_from_host) {
-			// Get post data for particular item type.
-			$item_test_data = $this->getItemTestProperties($this->getInputAll(), true);
-
-			// Apply effective macros values to properties.
-			$item_test_data = $this->resolveItemPropertyMacros($item_test_data);
-
-			// Rename fields according protocol.
-			$item_test_data = CArrayHelper::renameKeys($item_test_data, [
-				'params_ap' => 'params',
-				'params_es' => 'params',
-				'params_f' => 'params',
-				'script' => 'params',
-				'http_username' => 'username',
-				'http_password' => 'password',
-				'http_authtype' => 'authtype',
-				'item_type' => 'type'
-			]);
-
-			if (array_key_exists('headers', $item_test_data)) {
-				$item_test_data['headers'] = $this->transformHeaderFields($item_test_data['headers']);
-			}
-
-			if (array_key_exists('query_fields', $item_test_data)) {
-				$item_test_data['query_fields'] = $this->transformQueryFields($item_test_data['query_fields']);
-			}
-
-			if (array_key_exists('parameters', $item_test_data)) {
-				$item_test_data['parameters'] = $this->transformParametersFields($item_test_data['parameters']);
-			}
-
-			if ($item_test_data['type'] == ITEM_TYPE_CALCULATED) {
-				$item_test_data['host']['hostid'] = $this->getInput('hostid');
-			}
-
-			// Only non-empty fields need to be sent to server.
-			$item_test_data = $this->unsetEmptyValues($item_test_data);
-
-			/*
-			 * Server will turn off status code check if field value is empty. If field is not present, then server will
-			 * default to check if status code is 200.
-			 */
-			if ($this->item_type == ITEM_TYPE_HTTPAGENT && !array_key_exists('status_codes', $item_test_data)) {
-				$item_test_data['status_codes'] = '';
-			}
-
-			if ($this->item_type != ITEM_TYPE_CALCULATED) {
-				unset($item_test_data['value_type']);
-			}
-
-			// Send test to be executed on Zabbix server.
-			$server = new CZabbixServer($ZBX_SERVER, $ZBX_SERVER_PORT,
-				timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::CONNECT_TIMEOUT)),
-				timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::ITEM_TEST_TIMEOUT)), ZBX_SOCKET_BYTES_LIMIT
-			);
-			$result = $server->testItem($item_test_data, CSessionHelper::getId());
-
-			// Handle the response.
-			if ($result === false) {
-				error($server->getError());
-			}
-			elseif (is_array($result)) {
-				if (array_key_exists('result', $result)) {
-					// Move current value to previous value field.
-					if ($this->use_prev_value && $preproc_test_data['value'] !== '') {
-						$preproc_test_data['history']['value'] = $preproc_test_data['value'];
-						$preproc_test_data['history']['timestamp'] = $this->getPrevTime();
-
-						$output['prev_value'] = $preproc_test_data['value'];
-						$output['prev_time'] = $preproc_test_data['history']['timestamp'];
-					}
-
-					// Apply new value to preprocessing test.
-					$preproc_test_data['value'] = $result['result'];
-					$output['value'] = $result['result'];
-					$output['eol'] = (strstr($result['result'], "\r\n") === false) ? ZBX_EOL_LF : ZBX_EOL_CRLF;
-				}
-
-				if (array_key_exists('error', $result) && $result['error'] !== '') {
-					if ($preproc_test_data['steps']
-							&& $preproc_test_data['steps'][0]['type'] == ZBX_PREPROC_VALIDATE_NOT_SUPPORTED) {
-						$preproc_test_data['state'] = 1;
-					}
-					else {
-						error($result['error']);
-					}
-				}
-			}
-
-			if ($messages = get_and_clear_messages()) {
-				$output['error']['messages'] = array_column($messages, 'message');
-			}
+			$history = [
+				'value' => $this->getInput('value', ''),
+				'timestamp' => $this->getInput('prev_time', '') === '' ? '' : $this->getPrevTime()
+			];
+			$data += $this->prepareTestData();
 		}
 		else {
-			$preproc_test_data['state'] = $this->getInput('not_supported', 0);
+			$history = [
+				'value' => $this->getInput('prev_value', ''),
+				'timestamp' => $this->getInput('prev_time', '')
+			];
+			$data['item']['value'] = $this->getInput('value', '');
+			$data['options']['state'] = (int) $this->getInput('not_supported', self::SUPPORTED_STATE);
+
+			if ($data['options']['state'] == self::NOT_SUPPORTED_STATE) {
+				$data['options']['runtime_error'] = $this->getInput('runtime_error', '');
+			}
 		}
 
-		// Test preprocessing steps.
-		$this->eol = parent::getInput('eol', ZBX_EOL_LF);
+		if ($this->use_prev_value && $history['timestamp'] !== '') {
+			$data['options']['history'] = $history;
+		}
 
-		if (!array_key_exists('error', $output)) {
-			$preproc_test_data['value_type'] = $this->getInput('value_type', ITEM_VALUE_TYPE_STR);
+		$data['item']['value_type'] = $this->getInput('value_type', ITEM_VALUE_TYPE_STR);
 
-			$preproc_test_data['steps'] = $this->resolvePreprocessingStepMacros($preproc_test_data['steps']);
+		// Steps array can be empty if only value conversion is tested.
+		$steps_data = $this->resolvePreprocessingStepMacros(
+			normalizeItemPreprocessingSteps($this->getInput('steps', []))
+		);
 
-			// Send test details to Zabbix server.
-			$server = new CZabbixServer($ZBX_SERVER, $ZBX_SERVER_PORT,
-				timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::CONNECT_TIMEOUT)),
-				timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::ITEM_TEST_TIMEOUT)), ZBX_SOCKET_BYTES_LIMIT
-			);
-			$result = $server->testPreprocessingSteps($preproc_test_data, CSessionHelper::getId());
+		if ($steps_data) {
+			$data['item']['steps'] = $steps_data;
+		}
 
-			if ($result === false) {
-				error($server->getError());
-			}
-			elseif (is_array($result)) {
-				$test_failed = false;
-				$test_outcome = null;
+		$server = new CZabbixServer($ZBX_SERVER, $ZBX_SERVER_PORT,
+			timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::CONNECT_TIMEOUT)),
+			timeUnitToSeconds(CSettingsHelper::get(CSettingsHelper::ITEM_TEST_TIMEOUT)), ZBX_SOCKET_BYTES_LIMIT
+		);
+		$result = $server->testItem($data, CSessionHelper::getId());
+		$output = ['user' => ['debug_mode' => $this->getDebugMode()]];
 
-				foreach ($preproc_test_data['steps'] as $i => &$step) {
-					if ($test_failed) {
-						// If test is failed, proceesing steps are skipped from results.
-						unset($preproc_test_data['steps'][$i]);
-						continue;
-					}
-					elseif (array_key_exists($i, $result['steps'])) {
-						$step += $result['steps'][$i];
+		if ($result === false) {
+			error($server->getError());
+		}
+		else {
+			$this->processTestResult($data, $steps_data, $result, $output);
+		}
 
-						if (array_key_exists('error', $step)) {
-							// If error happened and no value is set, frontend shows label 'No value'.
-							if (!array_key_exists('action', $step) || $step['action'] != ZBX_PREPROC_FAIL_SET_VALUE) {
-								unset($step['result']);
-								$test_failed = true;
-							}
-						}
-						elseif ($step['type'] == ZBX_PREPROC_VALIDATE_NOT_SUPPORTED) {
-							$step['result'] = $preproc_test_data['value'];
-						}
-					}
+		$messages = get_and_clear_messages();
 
-					unset($step['type'], $step['params'], $step['error_handler'], $step['error_handler_params']);
-
-					// Latest executed step due to the error or end of preprocessing.
-					$test_outcome = $step + ['action' => ZBX_PREPROC_FAIL_DEFAULT];
+		if ($messages) {
+			foreach ($messages as &$message) {
+				if ($message['message'] === '') {
+					$message['message'] = _('<empty string>');
 				}
-				unset($step);
-
-				if (array_key_exists('error', $result)) {
-					error($result['error']);
-				}
-				elseif ($this->show_final_result) {
-					if (array_key_exists('result', $result)) {
-						$output['final'] = [
-							'action' => _s('Result converted to %1$s',
-								itemValueTypeString($preproc_test_data['value_type'])
-							),
-							'result' => $result['result']
-						];
-
-						if ($valuemap) {
-							$output['mapped_value'] = CValueMapHelper::applyValueMap($preproc_test_data['value_type'],
-								$result['result'], $valuemap
-							);
-						}
-					}
-					elseif (array_key_exists('error', $result)) {
-						$output['final'] = [
-							'action' => ($test_outcome['action'] == ZBX_PREPROC_FAIL_SET_ERROR)
-								? _('Set error to')
-								: '',
-							'error' => $result['error']
-						];
-					}
-
-					if ($output['final']['action'] !== '') {
-						$output['final']['action'] = (new CSpan($output['final']['action']))
-							->addClass(ZBX_STYLE_GREY)
-							->toString();
-					}
-				}
-
-				$output['steps'] = $preproc_test_data['steps'];
 			}
+			unset($message);
 
-			if ($messages = get_and_clear_messages()) {
-				$output['error']['messages'] = array_column($messages, 'message');
-			}
+			$output['error']['messages'] = array_column($messages, 'message');
 		}
 
 		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
+	}
+
+	private function processTestResult(array $data, array $steps_data, array $result, array &$output = []): void {
+		if (array_key_exists('error', $result)) {
+			error($result['error']);
+
+			return;
+		}
+		elseif ($steps_data && !array_key_exists('preprocessing', $result)) {
+			return;
+		}
+
+		$result_preproc = (array_key_exists('preprocessing', $result) ? $result['preprocessing'] : [])
+			+ ['steps' => []];
+		$result_item = array_key_exists('item', $result) ? $result['item'] : [];
+
+		if (array_key_exists('error', $result_item) && $result_item['error'] !== '') {
+			if ($steps_data	&& $steps_data[0]['type'] == ZBX_PREPROC_VALIDATE_NOT_SUPPORTED) {
+				$output['runtime_error'] = $result_item['error'];
+				$output['not_supported'] = self::NOT_SUPPORTED_STATE;
+			}
+			else {
+				error($result_item['error']);
+
+				return;
+			}
+		}
+		elseif (array_key_exists('result', $result_item)) {
+			$output['value'] = $result_item['result'];
+			$output['eol'] = $result_item['eol'] === 'CRLF' ? ZBX_EOL_CRLF : ZBX_EOL_LF;
+
+			if ($this->use_prev_value) {
+				$output['prev_value'] = array_key_exists('history', $data['options'])
+					? $data['options']['history']['value']
+					: $result_item['result'];
+				$output['prev_time'] = $this->getPrevTime();
+			}
+
+			if (array_key_exists('truncated', $result_item) && $result_item['truncated']) {
+				$output['value_warning'] = _s('Result is truncated due to its size (%1$s).',
+					convertUnits(['value' => $result_item['original_size'], 'units' => 'B'])
+				);
+			}
+		}
+
+		$test_outcome = ['action' => ZBX_PREPROC_FAIL_DEFAULT];
+		$test_failed = false;
+		$clear_step_fields = array_flip(['type', 'params', 'error_handler', 'error_handler_params',
+			'truncated', 'original_size'
+		]);
+
+		foreach ($steps_data as $i => &$step) {
+			// If test considered failed, further steps are skipped.
+			if ($test_failed) {
+				unset($result_preproc['steps'][$i]);
+				continue;
+			}
+
+			if (array_key_exists($i, $result_preproc['steps'])) {
+				$step += $result_preproc['steps'][$i];
+
+				// If error happened and no value override set, frontend shows 'No value'.
+				if (array_key_exists('error', $step)) {
+					if (array_key_exists('action', $step)) {
+						switch ($step['action']) {
+							case ZBX_PREPROC_FAIL_DISCARD_VALUE:
+								unset($step['result']);
+								$test_failed = true;
+							break;
+
+							case ZBX_PREPROC_FAIL_SET_VALUE:
+								// Code is not missing here.
+								break;
+
+							case ZBX_PREPROC_FAIL_SET_ERROR:
+								$test_failed = $step['type'] != ZBX_PREPROC_VALIDATE_NOT_SUPPORTED;
+								break;
+						}
+					}
+					else {
+						unset($step['result']);
+						$test_failed = $step['type'] != ZBX_PREPROC_VALIDATE_NOT_SUPPORTED;
+					}
+
+					$step['error'] = $step['error']['value'];
+				}
+				elseif (array_key_exists('truncated', $step) && $step['truncated']) {
+					$step['warning'] = _s('Result is truncated due to its size (%1$s).',
+						convertUnits(['value' => $step['original_size'], 'units' => 'B'])
+					);
+				}
+			}
+
+			$step = array_diff_key($step, $clear_step_fields);
+
+			// Latest executed step due to the error or end of preprocessing.
+			$test_outcome = $step + ['action' => ZBX_PREPROC_FAIL_DEFAULT];
+		}
+		unset($step);
+
+		$output['steps'] = $steps_data;
+
+		if (array_key_exists('error', $result_preproc)) {
+			error($result_preproc['error']);
+
+			return;
+		}
+
+		if ($this->show_final_result) {
+			if (array_key_exists('result', $result_preproc)) {
+				$output['final'] = [
+					'action' => _s('Result converted to %1$s', itemValueTypeString($data['item']['value_type'])),
+					'result' => $result_preproc['result']
+				];
+
+				if (array_key_exists('truncated', $result_preproc) && $result_preproc['truncated']) {
+					$output['final']['warning'] = _s('Result is truncated due to its size (%1$s).',
+						convertUnits(['value' => $result_preproc['original_size'], 'units' => 'B'])
+					);
+				}
+
+				if ($result_preproc['result'] !== null && $this->getInput('valuemapid', 0) != 0) {
+					$valuemaps = API::ValueMap()->get([
+						'output' => [],
+						'selectMappings' => ['type', 'newvalue', 'value'],
+						'valuemapids' => $this->getInput('valuemapid')
+					]);
+
+					if ($valuemaps) {
+						$output['mapped_value'] = CValueMapHelper::applyValueMap($data['item']['value_type'],
+							$result_preproc['result'], $valuemaps[0]
+						);
+					}
+				}
+			}
+
+			if (array_key_exists('final', $output) && $output['final']['action'] !== '') {
+				$output['final']['action'] = (new CSpan($output['final']['action']))
+					->addClass(ZBX_STYLE_GREY)
+					->toString();
+			}
+		}
 	}
 }

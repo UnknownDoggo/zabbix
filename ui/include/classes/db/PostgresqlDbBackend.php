@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -139,31 +134,6 @@ class PostgresqlDbBackend extends DbBackend {
 	}
 
 	/**
-	* Check if database is using IEEE754 compatible double precision columns.
-	*
-	* @return bool
-	*/
-	public function isDoubleIEEE754() {
-		global $DB;
-
-		$conditions_or = [
-			'(table_name=\'history\' AND column_name=\'value\')',
-			'(table_name=\'trends\' AND column_name IN (\'value_min\', \'value_avg\', \'value_max\'))'
-		];
-
-		$sql =
-			'SELECT COUNT(*) cnt FROM information_schema.columns'.
-				' WHERE table_catalog='.zbx_dbstr($DB['DATABASE']).
-					' AND table_schema='.zbx_dbstr($DB['SCHEMA'] ? $DB['SCHEMA'] : 'public').
-					' AND data_type=\'double precision\''.
-					' AND ('.implode(' OR ', $conditions_or).')';
-
-		$result = DBfetch(DBselect($sql));
-
-		return (is_array($result) && array_key_exists('cnt', $result) && $result['cnt'] == 4);
-	}
-
-	/**
 	 * Check is current connection contain requested cipher list.
 	 *
 	 * @return bool
@@ -177,7 +147,7 @@ class PostgresqlDbBackend extends DbBackend {
 			$is_secure = ($row && $row['ssl'] === 'on');
 		}
 		else {
-			$is_secure = (bool) DBfetch(DBselect('SELECT datname, usename, ssl, client_addr, cipher FROM pg_stat_ssl'.
+			$is_secure = (bool) DBfetch(DBselect('SELECT datname,usename,ssl,client_addr,cipher FROM pg_stat_ssl'.
 				' JOIN pg_stat_activity ON pg_stat_ssl.pid=pg_stat_activity.pid'.
 					' AND pg_stat_activity.usename='.zbx_dbstr($this->user)));
 		}
@@ -192,20 +162,40 @@ class PostgresqlDbBackend extends DbBackend {
 	/**
 	 * Create connection to database server.
 	 *
-	 * @param string $host         Host name.
-	 * @param string $port         Port.
-	 * @param string $user         User name.
-	 * @param string $password     Password.
-	 * @param string $dbname       Database name.
-	 * @param string $schema       DB schema.
+	 * @param string $hosts_ports   Comma-separated host names and ports.
+	 * @param string $default_port  Default port.
+	 * @param string $user          User name.
+	 * @param string $password      Password.
+	 * @param string $dbname        Database name.
+	 * @param string $schema        DB schema.
 	 *
-	 * @param
-	 * @return resource|null
+	 * @return PgSql\Connection|null
 	 */
-	public function connect($host, $port, $user, $password, $dbname, $schema) {
+	public function connect($hosts_ports, $default_port, $user, $password, $dbname, $schema) {
 		$this->user = $user;
 		$this->dbname = $dbname;
 		$this->schema = ($schema) ? $schema : 'public';
+
+		$endpoints = self::parseEndpoints($hosts_ports);
+
+		// Build host and port lists for libpq.
+		$hosts = [];
+		$ports = [];
+
+		foreach ($endpoints as $endpoint) {
+			/*
+			 * Keep host exactly as returned. Preserves whitespace and brackets for IPv6. Connection can fail if
+			 * whitespaces are used after host name.
+			 */
+			$hosts[] = $endpoint['host'];
+
+			// Use endpoint port when present. If empty string, use $default_port.
+			$ports[] = trim($endpoint['port']) === '' ? $default_port : $endpoint['port'];
+		}
+
+		$host = implode(',', $hosts);
+		$port = implode(',', $ports);
+
 		$params = compact(['host', 'port', 'user', 'password', 'dbname']);
 
 		if ($this->tls_encryption && (bool) $this->tls_ca_file) {
@@ -223,10 +213,16 @@ class PostgresqlDbBackend extends DbBackend {
 			$conn_string .= ((bool) $param) ? $key.'=\''.pg_connect_escape($param).'\' ' : '';
 		}
 
-		$resource = @pg_connect($conn_string);
+		if (count($endpoints) > 1) {
+			$conn_string .= 'target_session_attrs=read-write';
+			$conn_string .= ' connect_timeout=3';
+		}
+
+		$resource = $this->doPgConnect($conn_string);
 
 		if (!$resource) {
 			$this->setError('Error connecting to database.');
+
 			return null;
 		}
 
@@ -261,8 +257,6 @@ class PostgresqlDbBackend extends DbBackend {
 	/**
 	 * Check if tables have compressed data.
 	 *
-	 * @static
-	 *
 	 * @param array $tables  Tables list.
 	 *
 	 * @return bool
@@ -272,31 +266,130 @@ class PostgresqlDbBackend extends DbBackend {
 			return false;
 		}
 
-		$timescale_v1 = DBfetch(DBselect(
-			'SELECT NULL FROM pg_catalog.pg_class c'.
-			' JOIN pg_catalog.pg_namespace n'.
-			' ON n.oid=c.relnamespace'.
-			' WHERE n.nspname='.zbx_dbstr('timescaledb_information').
-			' AND c.relname='.zbx_dbstr('compressed_hypertable_stats')
+		$res = DBfetch(DBselect(
+			'SELECT extversion'.
+			' FROM pg_extension'.
+			' WHERE extname='.zbx_dbstr(ZBX_DB_EXTENSION_TIMESCALEDB)
 		));
 
-		if ($timescale_v1) {
-			$result = DBfetch(DBselect('SELECT coalesce(sum(number_compressed_chunks),0) chunks'.
-				' FROM timescaledb_information.compressed_hypertable_stats'.
-				' WHERE number_compressed_chunks != 0 AND '.dbConditionString('hypertable_name::text', $tables)
-			));
+		$stats_function = version_compare($res['extversion'], '2.18.0', '<')
+			? 'hypertable_compression_stats'
+			: 'hypertable_columnstore_stats';
+		$chunk_queries = [];
 
-			return (bool) $result['chunks'];
+		foreach ($tables as $table) {
+			$chunk_queries[] = 'SELECT number_compressed_chunks'.
+				' FROM '.$stats_function.'('.zbx_dbstr($table).')'.
+				' WHERE number_compressed_chunks != 0';
 		}
 
-		$query = implode(' UNION ', array_map(function ($table) {
-			return 'SELECT number_compressed_chunks chunks'.
-				' FROM hypertable_compression_stats('.zbx_dbstr($table).')'.
-				' WHERE number_compressed_chunks != 0';
-		}, $tables));
+		$result = DBfetch(DBselect(implode(' UNION ', $chunk_queries)));
 
-		$result = DBfetch(DBselect($query));
+		return (bool) $result;
+	}
 
-		return (bool) $result['chunks'];
+	/**
+	 * Create connection to database server.
+	 *
+	 * @param string $conn_string  Connection string.
+	 *
+	 * @return PgSql\Connection|false
+	 */
+	protected function doPgConnect(string $conn_string) {
+		return @pg_connect($conn_string);
+	}
+
+	/**
+	 * Parse input string containing comma-separated host and port pairs. Host and port are separated by colon. Host can
+	 * be an IPv6 address enclosed in square brackets.
+	 *
+	 * @param string $input  Input string containing comma-separated host and port pairs.
+	 *
+	 * @return array
+	 */
+	public static function parseEndpoints(string $input): array {
+		// Split by comma, trimming whitespace around commas.
+		$tokens = preg_split('/\s*,\s*/u', $input);
+
+		return array_map(static function(string $token): array {
+			// Remove outer whitespace from the token (but keep internal spaces).
+			$token = trim($token);
+
+			// Empty token (e.g. ,, or token of only spaces).
+			if ($token === '') {
+				return [
+					'host' => '',
+					'port' => ''
+				];
+			}
+
+			// Bracketed IPv6 starting with '[' and having a closing ']'.
+			if (strpos($token, '[') === 0) {
+				$closing = strpos($token, ']');
+
+				if ($closing !== false) {
+					/**
+					 * Host includes everything between '[' and ']'.
+					 */
+					$host = substr($token, 1, $closing - 1);
+					// Look for colon after the closing bracket.
+					$colon_pos = strpos($token, ':', $closing + 1);
+
+					if ($colon_pos !== false) {
+						// Preserves spaces after ':'.
+						$port = substr($token, $colon_pos + 1);
+
+						return [
+							'host' => $host,
+							'port' => $port
+						];
+					}
+
+					// Bracketed but no port.
+					return [
+						'host' => $host,
+						'port' => ''
+					];
+				}
+
+				// Starts with '[' but missing ']'. Treat as host and preserve as-is.
+				return [
+					'host' => $token,
+					'port' => ''
+				];
+			}
+
+			$colon_count = substr_count($token, ':');
+
+			// No colon. Only host, no port.
+			if ($colon_count == 0) {
+				return [
+					'host' => $token,
+					'port' => ''
+				];
+			}
+
+			// Multiple colons (unbracketed). Treat as unbracketed IPv6, keep whole token as host.
+			if ($colon_count >= 2) {
+				return [
+					'host' => $token,
+					'port' => ''
+				];
+			}
+
+			// Exactly one colon. Split at the first colon, preserve spaces on each side.
+			$colon_pos = strpos($token, ':');
+
+			// May contain trailing spaces.
+			$host = substr($token, 0, $colon_pos);
+
+			// May contain leading spaces.
+			$port = substr($token, $colon_pos + 1);
+
+			return [
+				'host' => $host,
+				'port' => $port
+			];
+		}, $tokens);
 	}
 }

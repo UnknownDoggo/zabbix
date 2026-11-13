@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -59,16 +54,32 @@ class CGraphPrototypeManager {
 			' FOR UPDATE'
 		);
 
-		// Deleting discovered graphs.
-		$del_discovered_graphids = DBfetchColumn(DBselect(
-			'SELECT gd.graphid FROM graph_discovery gd WHERE '.dbConditionInt('gd.parent_graphid', $del_graphids)
+		// Deleting discovered graph prototypes.
+		$db_graphids = DBfetchColumn(DBselect(
+			'SELECT gd.graphid'.
+			' FROM graph_discovery gd'.
+			' JOIN graphs g ON gd.graphid=g.graphid'.
+			' WHERE '.dbConditionId('gd.parent_graphid', $del_graphids).
+				' AND '.dbConditionInt('g.flags', [ZBX_FLAG_DISCOVERY_PROTOTYPE_CREATED])
 		), 'graphid');
 
-		if ($del_discovered_graphids) {
-			CGraphManager::delete($del_discovered_graphids);
+		if ($db_graphids) {
+			self::delete($db_graphids);
 		}
 
-		DB::delete('graphs_items', ['graphid' => $del_graphids]);
+		// Deleting discovered graphs.
+		$db_graphids = DBfetchColumn(DBselect(
+			'SELECT gd.graphid'.
+			' FROM graph_discovery gd'.
+			' JOIN graphs g ON gd.graphid=g.graphid'.
+			' WHERE '.dbConditionId('gd.parent_graphid', $del_graphids).
+				' AND '.dbConditionInt('g.flags', [ZBX_FLAG_DISCOVERY_CREATED])
+		), 'graphid');
+
+		if ($db_graphids) {
+			CGraphManager::delete($db_graphids);
+		}
+
 		DB::delete('graphs', ['graphid' => $del_graphids]);
 	}
 }

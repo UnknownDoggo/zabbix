@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package zbxcomms
@@ -23,14 +18,16 @@ import (
 	"bytes"
 	"compress/zlib"
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/log"
-	"zabbix.com/pkg/tls"
+	"golang.zabbix.com/agent2/pkg/tls"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/log"
 )
 
 const (
@@ -42,10 +39,17 @@ const headerSize = 4 + 1 + 4 + 4
 const tcpProtocol = byte(0x01)
 const zlibCompress = byte(0x02)
 
+// MaxPassiveCheckDataSize is the maximum size of data received during a passive check.
+const MaxPassiveCheckDataSize = 8 * 1024 * 1024
+
 const (
 	connStateAccept = iota + 1
 	connStateConnect
 	connStateEstablished
+)
+
+const (
+	responseFailed = "failed"
 )
 
 type Connection struct {
@@ -55,11 +59,31 @@ type Connection struct {
 	compress    bool
 	timeout     time.Duration
 	timeoutMode int
+	maxRecvSize uint32
+}
+
+// ConnectionInterface is interface for connection with Server or Proxy.
+type ConnectionInterface interface {
+	Close() (err error)
+	Read() (data []byte, err error)
+	RemoteIP() string
+	SetCompress(compress bool)
+	Write(data []byte) error
+	WriteString(s string) error
 }
 
 type Listener struct {
 	listener  net.Listener
 	tlsconfig *tls.Config
+}
+
+type redirectResponse struct {
+	Response string `json:"response"`
+	Redirect *struct {
+		Addr     string `json:"address"`
+		Revision uint64 `json:"revision"`
+		Reset    bool   `json:"reset"`
+	} `json:"redirect"`
 }
 
 func open(address string, localAddr *net.Addr, timeout time.Duration, connect_timeout time.Duration, timeoutMode int,
@@ -93,6 +117,7 @@ func (c *Connection) write(w io.Writer, data []byte) (err error) {
 	if c.compress {
 		z := zlib.NewWriter(&buf)
 		if _, err = z.Write(data); err != nil {
+			z.Close()
 			return
 		}
 		z.Close()
@@ -107,7 +132,9 @@ func (c *Connection) write(w io.Writer, data []byte) (err error) {
 	if err = binary.Write(&b, binary.LittleEndian, uint32(buf.Len())); nil != err {
 		return err
 	}
-	if err = binary.Write(&b, binary.LittleEndian, uint32(len(data))); nil != err {
+	if !c.compress {
+		b.Write([]byte{0, 0, 0, 0})
+	} else if err = binary.Write(&b, binary.LittleEndian, uint32(len(data))); nil != err {
 		return err
 	}
 	b.Write(buf.Bytes())
@@ -176,6 +203,14 @@ func (c *Connection) read(r io.Reader, pending []byte) ([]byte, error) {
 
 	expectedSize := binary.LittleEndian.Uint32(s[5:9])
 
+	if c.maxRecvSize != 0 && expectedSize > c.maxRecvSize {
+		return nil, errs.Errorf(
+			"message size %d exceeds the maximum size %d bytes",
+			expectedSize,
+			c.maxRecvSize,
+		)
+	}
+
 	if expectedSize > maxRecvDataSize {
 		return nil, fmt.Errorf("Message size %d exceeds the maximum size %d bytes.", expectedSize, maxRecvDataSize)
 	}
@@ -186,6 +221,21 @@ func (c *Connection) read(r io.Reader, pending []byte) ([]byte, error) {
 
 	if 0 != (flags & zlibCompress) {
 		reservedSize = binary.LittleEndian.Uint32(s[9:13])
+		if reservedSize > maxRecvDataSize {
+			return nil, errs.Errorf(
+				"message size %d exceeds the maximum size %d bytes",
+				reservedSize,
+				maxRecvDataSize,
+			)
+		}
+
+		if c.maxRecvSize != 0 && reservedSize > c.maxRecvSize {
+			return nil, errs.Errorf(
+				"uncompressed message size %d exceeds the maximum size %d bytes",
+				reservedSize,
+				c.maxRecvSize,
+			)
+		}
 	}
 
 	if int(expectedSize) == total-headerSize {
@@ -223,25 +273,6 @@ func (c *Connection) read(r io.Reader, pending []byte) ([]byte, error) {
 		return c.uncompress(s[:total], reservedSize)
 	}
 	return s[:total], nil
-}
-
-func (c *Connection) uncompress(data []byte, expLen uint32) ([]byte, error) {
-	var b bytes.Buffer
-
-	b.Grow(int(expLen))
-	z, err := zlib.NewReader(bytes.NewReader(data))
-	if nil != err {
-		return nil, fmt.Errorf("Unable to uncompress message: '%s'", err)
-	}
-	len, err := b.ReadFrom(z)
-	z.Close()
-	if nil != err {
-		return nil, fmt.Errorf("Unable to uncompress message: '%s'", err)
-	}
-	if len != int64(expLen) {
-		return nil, fmt.Errorf("Uncompressed message size %d instead of expected %d.", len, expLen)
-	}
-	return b.Bytes(), nil
 }
 
 func (c *Connection) Read() (data []byte, err error) {
@@ -283,35 +314,39 @@ func (c *Connection) Read() (data []byte, err error) {
 }
 
 func (c *Connection) RemoteIP() string {
-	addr, _, _ := net.SplitHostPort(c.conn.RemoteAddr().String())
-	return addr
+	tcpAddr, ok := c.conn.RemoteAddr().(*net.TCPAddr)
+	if !ok {
+		// This should never happen. RemoteAddr() should always return *net.TCPAddr as long as the connection is
+		// opened only with net.Dial("tcp", ...).
+		log.Warningf(
+			"remote address %q has unexpected type %T in RemoteIP()",
+			c.conn.RemoteAddr().String(),
+			c.conn.RemoteAddr(),
+		)
+
+		return c.conn.RemoteAddr().String()
+	}
+
+	return tcpAddr.IP.String()
 }
 
-func Listen(address string, args ...interface{}) (c *Listener, err error) {
-	var tlsconfig *tls.Config
-	if len(args) > 0 {
-		var ok bool
-		if tlsconfig, ok = args[0].(*tls.Config); !ok {
-			return nil, fmt.Errorf("invalid TLS configuration parameter of type %T", args[0])
-		}
+// Accept waits for and accepts an incoming connection using net.Accept.
+// It applies the given read timeout and timeout mode to the resulting connection.
+func (l *Listener) Accept(timeout time.Duration, timeoutMode int) (*Connection, error) {
+	conn, err := l.listener.Accept()
+	if err != nil {
+		return nil, errs.Wrap(err, "failed to accept connection")
 	}
-	l, tmperr := net.Listen("tcp", address)
-	if tmperr != nil {
-		return nil, fmt.Errorf("Listen failed: %s", tmperr.Error())
-	}
-	c = &Listener{listener: l.(*net.TCPListener), tlsconfig: tlsconfig}
-	return
-}
 
-func (l *Listener) Accept(timeout time.Duration, timeoutMode int) (c *Connection, err error) {
-	var conn net.Conn
-	if conn, err = l.listener.Accept(); err != nil {
-		return
-	} else {
-		c = &Connection{conn: conn, tlsConfig: l.tlsconfig, state: connStateAccept, timeout: timeout,
-			timeoutMode: timeoutMode}
+	c := &Connection{
+		conn:        conn,
+		tlsConfig:   l.tlsconfig,
+		state:       connStateAccept,
+		timeout:     timeout,
+		timeoutMode: timeoutMode,
 	}
-	return
+
+	return c, nil
 }
 
 func (c *Connection) Close() (err error) {
@@ -325,17 +360,60 @@ func (c *Connection) SetCompress(compress bool) {
 	c.compress = compress
 }
 
-func (c *Listener) Close() (err error) {
-	return c.listener.Close()
+// SetMaxRecvSize sets the maximum size of data that the connection can receive.
+func (c *Connection) SetMaxRecvSize(maxSize uint32) {
+	c.maxRecvSize = maxSize
 }
 
-func Exchange(addresses *[]string, localAddr *net.Addr, timeout time.Duration, connect_timeout time.Duration,
-	data []byte, args ...interface{}) ([]byte, []error) {
-	log.Tracef("connecting to %s [timeout:%s, connection timeout:%s]", *addresses, timeout, connect_timeout)
+func (*Connection) uncompress(data []byte, expLen uint32) ([]byte, error) {
+	const uncompressError = "unable to uncompress message"
+
+	var b bytes.Buffer
+
+	z, err := zlib.NewReader(bytes.NewReader(data))
+	if err != nil {
+		return nil, errs.Wrap(err, uncompressError)
+	}
+
+	r := io.LimitReader(z, int64(expLen)+1)
+	b.Grow(int(expLen))
+	length, readErr := b.ReadFrom(r)
+	closeErr := z.Close()
+
+	if readErr != nil {
+		return nil, errs.Wrap(readErr, uncompressError)
+	}
+
+	if closeErr != nil {
+		return nil, errs.Wrap(closeErr, uncompressError)
+	}
+
+	if length != int64(expLen) {
+		return nil, errs.Wrap(
+			errs.Errorf("uncompressed message size %d instead of expected %d", length, expLen),
+			uncompressError,
+		)
+	}
+
+	return b.Bytes(), nil
+}
+
+// Close stops the listener.
+func (l *Listener) Close() error {
+	err := l.listener.Close()
+	if err != nil {
+		return errs.Wrap(err, "failed to close listener")
+	}
+
+	return nil
+}
+
+func Exchange(addrpool AddressSet, localAddr *net.Addr, timeout time.Duration, connect_timeout time.Duration,
+	data []byte, args ...interface{}) (b []byte, errs []error, errRead error) {
+	log.Tracef("connecting to %s [timeout:%s, connection timeout:%s]", addrpool, timeout, connect_timeout)
 
 	var tlsconfig *tls.Config
 	var err error
-	var errs []error
 	var c *Connection
 	var no_response = false
 
@@ -345,7 +423,7 @@ func Exchange(addresses *[]string, localAddr *net.Addr, timeout time.Duration, c
 			errs = append(errs, fmt.Errorf("invalid TLS configuration parameter of type %T", args[0]))
 			log.Tracef("%s", errs[len(errs)-1])
 
-			return nil, errs
+			return nil, errs, nil
 		}
 
 		if len(args) > 1 {
@@ -353,62 +431,116 @@ func Exchange(addresses *[]string, localAddr *net.Addr, timeout time.Duration, c
 				errs = append(errs, fmt.Errorf("invalid response handling flag of type %T", args[1]))
 				log.Tracef("%s", errs[len(errs)-1])
 
-				return nil, errs
+				return nil, errs, nil
 			}
 		}
 	}
 
-	for i := 0; i < len(*addresses); i++ {
-		c, err = open((*addresses)[0], localAddr, timeout, connect_timeout, TimeoutModeFixed, tlsconfig)
+	for i := 0; i < addrpool.count(); i++ {
+		c, err = open(addrpool.Get(), localAddr, timeout, connect_timeout, TimeoutModeFixed, tlsconfig)
 		if err == nil {
 			break
 		}
 
-		errs = append(errs, fmt.Errorf("cannot connect to [%s]: %s", (*addresses)[0], err))
+		errs = append(errs, fmt.Errorf("cannot connect to [%s]: %s", addrpool.Get(), err))
 		log.Tracef("%s", errs[len(errs)-1])
 
-		tmp := (*addresses)[0]
-		*addresses = (*addresses)[1:]
-		*addresses = append(*addresses, tmp)
+		addrpool.Next()
 	}
 
 	if err != nil {
-		return nil, errs
+		return nil, errs, nil
 	}
 
 	defer c.Close()
 
-	log.Tracef("sending [%s] to [%s]", string(data), (*addresses)[0])
+	log.Tracef("sending [%s] to [%s]", string(data), addrpool.Get())
 
 	err = c.Write(data)
 	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot send to [%s]: %s", (*addresses)[0], err))
+		errs = append(errs, fmt.Errorf("cannot send to [%s]: %s", addrpool.Get(), err))
 		log.Tracef("%s", errs[len(errs)-1])
 
-		return nil, errs
+		addrpool.Next()
+		return nil, errs, nil
 	}
 
-	if no_response {
-		return nil, nil
-	}
+	log.Tracef("receiving data from [%s]", addrpool.Get())
 
-	log.Tracef("receiving data from [%s]", (*addresses)[0])
-
-	b, err := c.Read()
+	b, err = c.Read()
 	if err != nil {
-		errs = append(errs, fmt.Errorf("cannot receive data from [%s]: %s", (*addresses)[0], err))
+		errs = append(errs, fmt.Errorf("cannot receive data from [%s]: %s", addrpool.Get(), err))
 		log.Tracef("%s", errs[len(errs)-1])
-
-		return nil, errs
 	}
-	log.Tracef("received [%s] from [%s]", string(b), (*addresses)[0])
+	log.Tracef("received [%s] from [%s]", string(b), addrpool.Get())
 
 	if len(b) == 0 {
-		errs = append(errs, fmt.Errorf("connection closed"))
-		log.Tracef("%s", errs[len(errs)-1])
+		if !no_response {
+			errs = append(errs, fmt.Errorf("connection closed"))
+			log.Tracef("%s", errs[len(errs)-1])
 
-		return nil, errs
+			addrpool.Next()
+			return nil, errs, errs[len(errs)-1]
+		}
+	} else {
+		if nil != tlsconfig {
+			byte_slice := make([]byte, 1024)
+			c.conn.Read(byte_slice)
+		}
+
 	}
 
-	return b, nil
+	return b, nil, nil
+}
+
+func ExchangeWithRedirect(addrpool AddressSet, localAddr *net.Addr, timeout time.Duration,
+	connectTimeout time.Duration, data []byte, args ...interface{}) ([]byte, []error, error) {
+	retries := 0
+retry:
+	retries++
+
+	var exchangeAddrPool AddressSet
+
+	if retries > 1 {
+		// On retries, use a temporary addrpool with only the redirect address to skip failover
+		tempAddrs := []string{addrpool.Get()}
+		exchangeAddrPool = NewAddressPool(tempAddrs)
+	} else {
+		exchangeAddrPool = addrpool
+	}
+
+	b, errs, err := Exchange(exchangeAddrPool, localAddr, timeout, connectTimeout, data, args...)
+
+	if errs != nil {
+		return b, errs, err
+	}
+
+	var response redirectResponse
+
+	if json.Unmarshal(b, &response) != nil {
+		return b, errs, err
+	}
+
+	if response.Response != responseFailed || nil == response.Redirect {
+		return b, errs, err
+	}
+
+	if retries > 1 {
+		errs = append(errs, errors.New("sequential redirect responses detected"))
+
+		return nil, errs, err
+	}
+
+	if response.Redirect.Reset {
+		addrpool.reset()
+		log.Debugf("performing redirect reset, connecting to [%s]", addrpool.Get())
+
+		goto retry
+	}
+
+	if addrpool.addRedirect(response.Redirect.Addr, response.Redirect.Revision) {
+		log.Debugf("performing redirect to [%s]", addrpool.Get())
+	}
+
+	goto retry
 }

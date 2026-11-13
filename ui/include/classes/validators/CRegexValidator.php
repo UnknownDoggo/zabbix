@@ -1,39 +1,35 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-class CRegexValidator extends CValidator
-{
+
+
+class CRegexValidator extends CValidator {
 
 	/**
 	 * Error message if the is not a string.
 	 *
 	 * @var string
 	 */
-	public $messageInvalid;
+	public $messageInvalid = '';
 
 	/**
 	 * Error message if the value is invalid
 	 *
 	 * @var string
 	 */
-	public $messageRegex;
+	public $messageRegex = '';
 
 	/**
 	 * Check if regular expression is valid
@@ -48,28 +44,18 @@ class CRegexValidator extends CValidator
 			return false;
 		}
 
-		// escape '/' since Zabbix server treats them as literal characters.
-		$value = str_replace('/', '\/', $value);
-
-		// validate through preg_match
-		$error = false;
+		$error = '';
 
 		set_error_handler(function ($errno, $errstr) use (&$error) {
-			if ($errstr != '') {
-				$error = $errstr;
-			}
+			$error = $errstr;
 		});
 
-		preg_match('/'.$value.'/', null);
+		preg_match('/'.CRegexHelper::handleSlashEscaping($value).'/', '');
 
 		restore_error_handler();
 
-		if ($error) {
-			$this->error(
-				$this->messageRegex,
-				$value,
-				str_replace('preg_match(): ', '', $error)
-			);
+		if ($error !== '') {
+			$this->error($this->messageRegex, $value, str_replace('preg_match(): ', '', $error));
 			return false;
 		}
 

@@ -1,60 +1,41 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerMacrosEdit extends CController {
 
-	protected function init() {
-		$this->disableSIDValidation();
+	protected function init(): void {
+		$this->disableCsrfValidation();
 	}
 
-	protected function checkInput() {
-		$fields = [
-			'macros' => 'array'
-		];
-
-		$ret = $this->validateInput($fields);
-
-		if (!$ret) {
-			$this->setResponse(new CControllerResponseFatal());
-		}
-
-		return $ret;
+	protected function checkInput(): bool {
+		return true;
 	}
 
-	protected function checkPermissions() {
-		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
+	protected function checkPermissions(): bool {
+		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_MACROS);
 	}
 
-	protected function doAction() {
-		$data = [];
-
-		if ($this->hasInput('macros')) {
-			$data['macros'] = $this->getInput('macros');
-		}
-		else {
-			$data['macros'] = array_values(order_macros(API::UserMacro()->get([
+	protected function doAction(): void {
+		$data = [
+			'macros' => array_values(order_macros(API::UserMacro()->get([
 				'output' => ['globalmacroid', 'macro', 'value', 'type', 'description'],
 				'globalmacro' => true
-			]), 'macro'));
-		}
+			]), 'macro')),
+			'js_validation_rules' => (new CFormValidator(CControllerMacrosUpdate::getValidationRules()))->getRules()
+		];
 
 		if (!$data['macros']) {
 			$data['macros'][] = ['macro' => '', 'value' => '', 'description' => '', 'type' => ZBX_MACRO_TYPE_TEXT];

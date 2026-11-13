@@ -1,21 +1,16 @@
 /*
- ** Zabbix
- ** Copyright (C) 2001-2022 Zabbix SIA
- **
- ** This program is free software; you can redistribute it and/or modify
- ** it under the terms of the GNU General Public License as published by
- ** the Free Software Foundation; either version 2 of the License, or
- ** (at your option) any later version.
- **
- ** This program is distributed in the hope that it will be useful,
- ** but WITHOUT ANY WARRANTY; without even the implied warranty of
- ** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
- ** GNU General Public License for more details.
- **
- ** You should have received a copy of the GNU General Public License
- ** along with this program; if not, write to the Free Software
- ** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
- **/
+** Copyright (C) 2001-2026 Zabbix SIA
+**
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
+**
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
+**
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
+**/
 
 
 /**
@@ -28,21 +23,29 @@ jQuery(function ($) {
 	function createOverrideElement($override, option, value) {
 		var close = $('<button>', {'type': 'button'})
 				.on('click', function(e) {
-					$override.overrides('removeOverride', $override, option);
+					$override.overrides('removeOverride', $override, $(e.target));
 					e.stopPropagation();
 					e.preventDefault();
 				})
-				.addClass('subfilter-disable-btn'),
+				.addClass([ZBX_STYLE_BTN_ICON, ZBX_ICON_REMOVE_SMALLER, 'js-remove']),
 			opt = $override.data('options'),
 			field_name = opt.makeName(option, opt.getId($override));
 
-		if (option === 'color') {
-			const id = field_name.replace(/\]/g, '_').replace(/\[/g, '_');
-			const input = $('<input>', {'name': field_name, 'type': 'hidden', 'id': id}).val(value);
+		if (option === 'color' || option === 'color_palette') {
+			const color_picker = new ZColorPicker();
+
+			color_picker.colorFieldName = opt.makeName('color', opt.getId($override));
+			color_picker.paletteFieldName = opt.makeName('color_palette', opt.getId($override));
+
+			if (option === 'color') {
+				color_picker.color = value;
+			}
+			else if (option === 'color_palette') {
+				color_picker.palette = value;
+			}
 
 			return $('<div>')
-				.addClass('color-picker')
-				.append(input)
+				.append(color_picker)
 				.append(close);
 		}
 		else if (option === 'timeshift') {
@@ -185,7 +188,7 @@ jQuery(function ($) {
 		 * - makeOption	- Function extracts given string and returns override option from it.
 		 * - onUpdate	- Function called when override values changes.
 		 *
-		 * @param options
+		 * @param {object} options
 		 */
 		init: function(options) {
 			options = $.extend({}, {
@@ -222,10 +225,6 @@ jQuery(function ($) {
 
 					$(elmnt).insertBefore($(this));
 					$(this).remove();
-
-					if (opt === 'color') {
-						$(elmnt).find('input').colorpicker();
-					}
 				});
 
 				$override.on('click', '[data-option]', function(e) {
@@ -257,13 +256,25 @@ jQuery(function ($) {
 		 *  - adds new override option (UI element) of type {option} and value {value} for given $override;
 		 *  - changes if specified option of type {option} is already set for given $override.
 		 *
-		 * @param object $override       Object of current override.
-		 * @param string option          String of override option to set (e.g. color, type etc).
-		 * @param string value           Value of option. Can be NULL for options 'color' and 'timeshift'.
+		 * @param {object} $override       Object of current override.
+		 * @param {string} option          String of override option to set (e.g. color, type etc).
+		 * @param {string} value           Value of option. Can be NULL for options 'color' and 'timeshift'.
 		 */
 		addOverride: function($override, option, value) {
-			var opt = $override.data('options');
-			if ($('[name="' + opt['makeName'](option, opt.getId($override)) + '"]', $override).length > 0) {
+			const opt = $override.data('options');
+
+			let override_exists;
+
+			if (option === 'color') {
+				override_exists = $override[0].querySelector(`.${ZBX_STYLE_COLOR_PICKER}`) !== null;
+			}
+			else {
+				const field_name = opt['makeName'](option, opt.getId($override));
+
+				override_exists = $override[0].querySelector(`[name="${field_name}"]`) !== null;
+			}
+
+			if (override_exists) {
 				methods.updateOverride($override, option, value);
 			}
 			else {
@@ -271,10 +282,6 @@ jQuery(function ($) {
 				$('<li>')
 					.append(elmnt)
 					.insertBefore($('li:last', $override));
-
-				if (option === 'color') {
-					$(elmnt).find('input').colorpicker();
-				}
 			}
 
 			// Call on-select callback.
@@ -289,14 +296,23 @@ jQuery(function ($) {
 		updateOverride: function($override, option, value) {
 			var opt = $override.data('options'),
 				field_name = opt['makeName'](option, opt.getId($override));
-			$('[name="' + field_name + '"]', $override).val(value);
 
 			switch (option) {
-				case 'timeshift':
 				case 'color':
+					const color_picker = $override[0].querySelector(`.${ZBX_STYLE_COLOR_PICKER}`);
+
+					if (color_picker !== null) {
+						color_picker.color = value;
+					}
+					break;
+
+				case 'timeshift':
+					$('[name="' + field_name + '"]', $override).val(value);
 					break;
 
 				default:
+					$('[name="' + field_name + '"]', $override).val(value);
+
 					var visible_name = (typeof opt.captions[option] !== 'undefined') ? opt.captions[option] : option,
 						visible_value = (typeof opt.captions[option + value] !== 'undefined')
 							? opt.captions[option + value]
@@ -310,13 +326,13 @@ jQuery(function ($) {
 		/**
 		 * Removes existing override option from given $override.
 		 *
-		 * @param object $override       Object of current override.
-		 * @param string option          Override option that need to be removed.
+		 * @param {object} $override       Object of current override.
+		 * @param {object} $button         The button to remove the override.
 		 */
-		removeOverride: function($override, option) {
-			var opt = $override.data('options');
-			$('[name="'+opt['makeName'](option, opt.getId($override))+'"]', $(this)).closest('li').remove();
-			opt['onUpdate']();
+		removeOverride: function($override, $button) {
+			const options = $override.data('options');
+			$button.closest('li').remove();
+			options['onUpdate']();
 		}
 	};
 

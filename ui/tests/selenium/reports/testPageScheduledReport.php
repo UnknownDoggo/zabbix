@@ -1,27 +1,22 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CWebTest.php';
-require_once dirname(__FILE__).'/../behaviors/CMessageBehavior.php';
-require_once dirname(__FILE__).'/../../include/helpers/CDataHelper.php';
-require_once dirname(__FILE__).'/../traits/TableTrait.php';
+require_once __DIR__.'/../../include/CWebTest.php';
+require_once __DIR__.'/../behaviors/CMessageBehavior.php';
+require_once __DIR__.'/../behaviors/CTableBehavior.php';
+require_once __DIR__.'/../../include/helpers/CDataHelper.php';
 
 /**
  * @dataSource ScheduledReports
@@ -30,15 +25,16 @@ require_once dirname(__FILE__).'/../traits/TableTrait.php';
  */
 class testPageScheduledReport extends CWebTest {
 
-	use TableTrait;
-
 	/**
-	 * Attach MessageBehavior to the test.
+	 * Attach MessageBehavior and TableBehavior to the test.
 	 *
 	 * @return array
 	 */
 	public function getBehaviors() {
-		return [CMessageBehavior::class];
+		return [
+			CMessageBehavior::class,
+			CTableBehavior::class
+		];
 	}
 
 	/**
@@ -119,14 +115,16 @@ class testPageScheduledReport extends CWebTest {
 				->filter(new CElementFilter(CElementFilter::ATTRIBUTES_PRESENT, ['disabled']))->count());
 
 		// Check displaying and hiding the filter.
-		$filter_form = $this->query('name:zbx_filter')->asForm()->one();
-		$filter_tab = $this->query('link:Filter')->one();
-		$filter = $filter_form->query('id:tab_0')->one();
-		$this->assertTrue($filter->isDisplayed());
-		$filter_tab->click();
-		$this->assertFalse($filter->isDisplayed());
-		$filter_tab->click();
-		$this->assertTrue($filter->isDisplayed());
+		$filter = CFilterElement::find()->one();
+		$filter_form = $filter->getForm();
+		$this->assertEquals('Filter', $filter->getSelectedTabName());
+		// Check that filter is expanded by default.
+		$this->assertTrue($filter->isExpanded());
+		// Check that filter is collapsing/expanding on click.
+		foreach ([false, true] as $status) {
+			$filter->expand($status);
+			$this->assertTrue($filter->isExpanded($status));
+		}
 
 		// Check default values of filter.
 		$filter_form->checkValue(['Name' => '', 'Show' => 'All', 'Status' => 'Any']);
@@ -150,16 +148,11 @@ class testPageScheduledReport extends CWebTest {
 		// Check table headers.
 		$table = $this->query('class:list-table')->asTable()->one();
 		$this->assertEquals(['', 'Name', 'Owner', 'Repeats', 'Period', 'Last sent', 'Status', 'Info'], $table->getHeadersText());
-		foreach ($table->getHeaders() as $header) {
-			if ($header->getText() !== 'Name') {
-				// Only 'Name' column is clickable and contains tags 'a'.
-				$this->assertFalse($header->query('tag:a')->one(false)->isValid());
-			}
-		}
+		$this->assertEquals(['Name'], $table->getSortableHeaders()->asText());
 
 		// Check all columns and info icon for one report.
 		$row = $table->findRow('Name', $expired_report['Name']);
-		$row->getColumn('Info')->query('class:status-yellow')->one()->click();
+		$row->getColumn('Info')->query('class:zi-i-warning')->one()->click();
 		$hint = $this->query('xpath://div[@data-hintboxid]')->asOverlayDialog()->waitUntilPresent()->all()->last();
 		$this->assertEquals($expired_report['Info'], $hint->getText());
 		$hint->close();
@@ -168,6 +161,10 @@ class testPageScheduledReport extends CWebTest {
 		foreach ($expired_report as $column => $value) {
 			$this->assertEquals($value, $row->getColumn($column)->getText());
 		}
+
+		// Check that the filter is still expanded after page refresh.
+		$this->page->refresh()->waitUntilReady();
+		$this->assertTrue($filter->isExpanded());
 	}
 
 	public static function getFilterData() {
@@ -281,6 +278,17 @@ class testPageScheduledReport extends CWebTest {
 						'Name' => 'No data'
 					]
 				]
+			],
+			// Multiple spaces in filter field "Name".
+			[
+				[
+					'filter' => [
+						'Name' => '   '
+					],
+					'result' => [
+						'Report for filter - disabled'
+					]
+				]
 			]
 		];
 	}
@@ -290,9 +298,10 @@ class testPageScheduledReport extends CWebTest {
 	 */
 	public function testPageScheduledReport_Filter($data) {
 		$this->page->login()->open('zabbix.php?action=scheduledreport.list');
-
+		$table = $this->getTable();
 		$form = $this->query('name:zbx_filter')->asForm()->one();
 		$form->fill($data['filter'])->submit();
+		$table->waitUntilReloaded();
 		$this->page->waitUntilReady();
 
 		$this->assertTableDataColumn(CTestArrayHelper::get($data, 'result', []));
@@ -315,7 +324,7 @@ class testPageScheduledReport extends CWebTest {
 			],
 			[
 				[
-					'Name' => 'Report for filter - disabled',
+					'Name' => 'Report for filter -   disabled',
 					'Status' => 'Disabled'
 				]
 			],
@@ -427,6 +436,7 @@ class testPageScheduledReport extends CWebTest {
 			$names = [$names];
 		}
 		foreach ($names as $name) {
+			$name = ($name === 'Report for filter - disabled') ? 'Report for filter -   disabled' : $name;
 			$this->assertEquals($db_status, CDBHelper::getValue('SELECT status FROM report WHERE name='.zbx_dbstr($name)));
 		}
 	}
@@ -438,7 +448,9 @@ class testPageScheduledReport extends CWebTest {
 		$this->page->login()->open('zabbix.php?action=scheduledreport.list');
 		$table = $this->query('class:list-table')->asTable()->one();
 		$header = $table->query('xpath:.//a[text()="Name"]')->one();
-		$names = $this->getAllReportNames();
+
+		// In the HTML structure the names have several spaces, they need to be removed.
+		$names = preg_replace('/\s+/', ' ',$this->getAllReportNames());
 
 		foreach(['asc', 'desc'] as $sorting) {
 			$expected = ($sorting === 'asc') ? $names : array_reverse($names);
@@ -488,6 +500,11 @@ class testPageScheduledReport extends CWebTest {
 		$this->query('button:Delete')->one()->waitUntilClickable()->click();
 		$this->page->acceptAlert();
 		$this->page->waitUntilReady();
+
+		$message = is_string(CTestArrayHelper::get($data, 'Name'))
+			? 'Scheduled report deleted'
+			: 'Scheduled reports deleted';
+		$this->assertMessage(TEST_GOOD, $message);
 		$this->assertEquals('0 selected', $this->query('id:selected_count')->one()->getText());
 
 		if (array_key_exists('delete_all', $data)) {

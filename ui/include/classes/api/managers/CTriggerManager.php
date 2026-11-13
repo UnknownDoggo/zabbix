@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -53,81 +48,87 @@ class CTriggerManager {
 
 		$del_triggerids = array_keys($del_triggerids);
 
-		// Disable actions.
-		$actionids = [];
-		$conditionids = [];
+		self::checkUsedInActions($del_triggerids);
+		self::checkMaintenances($del_triggerids);
 
-		$db_actions = DBselect(
-			'SELECT ac.conditionid,ac.actionid'.
-			' FROM conditions ac'.
-			' WHERE ac.conditiontype='.CONDITION_TYPE_TRIGGER.
-				' AND '.dbConditionString('ac.value', $del_triggerids)
-		);
-		while ($db_action = DBfetch($db_actions)) {
-			$conditionids[] = $db_action['conditionid'];
-			$actionids[$db_action['actionid']] = true;
-		}
+		API::Map()->unlinkTriggers($del_triggerids);
 
-		if ($actionids) {
-			DB::update('actions', [
-				'values' => ['status' => ACTION_STATUS_DISABLED],
-				'where' => ['actionid' => array_keys($actionids)]
-			]);
-
-			// Delete action conditions.
-			DB::delete('conditions', ['conditionid' => $conditionids]);
-		}
-
-		// Remove trigger sysmap elements.
-		$selement_triggerids = [];
-		$selementids = [];
-
-		$db_selement_triggers = DBselect(
-			'SELECT st.selement_triggerid,st.selementid'.
-			' FROM sysmap_element_trigger st'.
-			' WHERE '.dbConditionInt('st.triggerid', $del_triggerids)
-		);
-
-		while ($db_selement_trigger = DBfetch($db_selement_triggers)) {
-			$selement_triggerids[] = $db_selement_trigger['selement_triggerid'];
-			$selementids[$db_selement_trigger['selementid']] = true;
-		}
-
-		if ($selement_triggerids) {
-			DB::delete('sysmap_element_trigger', ['selement_triggerid' => $selement_triggerids]);
-
-			// Remove map elements without triggers.
-			$db_selement_triggers = DBselect(
-				'SELECT DISTINCT st.selementid'.
-				' FROM sysmap_element_trigger st'.
-				' WHERE '.dbConditionInt('st.selementid', array_keys($selementids))
-			);
-			while ($db_selement_trigger = DBfetch($db_selement_triggers)) {
-				unset($selementids[$db_selement_trigger['selementid']]);
-			}
-
-			if ($selementids) {
-				DB::delete('sysmaps_elements', ['selementid' => array_keys($selementids)]);
-			}
-		}
-
-		// Remove related events.
-		$ins_housekeeper = [];
-
-		foreach ($del_triggerids as $del_triggerid) {
-			$ins_housekeeper[] = [
-				'tablename' => 'events',
-				'field' => 'triggerid',
-				'value' => $del_triggerid
-			];
-		}
-
-		DB::insertBatch('housekeeper', $ins_housekeeper);
-
-		DB::delete('trigger_discovery', ['triggerid' => $del_triggerids]);
 		DB::delete('trigger_depends', ['triggerid_down' => $del_triggerids]);
 		DB::delete('trigger_depends', ['triggerid_up' => $del_triggerids]);
+		DB::delete('functions', ['triggerid' => $del_triggerids]);
 		DB::delete('trigger_tag', ['triggerid' => $del_triggerids]);
+		DB::update('triggers', [
+			'values' => ['templateid' => 0],
+			'where' => ['triggerid' => $del_triggerids]
+		]);
 		DB::delete('triggers', ['triggerid' => $del_triggerids]);
+	}
+
+	/**
+	 * @throws APIException
+	 */
+	private static function checkUsedInActions(array $del_triggerids): void {
+		$row = DBfetch(DBselect(
+			'SELECT a.name,t.description'.
+			' FROM conditions c'.
+			' JOIN actions a ON c.actionid=a.actionid'.
+			' JOIN triggers t ON '.zbx_dbcast_2bigint('c.value').'=t.triggerid'.
+			' WHERE c.conditiontype='.ZBX_CONDITION_TYPE_TRIGGER.
+				' AND '.dbConditionString('c.value', $del_triggerids),
+			1
+		));
+
+		if ($row) {
+			throw new APIException(ZBX_API_ERROR_PARAMETERS, _s('Cannot delete trigger "%1$s": %2$s.',
+				$row['description'], _s('action "%1$s" uses this trigger', $row['name'])
+			));
+		}
+	}
+
+	/**
+	 * Check that no maintenance object will be left without host groups, hosts and triggers as the result of the
+	 * given triggers deletion.
+	 *
+	 * @throws APIException
+	 */
+	private static function checkMaintenances(array $triggerids): void {
+		$maintenance = DBfetch(DBselect(
+			'SELECT mt.maintenanceid,m.name'.
+			' FROM maintenance_trigger mt'.
+			' JOIN maintenances m ON mt.maintenanceid=m.maintenanceid'.
+			' WHERE '.dbConditionId('mt.triggerid', $triggerids).
+				' AND NOT EXISTS ('.
+					'SELECT NULL'.
+					' FROM maintenance_trigger mt1'.
+					' WHERE mt.maintenanceid=mt1.maintenanceid'.
+						' AND '.dbConditionId('mt1.triggerid', $triggerids, true).
+				')'.
+				' AND NOT EXISTS ('.
+					'SELECT NULL'.
+					' FROM maintenances_hosts mh'.
+					' WHERE mt.maintenanceid=mh.maintenanceid'.
+				')'.
+				' AND NOT EXISTS ('.
+					'SELECT NULL'.
+					' FROM maintenances_groups mg'.
+					' WHERE mt.maintenanceid=mg.maintenanceid'.
+				')'
+		, 1));
+
+		if ($maintenance) {
+			$maintenance_triggers = DBfetchColumn(DBselect(
+				'SELECT t.description'.
+				' FROM maintenance_trigger mt,triggers t'.
+				' WHERE mt.triggerid=t.triggerid'.
+					' AND '.dbConditionId('mt.maintenanceid', [$maintenance['maintenanceid']])
+			), 'description');
+			natsort($maintenance_triggers);
+
+			throw new APIException(ZBX_API_ERROR_PARAMETERS, _n(
+				'Cannot delete trigger %1$s because maintenance "%2$s" must contain at least one host group, host or trigger.',
+				'Cannot delete triggers %1$s because maintenance "%2$s" must contain at least one host group, host or trigger.',
+				'"'.implode('", "', $maintenance_triggers).'"', $maintenance['name'], count($maintenance_triggers)
+			));
+		}
 	}
 }

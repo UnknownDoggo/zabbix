@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 /**
@@ -29,9 +24,12 @@ class MysqlDbBackend extends DbBackend {
 	 * @return bool
 	 */
 	protected function checkDbVersionTable() {
-		$table_exists = DBfetch(DBselect("SHOW TABLES LIKE 'dbversion'"));
+		global $DB;
 
-		if (!$table_exists) {
+		try {
+			mysqli_query($DB['DB'], 'SELECT NULL FROM dbversion LIMIT 1');
+		}
+		catch (mysqli_sql_exception $e) {
 			$this->setError(_s('Unable to determine current Zabbix database version: %1$s.',
 				_s('the table "%1$s" was not found', 'dbversion')
 			));
@@ -107,30 +105,6 @@ class MysqlDbBackend extends DbBackend {
 	}
 
 	/**
-	 * Check if database is using IEEE754 compatible double precision columns.
-	 *
-	 * @return bool
-	*/
-	public function isDoubleIEEE754() {
-		global $DB;
-
-		$conditions_or = [
-			'(table_name=\'history\' AND column_name=\'value\')',
-			'(table_name=\'trends\' AND column_name IN (\'value_min\', \'value_avg\', \'value_max\'))'
-		];
-
-		$sql =
-			'SELECT COUNT(*) cnt FROM information_schema.columns'.
-				' WHERE table_schema='.zbx_dbstr($DB['DATABASE']).
-					' AND column_type=\'double\''.
-					' AND ('.implode(' OR ', $conditions_or).')';
-
-		$result = DBfetch(DBselect($sql));
-
-		return (is_array($result) && array_key_exists('cnt', $result) && $result['cnt'] == 4);
-	}
-
-	/**
 	 * Check is current connection contain requested cipher list.
 	 *
 	 * @return bool
@@ -195,19 +169,32 @@ class MysqlDbBackend extends DbBackend {
 		return $resource;
 	}
 
+	private function setCharset($charset) {
+		global $DB;
+
+		try {
+			mysqli_set_charset($DB['DB'], $charset);
+		}
+		catch (mysqli_sql_exception $e) {
+			return false;
+		}
+
+		return true;
+	}
+
 	/**
 	 * Initialize connection.
 	 *
 	 * @return bool
 	 */
 	public function init() {
-		$db_encoding = DBselect('SHOW VARIABLES LIKE "character_set_database"');
-		$charset = $db_encoding ? DBfetch($db_encoding) : false;
-		if ($charset && strtoupper($charset['Value']) === 'UTF8MB4') {
-			DBexecute('SET NAMES utf8mb4');
-			return;
+		$db_innodb_snapshot_isolation = DBfetch(DBselect("SHOW VARIABLES LIKE 'innodb_snapshot_isolation'"));
+		if ($db_innodb_snapshot_isolation && $db_innodb_snapshot_isolation['Value'] !== 'OFF') {
+			DBexecute("SET innodb_snapshot_isolation='OFF'");
 		}
 
-		DBexecute('SET NAMES utf8');
+		if (!$this->setCharset('utf8mb4') && !$this->setCharset('utf8') && !$this->setCharset('utf8mb3')) {
+			$this->setError(_('Cannot set charset.'));
+		}
 	}
 }

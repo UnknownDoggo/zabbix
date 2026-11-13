@@ -1,54 +1,63 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package redis
 
 import (
+	"strconv"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"git.zabbix.com/ap/plugin-support/uri"
-	"git.zabbix.com/ap/plugin-support/zbxerr"
+	"golang.zabbix.com/agent2/plugins/redis/conn"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/metric"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/plugin/comms"
+	"golang.zabbix.com/sdk/uri"
+	"golang.zabbix.com/sdk/zbxerr"
 )
 
-const pluginName = "Redis"
+// impl is the pointer to the plugin implementation.
+//
+//nolint:gochecknoglobals // legacy implementation
+var impl Plugin
+
+var _ plugin.Runner = (*Plugin)(nil)
+var _ plugin.Exporter = (*Plugin)(nil)
 
 // Plugin inherits plugin.Base and store plugin-specific data.
 type Plugin struct {
 	plugin.Base
-	connMgr *ConnManager
-	options PluginOptions
+
+	connMgr *conn.Manager
+	options pluginOptions
 }
 
-// impl is the pointer to the plugin implementation.
-var impl Plugin
-
 // Export implements the Exporter interface.
-func (p *Plugin) Export(key string, rawParams []string, ctx plugin.ContextProvider) (result interface{}, err error) {
-	params, _, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
+func (p *Plugin) Export(key string, rawParams []string, _ plugin.ContextProvider) (any, error) {
+	params, _, hc, err := metrics[key].EvalParams(rawParams, p.options.Sessions)
 	if err != nil {
-		return nil, err
+		return nil, errs.Wrap(err, "failed to eval params")
 	}
 
-	uri, err := uri.NewWithCreds(params["URI"], "zabbix", params["Password"], uriDefaults)
+	err = metric.SetDefaults(params, hc, p.options.Default)
 	if err != nil {
-		return nil, err
+		return nil, errs.Wrap(err, "failed to set metric defaults")
+	}
+
+	redisURI, err := uri.NewWithCreds(params["URI"], params["User"], params["Password"], uriDefaults)
+	if err != nil {
+		return nil, errs.Wrap(err, "could not create URI for Redis")
 	}
 
 	handleMetric := getHandlerFunc(key)
@@ -56,33 +65,40 @@ func (p *Plugin) Export(key string, rawParams []string, ctx plugin.ContextProvid
 		return nil, zbxerr.ErrorUnsupportedMetric
 	}
 
-	conn, err := p.connMgr.GetConnection(*uri)
+	connectionTimeout, err := p.getConnectionTimeout(params)
+	if err != nil {
+		return nil, err
+	}
+
+	p.Tracef("connection timeout set to: %d", connectionTimeout)
+
+	connection, err := p.connMgr.GetConnection(redisURI, params, connectionTimeout)
 	if err != nil {
 		// Special logic of processing connection errors is used if redis.ping is requested
 		// because it must return pingFailed if any error occurred.
 		if key == keyPing {
-			return pingFailed, nil
+			return comms.PingFailed, nil
 		}
 
 		p.Errf(err.Error())
 
-		return nil, err
+		return nil, errs.Wrap(err, "failed to get connection to Redis")
 	}
 
-	result, err = handleMetric(conn, params)
+	result, err := handleMetric(connection, params)
 	if err != nil {
 		p.Errf(err.Error())
 	}
 
-	return result, err
+	return result, nil
 }
 
 // Start implements the Runner interface and performs initialization when plugin is activated.
 func (p *Plugin) Start() {
-	p.connMgr = NewConnManager(
+	p.connMgr = conn.NewManager(
+		p.Logger,
 		time.Duration(p.options.KeepAlive)*time.Second,
-		time.Duration(p.options.Timeout)*time.Second,
-		hkInterval*time.Second,
+		conn.HouseKeeperInterval*time.Second,
 	)
 }
 
@@ -90,4 +106,20 @@ func (p *Plugin) Start() {
 func (p *Plugin) Stop() {
 	p.connMgr.Destroy()
 	p.connMgr = nil
+}
+
+func (p *Plugin) getConnectionTimeout(params map[string]string) (int, error) {
+	connectionTimeout, err := strconv.Atoi(params["ConnectionTimeout"])
+	if err != nil {
+		p.Tracef("failed to convert parameter connection timeout %s", err.Error())
+
+		connectionTimeout, err = strconv.Atoi(p.options.Default.ConnectionTimeout)
+		if err != nil {
+			p.Tracef("failed to convert default connection timeout %s", err.Error())
+
+			return 0, errs.New("failed to get connection timeout")
+		}
+	}
+
+	return connectionTimeout, nil
 }

@@ -1,35 +1,35 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerExport extends CController {
 
+	protected function init() {
+		$this->disableCsrfValidation();
+	}
+
 	protected function checkInput() {
 		$fields = [
 			'action' =>			'required|string',
 			'backurl' =>		'required|string',
-			'valuemapids' =>	'not_empty|array_db valuemaps.valuemapid',
 			'hostids' =>		'not_empty|array_db hosts.hostid',
 			'mediatypeids' =>	'not_empty|array_db media_type.mediatypeid',
 			'maps' =>			'not_empty|array_db sysmaps.sysmapid',
 			'templates' =>		'not_empty|array_db hosts.hostid',
+			'dashboardids' =>	'not_empty|array_db dashboard.dashboardid',
+			'regexpids' =>		'not_empty|array_db regexps.regexpid',
 			'format' =>			'in '.implode(',', [CExportWriterFactory::YAML, CExportWriterFactory::XML, CExportWriterFactory::JSON])
 		];
 
@@ -37,6 +37,9 @@ class CControllerExport extends CController {
 
 		if (!$ret) {
 			$this->setResponse(new CControllerResponseFatal());
+		}
+		elseif (!(new CFrontendActionValidator())->validate($this->getInput('backurl'))) {
+			throw new CAccessDeniedException();
 		}
 
 		return $ret;
@@ -47,9 +50,6 @@ class CControllerExport extends CController {
 			case 'export.mediatypes':
 				return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_MEDIA_TYPES);
 
-			case 'export.valuemaps':
-				return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
-
 			case 'export.hosts':
 				return $this->checkAccess(CRoleHelper::UI_CONFIGURATION_HOSTS);
 
@@ -58,6 +58,12 @@ class CControllerExport extends CController {
 
 			case 'export.sysmaps':
 				return $this->checkAccess(CRoleHelper::UI_MONITORING_MAPS);
+
+			case 'export.dashboards':
+				return $this->checkAccess(CRoleHelper::UI_MONITORING_DASHBOARD);
+
+			case 'export.regexes':
+				return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_GENERAL);
 
 			default:
 				return false;
@@ -73,10 +79,6 @@ class CControllerExport extends CController {
 		];
 
 		switch ($action) {
-			case 'export.valuemaps':
-				$params['options']['valueMaps'] = $this->getInput('valuemapids', []);
-				break;
-
 			case 'export.hosts':
 				$params['options']['hosts'] = $this->getInput('hostids', []);
 				break;
@@ -93,6 +95,14 @@ class CControllerExport extends CController {
 				$params['options']['templates'] = $this->getInput('templates', []);
 				break;
 
+			case 'export.dashboards':
+				$params['options']['dashboards'] = $this->getInput('dashboardids', []);
+				break;
+
+			case 'export.regexes':
+				$params['options']['global_regexes'] = $this->getInput('regexpids', []);
+				break;
+
 			default:
 				$this->setResponse(new CControllerResponseFatal());
 
@@ -101,15 +111,15 @@ class CControllerExport extends CController {
 
 		$result = API::Configuration()->export($params);
 
-		if ($result) {
-			$response = new CControllerResponseData([
-				'main_block' => $result,
-				'mime_type' => CExportWriterFactory::getMimeType($params['format']),
-				'page' => ['file' => 'zbx_export_'.substr($action, 7).'.'.$params['format']]
-			]);
+		if ($result !== false) {
+			$response = (new CControllerResponseData(['main_block' => $result]))
+				->setFileName('zbx_export_'.substr($action, 7).'.'.$params['format'])
+				->setFileMimeType(CExportWriterFactory::getMimeType($params['format']));
 		}
 		else {
-			$response = new CControllerResponseRedirect($this->getInput('backurl', 'zabbix.php?action=dashboard.view'));
+			$response = new CControllerResponseRedirect(
+				new CUrl($this->getInput('backurl', 'zabbix.php?action=dashboard.view'))
+			);
 			CMessageHelper::setErrorTitle(_('Export failed'));
 		}
 

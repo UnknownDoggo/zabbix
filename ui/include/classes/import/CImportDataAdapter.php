@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -50,12 +45,21 @@ class CImportDataAdapter {
 	}
 
 	/**
-	 * Get groups from the imported data.
+	 * Get template groups from the imported data.
 	 *
 	 * @return array
 	 */
-	public function getGroups(): array {
-		return array_key_exists('groups', $this->data) ? $this->data['groups'] : [];
+	public function getTemplateGroups(): array {
+		return array_key_exists('template_groups', $this->data) ? $this->data['template_groups'] : [];
+	}
+
+	/**
+	 * Get host groups from the imported data.
+	 *
+	 * @return array
+	 */
+	public function getHostGroups(): array {
+		return array_key_exists('host_groups', $this->data) ? $this->data['host_groups'] : [];
 	}
 
 	/**
@@ -70,9 +74,17 @@ class CImportDataAdapter {
 			foreach ($this->data['templates'] as $template) {
 				$template = CArrayHelper::renameKeys($template, ['template' => 'host']);
 
+				if ($template['vendor']) {
+					$template['vendor_name'] = $template['vendor']['name'];
+					$template['vendor_version'] = $template['vendor']['version'];
+				}
+				else {
+					$template += array_fill_keys(['vendor_name', 'vendor_version'], '');
+				}
+
 				$templates[] = CArrayHelper::getByKeys($template, [
 					'uuid', 'groups', 'macros', 'templates', 'host', 'status', 'name', 'description', 'tags',
-					'valuemaps'
+					'valuemaps', 'vendor_name', 'vendor_version', 'wizard_ready', 'readme'
 				]);
 			}
 		}
@@ -90,18 +102,15 @@ class CImportDataAdapter {
 
 		if (array_key_exists('hosts', $this->data)) {
 			foreach ($this->data['hosts'] as $host) {
-				$host = CArrayHelper::renameKeys($host, ['proxyid' => 'proxy_hostid']);
-
 				if (array_key_exists('interfaces', $host)) {
 					foreach ($host['interfaces'] as $index => $interface) {
 						$host['interfaces'][$index] = CArrayHelper::renameKeys($interface, ['default' => 'main']);
 					}
 				}
 
-				$hosts[] = CArrayHelper::getByKeys($host, [
-					'inventory', 'proxy', 'groups', 'templates', 'macros', 'interfaces', 'host', 'status',
-					'description', 'ipmi_authtype', 'ipmi_privilege', 'ipmi_username', 'ipmi_password', 'name',
-					'inventory_mode', 'tags', 'valuemaps'
+				$hosts[] = CArrayHelper::getByKeys($host, ['host', 'name', 'description', 'monitored_by', 'proxy',
+					'proxy_group', 'status', 'ipmi_authtype', 'ipmi_privilege', 'ipmi_username', 'ipmi_password',
+					'templates', 'groups', 'interfaces', 'tags', 'macros', 'inventory', 'inventory_mode', 'valuemaps'
 				]);
 			}
 		}
@@ -357,6 +366,35 @@ class CImportDataAdapter {
 	}
 
 	/**
+	 * Get global dashboards from the imported data.
+	 *
+	 * @return array
+	 */
+	public function getDashboards(): array {
+		$dashboards = [];
+
+		if (array_key_exists('dashboards', $this->data)) {
+			foreach ($this->data['dashboards'] as $dashboard) {
+				foreach ($dashboard['pages'] as &$dashboard_page) {
+					// Rename hide_header to view_mode in widgets.
+					if (array_key_exists('widgets', $dashboard_page)) {
+						$dashboard_page['widgets'] = array_map(function (array $widget): array {
+							$widget = CArrayHelper::renameKeys($widget, ['hide_header' => 'view_mode']);
+
+							return $widget;
+						}, $dashboard_page['widgets']);
+					}
+				}
+				unset($dashboard_page);
+
+				$dashboards[$dashboard['name']] = $dashboard;
+			}
+		}
+
+		return $dashboards;
+	}
+
+	/**
 	 * Get media types from the imported data.
 	 *
 	 * @return array
@@ -385,18 +423,34 @@ class CImportDataAdapter {
 					unset($message_template);
 				}
 
-				if ($media_type['type'] == MEDIA_TYPE_EXEC && array_key_exists('parameters', $media_type)) {
-					$media_type['exec_params'] = $media_type['parameters']
-						? implode("\n", $media_type['parameters'])."\n"
-						: '';
-					unset($media_type['parameters']);
-				}
-
 				$media_types[] = CArrayHelper::renameKeys($media_type, $keys);
 			}
 		}
 
 		return $media_types;
+	}
+
+	/**
+	 * Get global regexes from the imported data.
+	 *
+	 * @return array
+	 */
+	public function getGlobalRegexes(): array {
+		$global_regexes = [];
+
+		if (array_key_exists('global_regexes', $this->data)) {
+			foreach ($this->data['global_regexes'] as $global_regex) {
+				foreach ($global_regex['expressions'] as &$expression) {
+					$expression['expression_type'] = $expression['type'];
+					unset($expression['type']);
+				}
+				unset($expression);
+
+				$global_regexes[$global_regex['name']] = $global_regex;
+			}
+		}
+
+		return $global_regexes;
 	}
 
 	/**
@@ -408,6 +462,13 @@ class CImportDataAdapter {
 	 * @return array
 	 */
 	protected function formatDiscoveryRule(array $discovery_rule, $host) {
+		if (!$discovery_rule['filter']) {
+			$discovery_rule['filter'] = [
+				'evaltype' => CONDITION_EVAL_TYPE_AND_OR,
+				'conditions' => []
+			];
+		}
+
 		$discovery_rule = $this->renameItemFields($discovery_rule);
 		$discovery_rule = $this->formatDiscoveryRuleOverrideFields($discovery_rule);
 
@@ -529,6 +590,16 @@ class CImportDataAdapter {
 							}
 							if (array_key_exists('inventory_mode', $operation) && $operation['inventory_mode'] !== '') {
 								$operation['opinventory']['inventory_mode'] = $operation['inventory_mode'];
+							}
+							break;
+
+						case OPERATION_OBJECT_LLD_RULE_PROTOTYPE:
+							if (array_key_exists('status', $operation) && $operation['status'] !== '') {
+								$operation['opstatus']['status'] = $operation['status'];
+							}
+
+							if (array_key_exists('delay', $operation) && $operation['delay'] !== '') {
+								$operation['opperiod']['delay'] = $operation['delay'];
 							}
 							break;
 					}

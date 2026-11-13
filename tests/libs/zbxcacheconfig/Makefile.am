@@ -1,0 +1,157 @@
+include ../Makefile.include
+
+if SERVER
+SERVER_tests = \
+	dc_maintenance_match_tags \
+	dc_check_maintenance_period \
+	is_item_processed_by_server \
+	dc_item_poller_type_update \
+	dc_expand_user_macros_in_func_params \
+	dc_function_calculate_nextcheck \
+	um_cache_sync \
+	um_cache_resolve \
+	um_cache_resolve_cont
+
+noinst_PROGRAMS = $(SERVER_tests)
+
+CACHE_LIBS = \
+	$(SERVER_GROUPED_LIBS) \
+	$(MOCK_DATA_DEPS) \
+	$(MOCK_TEST_DEPS)
+
+COMMON_WRAP_FUNCS = \
+	-Wl,--wrap=zbx_mutex_create \
+	-Wl,--wrap=zbx_mutex_destroy \
+	-Wl,--wrap=zbx_shmem_create \
+	-Wl,--wrap=zbx_shmem_destroy \
+	-Wl,--wrap=__zbx_shmem_malloc \
+	-Wl,--wrap=__zbx_shmem_realloc \
+	-Wl,--wrap=__zbx_shmem_free \
+	-Wl,--wrap=zbx_shmem_dump_stats \
+	-Wl,--wrap=zbx_history_get_values \
+	-Wl,--wrap=zbx_history_add_values \
+	-Wl,--wrap=history_sql_open \
+	-Wl,--wrap=history_elastic_open \
+	-Wl,--wrap=history_clickhouse_open \
+	-Wl,--wrap=zbx_elastic_version_extract \
+	-Wl,--wrap=zbx_elastic_version_get \
+	-Wl,--wrap=time
+
+dc_maintenance_match_tags_CFLAGS = \
+	-I@top_srcdir@/src/libs/zbxcacheconfig \
+	-I@top_srcdir@/src/libs/zbxcachehistory \
+	-I@top_srcdir@/src/libs/zbxcachevalue \
+	-I@top_srcdir@/tests \
+	$(TLS_CFLAGS) \
+	$(CMOCKA_CFLAGS) \
+	$(YAML_CFLAGS)
+
+dc_check_maintenance_period_CFLAGS = \
+	-I@top_srcdir@/src/libs/zbxcacheconfig \
+	-I@top_srcdir@/src/libs/zbxcachehistory \
+	-I@top_srcdir@/src/libs/zbxcachevalue \
+	-I@top_srcdir@/tests \
+	$(TLS_CFLAGS) \
+	$(CMOCKA_CFLAGS) \
+	$(YAML_CFLAGS)
+
+dc_maintenance_match_tags_SOURCES = dc_maintenance_match_tags.c dbconfig_maintenance_test.c
+dc_maintenance_match_tags_LDADD = $(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+dc_maintenance_match_tags_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+dc_check_maintenance_period_SOURCES = dc_check_maintenance_period.c dbconfig_maintenance_test.c
+dc_check_maintenance_period_LDADD = $(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+dc_check_maintenance_period_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+is_item_processed_by_server_SOURCES = is_item_processed_by_server.c
+is_item_processed_by_server_LDADD = $(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+is_item_processed_by_server_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+is_item_processed_by_server_CFLAGS = -I@top_srcdir@/tests $(CMOCKA_CFLAGS) $(YAML_CFLAGS) $(TLS_CFLAGS)
+
+dc_item_poller_type_update_SOURCES = dc_item_poller_type_update.c dc_item_poller_type_update_test.c
+dc_item_poller_type_update_LDADD = $(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+dc_item_poller_type_update_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+dc_item_poller_type_update_CFLAGS = -I@top_srcdir@/tests -I@top_srcdir@/src/libs/zbxcacheconfig \
+	-I@top_srcdir@/src/libs/zbxcachehistory -I@top_srcdir@/src/libs/zbxcachevalue $(CMOCKA_CFLAGS) $(YAML_CFLAGS) \
+	$(TLS_CFLAGS)
+
+dc_expand_user_macros_in_func_params_CFLAGS = \
+	-I@top_srcdir@/tests \
+	-I@top_srcdir@/tests/mocks/configcache \
+	-I@top_srcdir@/src/libs/zbxcacheconfig \
+	-I@top_srcdir@/src/libs/zbxcachehistory \
+	-I@top_srcdir@/src/libs/zbxcachevalue \
+	$(CMOCKA_CFLAGS) \
+	$(YAML_CFLAGS) \
+	$(TLS_CFLAGS)
+
+dc_expand_user_macros_in_func_params_SOURCES = \
+	dc_expand_user_macros_in_func_params.c
+dc_expand_user_macros_in_func_params_LDADD = \
+	$(top_srcdir)/tests/mocks/configcache/libconfigcachemock.a \
+	$(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+dc_expand_user_macros_in_func_params_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS) \
+	-Wl,--wrap=zbx_hashset_search
+
+dc_function_calculate_nextcheck_CFLAGS = \
+	-I@top_srcdir@/tests $(CMOCKA_CFLAGS) $(YAML_CFLAGS) $(TLS_CFLAGS)
+dc_function_calculate_nextcheck_SOURCES = \
+	dc_function_calculate_nextcheck.c \
+	dc_function_calculate_nextcheck_test.c
+dc_function_calculate_nextcheck_LDADD = \
+	$(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+dc_function_calculate_nextcheck_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS)
+
+um_cache_sync_CFLAGS = \
+	-I@top_srcdir@/tests \
+	-I@top_srcdir@/src/libs \
+	$(CMOCKA_CFLAGS) \
+	$(YAML_CFLAGS) \
+	$(TLS_CFLAGS)
+
+um_cache_sync_SOURCES = \
+	um_cache_sync.c \
+	um_cache_mock.c \
+	um_cache_mock.h
+um_cache_sync_LDADD = \
+	$(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+um_cache_sync_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS) \
+	-Wl,--wrap=__zbx_shmem_malloc \
+	-Wl,--wrap=__zbx_shmem_realloc \
+	-Wl,--wrap=__zbx_shmem_free
+
+um_cache_resolve_CFLAGS = \
+	-I@top_srcdir@/tests \
+	-I@top_srcdir@/src/libs \
+	$(CMOCKA_CFLAGS) \
+	$(TLS_CFLAGS) \
+	$(YAML_CFLAGS)
+um_cache_resolve_SOURCES = \
+	um_cache_resolve.c \
+	um_cache_mock.c \
+	um_cache_mock.h
+um_cache_resolve_LDADD = \
+	$(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+um_cache_resolve_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS) \
+	-Wl,--wrap=__zbx_shmem_malloc \
+	-Wl,--wrap=__zbx_shmem_realloc \
+	-Wl,--wrap=__zbx_shmem_free
+
+um_cache_resolve_cont_CFLAGS = \
+	-I@top_srcdir@/tests \
+	-I@top_srcdir@/src/libs \
+	$(CMOCKA_CFLAGS) \
+	$(YAML_CFLAGS) \
+	$(TLS_CFLAGS)
+um_cache_resolve_cont_SOURCES = \
+	um_cache_resolve_cont.c \
+	um_cache_mock.c \
+	um_cache_mock.h
+um_cache_resolve_cont_LDADD = \
+	$(CACHE_LIBS) @SERVER_LIBS@ $(CMOCKA_LIBS) $(YAML_LIBS) $(TLS_LIBS)
+um_cache_resolve_cont_LDFLAGS = @SERVER_LDFLAGS@ $(CMOCKA_LDFLAGS) $(YAML_LDFLAGS) $(TLS_LDFLAGS) \
+	-Wl,--wrap=__zbx_shmem_malloc \
+	-Wl,--wrap=__zbx_shmem_realloc \
+	-Wl,--wrap=__zbx_shmem_free
+
+endif

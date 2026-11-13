@@ -1,26 +1,21 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/../CElement.php';
+require_once __DIR__.'/../CElement.php';
 
 use \Facebook\WebDriver\Remote\RemoteWebElement;
 use \Facebook\WebDriver\Exception\UnrecognizedExceptionException;
@@ -44,6 +39,12 @@ class CHostInterfaceElement extends CMultifieldTableElement {
 			'row' => $row,
 			'column' => $column
 		];
+
+		$names = [];
+		for ($i = 1; $i < 5; $i++) {
+			$names['interface_main_'.$i] = 'Default';
+		}
+		$instance->setFieldNames($names);
 
 		return $instance;
 	}
@@ -127,13 +128,13 @@ class CHostInterfaceElement extends CMultifieldTableElement {
 					$element = $row->query($xpath)->one(false);
 
 					if ($element->isValid()) {
-						$form = $element->asForm(['normalized' => true]);
+						$form = $element->asGridForm(['normalized' => true]);
 						$fields = $form->getFields();
 					}
 				}
 
-				if ($name === 'Use bulk requests') {
-					$selector = 'xpath:.//label[contains(text(), "Use bulk requests")]/../input';
+				if ($name === 'Use combined requests') {
+					$selector = 'xpath:.//label[contains(text(), "Use combined requests")]/../input';
 					$row->query($selector)->asCheckbox()->one()->fill($value);
 					unset($values[$name]);
 				}
@@ -170,11 +171,11 @@ class CHostInterfaceElement extends CMultifieldTableElement {
 		$element = $row->query($xpath)->one(false);
 
 		if ($element->isValid()) {
-			$form = $element->asForm(['normalized' => true]);
+			$form = $element->asGridForm(['normalized' => true]);
 
 			// Expand row for SNMP interface.
 			$button = $row->getColumn(0)->query('tag:button')->one();
-			if (in_array($button->getAttribute('title'), ['', 'Expand'])) {
+			if (in_array($button->getAttribute('aria-label'), ['', 'Collapse section'])) {
 				$button->click();
 			}
 
@@ -192,12 +193,12 @@ class CHostInterfaceElement extends CMultifieldTableElement {
 	public function checkValue($expected, $raise_exception = true) {
 		$bulks = [];
 		foreach ($expected as $id => &$data) {
-			$bulks[$id] = CTestArrayHelper::get($data, 'Use bulk requests');
-			unset($data['Use bulk requests']);
+			$bulks[$id] = CTestArrayHelper::get($data, 'Use combined requests');
+			unset($data['Use combined requests']);
 		}
 		unset($data);
 
-		$selector = 'xpath:.//label[contains(text(), "Use bulk requests")]/../input';
+		$selector = 'xpath:.//label[contains(text(), "Use combined requests")]/../input';
 		if (parent::checkValue($expected, $raise_exception)) {
 			$rows = $this->getRows();
 

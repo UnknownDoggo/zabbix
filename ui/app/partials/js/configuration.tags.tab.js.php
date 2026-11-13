@@ -1,68 +1,64 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 /**
  * @var CPartial $this
+ * @var array    $data
  */
-?>
 
-<script type="text/x-jquery-tmpl" id="tag-row-tmpl">
-	<?= renderTagTableRow('#{rowNum}', '', '', ['add_post_js' => false]) ?>
-</script>
+(new CTemplateTag('tag-row-tmpl', renderTagTableRow('#{rowNum}', ['tag' => '', 'value' => ''], [
+	'add_post_js' => false,
+	'with_automatic' => array_key_exists('with_automatic', $data) && $data['with_automatic'],
+	'has_inline_validation' => $data['has_inline_validation']
+])))->show()
+?>
 
 <script type="text/javascript">
 	jQuery(function() {
-		let tags_initialized = false;
+		const tabsEventHandler = (event, ui) => {
+			const $panel = event.type === 'tabscreate' ? ui.panel : ui.newPanel;
 
-		$('#<?= $data['tabs_id'] ?>').on('tabscreate tabsactivate', function(event, ui) {
-			const $panel = (event.type === 'tabscreate') ? ui.panel : ui.newPanel;
+			if ($panel.is('#<?= $data['tags_tab_id'] ?>')) {
+				$('#<?= $data['tabs_id'] ?>').off('tabscreate.tags-tab tabsactivate.tags-tab', tabsEventHandler);
+				bindTagsTableEvents($panel);
+			}
+		};
+		const bindTagsTableEvents = ($panel) => {
+			const $table = $panel.find('.tags-table');
 
-			if ($panel.attr('id') === 'tags-tab') {
-				if (tags_initialized) {
-					return;
+			$table.dynamicRows({template: '#tag-row-tmpl', allow_empty: true});
+			$table.on('click', '.element-table-disable', (e) => {
+				const row = e.target.closest('.form_row');
+
+				const type_input = row.querySelector('input[name$="[type]"]');
+				type_input.value &= ~<?= ZBX_PROPERTY_OWN ?>;
+				type_input.setAttribute('data-skip-from-submit', '');
+
+				for (const element of row.querySelectorAll('textarea, input[name$="[automatic]"]')) {
+					element.setAttribute('data-skip-from-submit', '');
 				}
+			});
+		}
+		const tags_tab = $('#<?= $data['tags_tab_id'] ?>[aria-hidden="false"]');
 
-				const $table = $('#tags-table');
-
-				$table
-					.dynamicRows({template: '#tag-row-tmpl'})
-					.on('afteradd.dynamicRows', function() {
-						$('.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>', $table).textareaFlexible();
-					})
-					.find('.<?= ZBX_STYLE_TEXTAREA_FLEXIBLE ?>')
-					.textareaFlexible();
-
-				tags_initialized = true;
-			}
-
-			if (tags_initialized) {
-				$('#tags-table').on('click', 'button.element-table-disable', function() {
-					var num = $(this).attr('id').split('_')[1],
-						$type = $('#tags_' + num + '_type');
-
-					if ($type.val() & <?= ZBX_PROPERTY_OWN ?>) {
-						$type.val($type.val() & (~<?= ZBX_PROPERTY_OWN ?>));
-					}
-				});
-			}
-		});
+		if (tags_tab.length) {
+			bindTagsTableEvents(tags_tab);
+		}
+		else {
+			$('#<?= $data['tabs_id'] ?>').on('tabscreate.tags-tab tabsactivate.tags-tab', tabsEventHandler);
+		}
 	});
 </script>

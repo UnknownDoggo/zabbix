@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -30,52 +25,6 @@ function check_target(e, type) {
 
 	for (var i = 0; i < targets.length; ++i) {
 		targets[i].checked = targets[i] == e;
-	}
-}
-
-/**
- * Remove part of expression.
- *
- * @param string id		Expression temporary ID.
- * @param number type	Expression (type = 0) or recovery expression (type = 1).
- */
-function delete_expression(id, type) {
-	// If type is expression.
-	if (type == 0) {
-		jQuery('#remove_expression').val(id);
-	}
-	// Type is recovery expression.
-	else {
-		jQuery('#remove_recovery_expression').val(id);
-	}
-}
-
-/**
- * Insert expression part into input field.
- *
- * @param string id		Expression temporary ID.
- * @param number type	Expression (type = 0) or recovery expression (type = 1).
- */
-function copy_expression(id, type) {
-	// If type is expression.
-	if (type == 0) {
-		var element = document.getElementsByName('expr_temp')[0];
-	}
-	// Type is recovery expression.
-	else {
-		var element = document.getElementsByName('recovery_expr_temp')[0];
-	}
-
-	if (element.value.length > 0 && !confirm(t('Do you wish to replace the conditional expression?'))) {
-		return null;
-	}
-
-	var src = document.getElementById(id);
-	if (typeof src.textContent != 'undefined') {
-		element.value = src.textContent;
-	}
-	else {
-		element.value = src.innerText;
 	}
 }
 
@@ -96,41 +45,41 @@ function testUserSound(idx) {
 	}
 }
 
-/**
- * Converts all HTML symbols into HTML entities.
- */
-jQuery.escapeHtml = function(html) {
-	return jQuery('<div>').text(html).html();
+function escapeHtml(string) {
+	return string
+		.replace(/&/g,'&amp;')
+		.replace(/</g,'&lt;')
+		.replace(/>/g,'&gt;')
+		.replace(/\"/g,'&quot;')
+		.replace(/\'/g,'&apos;');
 }
 
-function validateNumericBox(obj, allowempty, allownegative) {
-	if (obj != null) {
-		if (allowempty) {
-			if (obj.value.length == 0 || obj.value == null) {
-				obj.value = '';
-			}
-			else {
-				if (isNaN(parseInt(obj.value, 10))) {
-					obj.value = 0;
-				}
-				else {
-					obj.value = parseInt(obj.value, 10);
-				}
-			}
-		}
-		else {
-			if (isNaN(parseInt(obj.value, 10))) {
-				obj.value = 0;
-			}
-			else {
-				obj.value = parseInt(obj.value, 10);
-			}
-		}
+/**
+ * Validates and processes the numeric value in an HTML input element. Leaves negative numbers without leading zeroes.
+ *
+ * @param {HTMLInputElement} input           The HTML input element containing the numeric value.
+ * @param {bool}             allow_negative  If true, negative numbers are allowed; otherwise, negative numbers
+ *                                           are converted to positive.
+ * @param {number}           min_length      Pad number with zeroes to maintain min length.
+ * @param {number|null}      default_value
+ */
+function normalizeNumericBox(input, {allow_negative, min_length, default_value}) {
+	const old_value = input.value;
+	let num = parseInt(input.value, 10);
+
+	if (isNaN(num)) {
+		input.value = default_value !== null ? default_value : '0'.repeat(Math.max(min_length, 1));
 	}
-	if (!allownegative) {
-		if (obj.value < 0) {
-			obj.value = obj.value * -1;
+	else {
+		if (num < 0 && !allow_negative) {
+			num = -num;
 		}
+
+		input.value = num < 0 ? num : num.toString().padStart(min_length, '0');
+	}
+
+	if (old_value !== input.value) {
+		input.dispatchEvent(new Event('input', {bubbles: true}));
 	}
 }
 
@@ -140,7 +89,13 @@ function validateNumericBox(obj, allowempty, allownegative) {
  * @param {String} str
  */
 function t(str) {
-	return (!!locale[str]) ? locale[str] : str;
+	if (!!locale[str]) {
+		return locale[str];
+	}
+
+	console.warn(`Missing translation for string: ${str}`);
+
+	return str;
 }
 
 /**
@@ -160,40 +115,42 @@ function getUniqueId() {
 /**
  * Color palette object used for getting different colors from color palette.
  */
-var colorPalette = (function() {
+let colorPalette = (function() {
 	'use strict';
 
-	var current_color = 0,
-		palette = [];
+	let palette = [];
 
 	return {
-		incrementNextColor: function() {
-			if (++current_color == palette.length) {
-				current_color = 0;
-			}
-		},
-
 		/**
 		 * Gets next color from palette.
 		 *
-		 * @return string	hexadecimal color code
+		 * @param {array} used_colors  Array of already used hexadecimal color codes.
+		 *
+		 * @return string  Hexadecimal color code.
 		 */
-		getNextColor: function() {
-			var color = palette[current_color];
+		getNextColor: function(used_colors) {
+			if (!used_colors.length) {
+				return palette[0] || '';
+			}
 
-			this.incrementNextColor();
+			const palette_usage = {};
 
-			return color;
+			for (const color of palette) {
+				palette_usage[color] = used_colors.filter(used_color => used_color === color).length;
+			}
+
+			const min_used_color_count = Math.min(...Object.values(palette_usage));
+
+			return Object.keys(palette_usage).find(color => palette_usage[color] == min_used_color_count);
 		},
 
 		/**
-		 * Set theme specific color palette.
+		 * Set color palette.
 		 *
-		 * @param array colors  Array of hexadecimal color codes.
+		 * @param {array} colors  Array of hexadecimal color codes.
 		 */
 		setThemeColors: function(colors) {
 			palette = colors;
-			current_color = 0;
 		}
 	}
 }());
@@ -468,136 +425,79 @@ function overlayPreloaderDestroy(id) {
 }
 
 /**
- * Function to close overlay dialogue and moves focus to IU element that was clicked to open it.
+ * Close and destroy overlay dialogue and move focus to IU element that was clicked to open it.
  *
- * @param string   dialogueid	Dialogue identifier to identify dialogue.
+ * Closing action by user (not script) can be prevented by preventing default action of the "dialog.close" event.
+ *
+ * @param {string} dialogueid
+ * @param {string} close_by    Indicates the initiator of closing action.
+ *
+ * @returns {boolean}  Whether the dialog was closed (or wasn't opened).
  */
-function overlayDialogueDestroy(dialogueid) {
-	if (typeof dialogueid !== 'undefined') {
-		var overlay = overlays_stack.getById(dialogueid)
-		if (!overlay) {
-			return;
-		}
+function overlayDialogueDestroy(dialogueid, close_by = Overlay.prototype.CLOSE_BY_SCRIPT) {
+	const overlay = overlays_stack.getById(dialogueid);
 
-		if (typeof overlay.xhr !== 'undefined') {
-			overlay.xhr.abort();
-			delete overlay.xhr;
-		}
-
-		if (overlay instanceof Overlay) {
-			overlay.unmount();
-		}
-
-		jQuery('[data-dialogueid='+dialogueid+']').remove();
-
-		removeFromOverlaysStack(dialogueid);
-
-		overlay.$dialogue[0].dispatchEvent(new CustomEvent('overlay.close', {detail: {dialogueid}}));
+	if (overlay === undefined) {
+		return true;
 	}
+
+	const is_default_prevented = !overlay.$dialogue[0].dispatchEvent(
+		new CustomEvent('dialogue.close', {
+			detail: {
+				dialogueid,
+				position: overlay.getPosition(),
+				position_fix: overlay.getPositionFix(),
+				close_by
+			},
+			cancelable: true
+		})
+	);
+
+	if (close_by === Overlay.prototype.CLOSE_BY_USER && is_default_prevented) {
+		return false;
+	}
+
+	if (overlay.xhr !== undefined) {
+		overlay.xhr.abort();
+
+		delete overlay.xhr;
+	}
+
+	if (overlay instanceof Overlay) {
+		overlay.unmount();
+	}
+
+	jQuery(`[data-dialogueid="${dialogueid}"]`).remove();
+
+	removeFromOverlaysStack(dialogueid);
+
+	return true;
 }
 
 /**
- * Display modal window.
+ * Create and display stacked popup dialogue.
  *
- * @param {object} params                                   Modal window params.
- * @param {string} params.title                             Modal window title.
- * @param {string} params.class                             Modal window CSS class, often based on .modal-popup*.
- * @param {object} params.content                           Window content.
- * @param {object} params.footer                           	Window footer content.
- * @param {object} params.controls                          Window controls.
- * @param {array}  params.buttons                           Window buttons.
- * @param {string} params.debug                             Debug HTML displayed in modal window.
- * @param {string} params.buttons[]['title']                Text on the button.
- * @param {object}|{string} params.buttons[]['action']      Function object or executable string that will be executed
- *                                                          on click.
- * @param {string} params.buttons[]['class']    (optional)  Button class.
- * @param {bool}   params.buttons[]['cancel']   (optional)  It means what this button has cancel action.
- * @param {bool}   params.buttons[]['focused']  (optional)  Focus this button.
- * @param {bool}   params.buttons[]['enabled']  (optional)  Should the button be enabled? Default: true.
- * @param {bool}   params.buttons[]['keepOpen'] (optional)  Prevent dialogue closing, if button action returned false.
- * @param string   params.dialogueid            (optional)  Unique dialogue identifier to reuse existing overlay dialog
- *                                                          or create a new one if value is not set.
- * @param string   params.script_inline         (optional)  Custom javascript code to execute when initializing dialog.
- * @param {Node|null} trigger_elmnt                         UI element which triggered opening of overlay dialogue.
+ * @param {Object} properties  Mutable properties of dialogue.
+ * @param {Object} options     Overlay options.
  *
- * @return {Overlay}
+ * Will reuse existing overlay object, if "options.dialogueid" is specified.
+ *
+ * @see Overlay for supported options.
+ * @see Overlay.prototype.setProperties for supported properties.
+ *
+ * @returns {Overlay}
  */
-function overlayDialogue(params, trigger_elmnt) {
-	params.element = params.element || trigger_elmnt;
-	params.type = params.type || 'popup';
+function overlayDialogue(properties, options = {}) {
+	const overlay = overlays_stack.getById(options.dialogueid) || new Overlay({...options, type: 'popup'});
 
-	var overlay = overlays_stack.getById(params.dialogueid);
+	addToOverlaysStack(overlay);
 
-	if (!overlay) {
-		overlay = new Overlay(params.type, params.dialogueid);
-	}
-
-	overlay.setProperties(params);
+	overlay.setProperties(properties);
 	overlay.mount();
 	overlay.recoverFocus();
 	overlay.containFocus();
 
-	addToOverlaysStack(overlay);
-
 	return overlay;
-}
-
-/**
- * Execute script.
- *
- * @param string scriptid			Script ID.
- * @param string confirmation		Confirmation text.
- * @param {Node} trigger_element	UI element that was clicked to open overlay dialogue.
- * @param string hostid				Host ID.
- * @param string eventid			Event ID.
- */
-function executeScript(scriptid, confirmation, trigger_element, hostid = null, eventid = null) {
-	var execute = function() {
-		var popup_options = {scriptid: scriptid};
-
-		if (hostid !== null) {
-			popup_options.hostid = hostid;
-		}
-
-		if (eventid !== null) {
-			popup_options.eventid = eventid;
-		}
-
-		if (Object.keys(popup_options).length === 2) {
-			PopUp('popup.scriptexec', popup_options, {dialogue_class: 'modal-popup-medium', trigger_element});
-		}
-	};
-
-	if (confirmation.length > 0) {
-		overlayDialogue({
-			'title': t('Execution confirmation'),
-			'content': jQuery('<span>')
-				.addClass('confirmation-msg')
-				.text(confirmation),
-			'class': 'modal-popup modal-popup-small position-middle',
-			'buttons': [
-				{
-					'title': t('Cancel'),
-					'class': 'btn-alt',
-					'focused': (hostid === null && eventid === null),
-					'action': function() {}
-				},
-				{
-					'title': t('Execute'),
-					'enabled': (hostid !== null || eventid !== null),
-					'focused': (hostid !== null || eventid !== null),
-					'action': function() {
-						execute();
-					}
-				}
-			]
-		}, trigger_element);
-
-		return false;
-	}
-	else {
-		execute();
-	}
 }
 
 (function($) {
@@ -660,52 +560,41 @@ function executeScript(scriptid, confirmation, trigger_element, hostid = null, e
 })(jQuery);
 
 /**
- * Parse url string to object. Hash starting part of URL will be removed.
- * Return object where 'url' key contain parsed url, 'pairs' key is array of objects with parsed arguments.
+ * Parse URL string to object. Hash starting part of URL will be removed.
+ * Return object where 'url' key contains parsed URL, 'pairs' key is array of objects with parsed arguments.
  * For malformed URL strings will return false.
  *
- * @param {string} url    URL string to parse.
+ * @param {string} url_string  URL string to parse.
  *
  * @return {object|bool}
  */
-function parseUrlString(url) {
-	var url = url.replace(/#.+/, ''),
-		pos = url.indexOf('?'),
-		valid = true,
-		pairs = [],
-		query;
-
-	if (pos != -1) {
-		query = url.substring(pos + 1);
-		url = url.substring(0, pos);
-
-		jQuery.each(query.split('&'), function(i, pair) {
-			if (jQuery.trim(pair)) {
-				pair = pair.replace(/\+/g, ' ').split('=', 2);
-				pair.push('');
-
-				try {
-					if (pair[0].match(/%[01]/) || pair[1].match(/%[01]/)) {
-						// Non-printable characters in URL.
-						throw null;
-					}
-
-					pairs.push({
-						'name': decodeURIComponent(pair[0]),
-						'value': decodeURIComponent(pair[1])
-					});
-				}
-				catch( e ) {
-					valid = false;
-					// Break jQuery.each iteration.
-					return false;
-				}
-			}
-		});
+function parseUrlString(url_string) {
+	try {
+		decodeURI(url_string);
+	}
+	catch {
+		return false;
 	}
 
-	if (!valid) {
-		return false;
+	let url = url_string.replace(/#.+/, '');
+	const pos = url.indexOf('?');
+	const pairs = [];
+
+	if (pos != -1) {
+		const query = url.substring(pos + 1);
+		url = url.substring(0, pos);
+
+		for (const param of new URLSearchParams(query)) {
+			if (encodeURIComponent(param[0]).match(/%[01]/) || encodeURIComponent(param[1]).match(/%[01]/)) {
+				// Non-printable characters in URL.
+				return false;
+			}
+
+			pairs.push({
+				'name': param[0],
+				'value': param[1]
+			});
+		}
 	}
 
 	return {
@@ -726,57 +615,41 @@ function parseUrlString(url) {
  * @return {jQuery}
  */
 function makeMessageBox(type, messages, title = null, show_close_box = true, show_details = null) {
-	var classes = {good: 'msg-good', bad: 'msg-bad', warning: 'msg-warning'},
-		msg_class = classes[type];
+	const classes = {good: 'msg-good', info: 'msg-info', warning: 'msg-warning', bad: 'msg-bad'};
+	const aria_labels = {good: t('Success message'), info: t('Info message'), warning: t('Warning message'),
+		bad: t('Error message')
+	};
 
 	if (show_details === null) {
 		show_details = type === 'bad' || type === 'warning';
 	}
 
-	var	$list = jQuery('<ul>')
-			.addClass('list-dashed'),
-		$msg_details = jQuery('<div>')
-			.addClass('msg-details')
-			.append($list),
-		aria_labels = {good: t('Success message'), bad: t('Error message'), warning: t('Warning message')},
+	var	$list = jQuery('<ul>', {class: 'list-dashed'}),
+		$msg_details = jQuery('<div>', {class: 'msg-details'}).append($list),
 		$msg_box = jQuery('<output>')
-			.addClass(msg_class).attr('role', 'contentinfo')
+			.addClass(classes[type])
+			.attr('role', 'contentinfo')
 			.attr('aria-label', aria_labels[type]),
-		$details_arrow = jQuery('<span>')
-			.attr('id', 'details-arrow')
-			.addClass(show_details ? 'arrow-up' : 'arrow-down'),
 		$link_details = jQuery('<a>')
-			.text(t('Details') + ' ')
 			.addClass('link-action')
-			.attr('href', 'javascript:void(0)')
+			.attr('aria-expanded', show_details ? 'true' : 'false')
 			.attr('role', 'button')
-			.append($details_arrow)
-			.attr('aria-expanded', show_details ? 'true' : 'false');
+			.attr('href', 'javascript:void(0)')
+			.append(t('Details'), jQuery('<span>', {class: show_details ? 'arrow-up' : 'arrow-down'}));
 
-		$link_details.click(function() {
-			showHide(jQuery(this)
-				.siblings('.msg-details')
-				.find('.msg-details-border')
-			);
-			jQuery('#details-arrow', jQuery(this)).toggleClass('arrow-up arrow-down');
-			jQuery(this).attr('aria-expanded', jQuery(this)
-				.find('.arrow-down')
-				.length == 0
-			);
-		});
+		$link_details.click((e) => toggleMessageBoxDetails(e.target));
 
 	if (title !== null) {
 		if (Array.isArray(messages) && messages.length > 0) {
 			$msg_box.prepend($link_details);
+			$msg_box.addClass(ZBX_STYLE_COLLAPSIBLE);
 		}
 		jQuery('<span>')
 			.text(title)
 			.appendTo($msg_box);
 
-		$list.addClass('msg-details-border');
-
 		if (!show_details) {
-			$list.hide();
+			$msg_box.addClass(ZBX_STYLE_COLLAPSED);
 		}
 	}
 
@@ -792,47 +665,63 @@ function makeMessageBox(type, messages, title = null, show_close_box = true, sho
 	}
 
 	if (show_close_box) {
-		var $button = jQuery('<button>')
-				.addClass('overlay-close-btn')
+		$msg_box.append(
+			jQuery('<button>')
+				.addClass('btn-overlay-close')
 				.attr('type', 'button')
-				.attr('title', t('Close'))
+				.attr('aria-label', t('Close notification'))
 				.click(function() {
 					jQuery(this)
-						.closest('.' + msg_class)
+						.closest(`.${classes[type]}`)
 						.remove();
-				});
-		$msg_box.append($button);
+				})
+		);
 	}
 
 	return $msg_box;
 }
 
+function toggleMessageBoxDetails(element) {
+	const parent = element.parentElement;
+	const arrow = element.querySelector('span');
+
+	parent.classList.toggle(ZBX_STYLE_COLLAPSED);
+	element.setAttribute('aria-expanded', !parent.classList.contains(ZBX_STYLE_COLLAPSED));
+	arrow.classList.toggle('arrow-down');
+	arrow.classList.toggle('arrow-up');
+}
+
 /**
- * Download svg graph as .png image.
+ * Download svg as .png image.
  *
  * @param {SVGElement} svg
  * @param {string}     file_name
+ * @param {string}     legend_class
  */
-function downloadSvgImage(svg, file_name) {
+function downloadSvgImage(svg, file_name, legend_class = '') {
 	var $dom_node = jQuery(svg),
 		canvas = document.createElement('canvas'),
-		labels = $dom_node.next('.svg-graph-legend'),
+		labels = $dom_node.next(legend_class),
 		$clone = $dom_node.clone(),
-		$container = $dom_node.closest('.dashboard-grid-widget-content'),
+		$container = $dom_node.closest('.dashboard-grid-widget-contents'),
 		image = new Image,
 		a = document.createElement('a'),
 		style = document.createElementNS('http://www.w3.org/1999/xhtml', 'style'),
 		$labels_clone,
-		labels_height = labels.length ? labels.height() : 0,
+		labels_height = labels.length
+			? labels.height() + Math.max(0, parseFloat(getComputedStyle(labels[0]).top) || 0)
+			: 0,
 		context2d;
 
-	// Clone only svg graph styles.
+	// Clone only svg styles.
 	style.innerText = jQuery.map(document.styleSheets[0].cssRules, function (rule) {
 		return rule.selectorText && rule.selectorText.substr(0, 5) == '.svg-' ? rule.cssText : '';
 	}).join('');
 
 	jQuery.map(['background-color', 'font-family', 'font-size', 'color'], function (key) {
-		$clone.css(key, $container.css(key));
+		if ($clone.css(key) === '') {
+			$clone.css(key, $container.css(key));
+		}
 	});
 
 	canvas.width = $dom_node.width()
@@ -859,7 +748,7 @@ function downloadSvgImage(svg, file_name) {
 		);
 
 	$clone.attr('height', canvas.height + 'px').append($labels_clone);
-	image.src = 'data:image/svg+xml;base64,' + btoa(new XMLSerializer().serializeToString($clone[0]));
+	image.src = 'data:image/svg+xml;utf8,' + new XMLSerializer().serializeToString($clone[0]).replace(/#/g, '%23');
 }
 
 /**
@@ -871,7 +760,7 @@ function downloadSvgImage(svg, file_name) {
 function downloadPngImage(img, file_name) {
 	var a = document.createElement('a');
 
-	a.href = img.src;
+	a.href = img.src + "&download=1";
 	a.rel = 'noopener' + (ZBX_NOREFERER ? ' noreferrer' : '');
 	a.download = file_name;
 	a.target = '_blank';
@@ -948,53 +837,172 @@ function urlEncodeData(parameters, prefix = '') {
  *            d: "3"
  *        },
  *        e: {
- *            f: ["4", "5"]
+ *            f: {
+ *                0: "4",
+ *                1: "5"
+ *            }
  *        }
  *    }
  *
  * @param {HTMLFormElement} form
  *
- * @return {object}
+ * @return {Object}
  */
 function getFormFields(form) {
-	const fields = {};
+	return searchParamsToObject(new FormData(form));
+}
 
-	for (let [key, value] of new FormData(form)) {
+/**
+ * Convert URL search parameters into a nested object.
+ *
+ * @param search_params  An object implementing iterator protocol (URLSearchParams).
+ *
+ * @returns {Object}
+ */
+function searchParamsToObject(search_params) {
+	const fields = Object.create(null);
+
+	for (let [key, value] of search_params) {
 		value = value.replace(/\r?\n/g, '\r\n');
 
-		const key_parts = [...key.matchAll(/[^\[\]]+|\[\]/g)];
+		const key_parts = [...key.matchAll(/[^\[\]]+|\[]/g)];
 
 		let key_fields = fields;
 
 		for (let i = 0; i < key_parts.length; i++) {
-			const key_part = key_parts[i][0];
+			let key_part = key_parts[i][0];
 
-			if (i == key_parts.length - 1) {
-				if (key_part === '[]') {
-					key_fields.push(value);
-				}
-				else {
-					key_fields[key_part] = value;
-				}
+			if (key_part === '[]') {
+				key_part = Object.keys(key_fields).length;
+			}
+
+			if (i === key_parts.length - 1) {
+				key_fields[key_part] = value;
 
 				break;
 			}
 
-			if (key_part === '[]') {
-				const key_field = key_parts[i + 1][0] === '[]' ? [] : {};
-
-				key_fields.push(key_field);
-				key_fields = key_field;
+			if (!Object.hasOwn(key_fields, key_part)) {
+				key_fields[key_part] = Object.create(null);
 			}
-			else {
-				if (!(key_part in key_fields)) {
-					key_fields[key_part] = key_parts[i + 1][0] === '[]' ? [] : {};
-				}
 
-				key_fields = key_fields[key_part];
-			}
+			key_fields = key_fields[key_part];
 		}
 	}
 
 	return fields;
+}
+
+/**
+ * Convert a nested data object into URL search parameters object.
+ *
+ * @param {Object|Array} object
+ *
+ * @returns {URLSearchParams}
+ */
+function objectToSearchParams(object) {
+	const combine = (data, search_params = new URLSearchParams(), name_prefix = '') => {
+		if (typeof data === 'object') {
+			for (const [name, datum] of Object.entries(data)) {
+				combine(datum, search_params, name_prefix !== '' ? `${name_prefix}[${name}]` : name);
+			}
+		}
+		else {
+			search_params.append(name_prefix, data);
+		}
+
+		return search_params;
+	};
+
+	return combine(object);
+}
+
+/**
+ * Convert nested data object into Form data object.
+ *
+ * @param {Object|Array} object
+ *
+ * @returns {FormData}
+ */
+function objectToFormData(object) {
+	const combine = (data, form_data = new FormData(), name_prefix = '') => {
+		if (Array.isArray(data)) {
+			for (const [index, datum] of data.entries()) {
+				combine(datum, form_data, name_prefix !== '' ? `${name_prefix}[${index}]` : index);
+			}
+		}
+		else if (data !== null && typeof data === 'object' && !(data instanceof File)) {
+			for (const [name, datum] of Object.entries(data)) {
+				combine(datum, form_data, name_prefix !== '' ? `${name_prefix}[${name}]` : name);
+			}
+		}
+		else {
+			form_data.append(name_prefix, data);
+		}
+
+		return form_data;
+	};
+
+	return combine(object);
+}
+
+/**
+ * Create a URL pointing to zabbix.php.
+ *
+ * @param {Object} arguments
+ * @param {string} path
+ *
+ * @returns {string}
+ */
+function zabbixUrl(arguments, path = 'zabbix.php') {
+	return `${path}?${objectToSearchParams(arguments)}`;
+}
+
+/**
+ * Convert RGB encoded color into HSL encoded color.
+ *
+ * @param {number} r  Red component in range of 0-1.
+ * @param {number} g  Green component in range of 0-1.
+ * @param {number} b  Blue component in range of 0-1.
+ *
+ * @returns [{number}, {number}, {number}]  Hue, saturation and lightness components.
+ */
+function convertRGBToHSL(r, g, b) {
+	const v = Math.max(r, g, b);
+	const c = v - Math.min(r, g, b);
+	const f = 1 - Math.abs(v * 2 - c - 1);
+	const h = c && ((v === r) ? (g - b) / c : ((v === g) ? 2 + (b - r) / c : 4 + (r - g) / c));
+
+	return [60 * (h < 0 ? h + 6 : h), f ? c / f : 0, (v * 2 - c) / 2];
+}
+
+/**
+ * Check if given value is valid color hex code.
+ */
+function isColorHex(value) {
+	return /^#([0-9A-F]{6})$/i.test(value);
+}
+
+/**
+ * Validate and convert time to seconds. Logic almost matches func.inc.php timeUnitToSeconds as this doesn't allow
+ * leading zeroes to match parser
+ *
+ * @param {string} time
+ * @param {bool}   with_year
+ *
+ * @returns {int|null}  Null if not valid time unit.
+ */
+function timeUnitToSeconds(time, with_year) {
+	const suffixes = with_year ? ZBX_TIME_SUFFIXES_WITH_YEAR : ZBX_TIME_SUFFIXES;
+	const match = time.match(new RegExp('^(?<int>-?\\d+)(?<suffix>[' + suffixes + '])?$'));
+
+	if (match === null || (match.groups.int.length > 1 && match.groups.int.charAt(0) === '0')) {
+		return null;
+	}
+
+	if (match.groups.suffix === undefined) {
+		return parseInt(match.groups.int);
+	}
+
+	return parseInt(match.groups.int) * ZBX_TIME_SUFFIX_MULTIPLIERS[match.groups.suffix];
 }

@@ -1,32 +1,22 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #include "zbxalgo.h"
 
-#include "common.h"
-#include "log.h"
-
-#define DB_INFINITY	(1e12 - 1e-4)
+#include "zbxnum.h"
 
 #define ZBX_MATH_EPSILON	(1e-6)
-
-#define ZBX_IS_NAN(x)	((x) != (x))
 
 #define ZBX_VALID_MATRIX(m)		(0 < (m)->rows && 0 < (m)->columns && NULL != (m)->elements)
 #define ZBX_MATRIX_EL(m, row, col)	((m)->elements[(row) * (m)->columns + (col)])
@@ -62,6 +52,7 @@ static int	zbx_matrix_alloc(zbx_matrix_t *m, int rows, int columns)
 	return SUCCEED;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
@@ -85,18 +76,17 @@ static int	zbx_matrix_copy(zbx_matrix_t *dest, zbx_matrix_t *src)
 	return SUCCEED;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
 static int	zbx_identity_matrix(zbx_matrix_t *m, int n)
 {
-	int	i, j;
-
 	if (SUCCEED != zbx_matrix_alloc(m, n, n))
 		return FAIL;
 
-	for (i = 0; i < n; i++)
-		for (j = 0; j < n; j++)
+	for (int i = 0; i < n; i++)
+		for (int j = 0; j < n; j++)
 			ZBX_MATRIX_EL(m, i, j) = (i == j ? 1.0 : 0.0);
 
 	return SUCCEED;
@@ -104,30 +94,28 @@ static int	zbx_identity_matrix(zbx_matrix_t *m, int n)
 
 static int	zbx_transpose_matrix(zbx_matrix_t *m, zbx_matrix_t *r)
 {
-	int	i, j;
-
 	if (!ZBX_VALID_MATRIX(m))
 		goto error;
 
 	if (SUCCEED != zbx_matrix_alloc(r, m->columns, m->rows))
 		return FAIL;
 
-	for (i = 0; i < r->rows; i++)
-		for (j = 0; j < r->columns; j++)
+	for (int i = 0; i < r->rows; i++)
+		for (int j = 0; j < r->columns; j++)
 			ZBX_MATRIX_EL(r, i, j) = ZBX_MATRIX_EL(m, j, i);
 
 	return SUCCEED;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
 static void	zbx_matrix_swap_rows(zbx_matrix_t *m, int r1, int r2)
 {
 	double	tmp;
-	int	i;
 
-	for (i = 0; i < m->columns; i++)
+	for (int i = 0; i < m->columns; i++)
 	{
 		tmp = ZBX_MATRIX_EL(m, r1, i);
 		ZBX_MATRIX_EL(m, r1, i) = ZBX_MATRIX_EL(m, r2, i);
@@ -137,17 +125,13 @@ static void	zbx_matrix_swap_rows(zbx_matrix_t *m, int r1, int r2)
 
 static void	zbx_matrix_divide_row_by(zbx_matrix_t *m, int row, double denominator)
 {
-	int	i;
-
-	for (i = 0; i < m->columns; i++)
+	for (int i = 0; i < m->columns; i++)
 		ZBX_MATRIX_EL(m, row, i) /= denominator;
 }
 
 static void	zbx_matrix_add_rows_with_factor(zbx_matrix_t *m, int dest, int src, double factor)
 {
-	int	i;
-
-	for (i = 0; i < m->columns; i++)
+	for (int i = 0; i < m->columns; i++)
 		ZBX_MATRIX_EL(m, dest, i) += ZBX_MATRIX_EL(m, src, i) * factor;
 }
 
@@ -265,13 +249,13 @@ out:
 	return res;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
 static int	zbx_matrix_mult(zbx_matrix_t *left, zbx_matrix_t *right, zbx_matrix_t *result)
 {
 	double	element;
-	int	i, j, k;
 
 	if (!ZBX_VALID_MATRIX(left) || !ZBX_VALID_MATRIX(right) || left->columns != right->rows)
 		goto error;
@@ -279,13 +263,13 @@ static int	zbx_matrix_mult(zbx_matrix_t *left, zbx_matrix_t *right, zbx_matrix_t
 	if (SUCCEED != zbx_matrix_alloc(result, left->rows, right->columns))
 		return FAIL;
 
-	for (i = 0; i < result->rows; i++)
+	for (int i = 0; i < result->rows; i++)
 	{
-		for (j = 0; j < result->columns; j++)
+		for (int j = 0; j < result->columns; j++)
 		{
 			element = 0;
 
-			for (k = 0; k < left->columns; k++)
+			for (int k = 0; k < left->columns; k++)
 				element += ZBX_MATRIX_EL(left, i, k) * ZBX_MATRIX_EL(right, k, j);
 
 			ZBX_MATRIX_EL(result, i, j) = element;
@@ -295,6 +279,7 @@ static int	zbx_matrix_mult(zbx_matrix_t *left, zbx_matrix_t *right, zbx_matrix_t
 	return SUCCEED;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
@@ -332,19 +317,18 @@ out:
 	zbx_matrix_free(to_be_inverted);
 	zbx_matrix_free(left_part);
 	zbx_matrix_free(right_part);
+
 	return res;
 }
 
 static int	zbx_fill_dependent(double *x, int n, zbx_fit_t fit, zbx_matrix_t *m)
 {
-	int	i;
-
 	if (FIT_LINEAR == fit || FIT_POLYNOMIAL == fit || FIT_LOGARITHMIC == fit)
 	{
 		if (SUCCEED != zbx_matrix_alloc(m, n, 1))
 			return FAIL;
 
-		for (i = 0; i < n; i++)
+		for (int i = 0; i < n; i++)
 			ZBX_MATRIX_EL(m, i, 0) = x[i];
 	}
 	else if (FIT_EXPONENTIAL == fit || FIT_POWER == fit)
@@ -352,7 +336,7 @@ static int	zbx_fill_dependent(double *x, int n, zbx_fit_t fit, zbx_matrix_t *m)
 		if (SUCCEED != zbx_matrix_alloc(m, n, 1))
 			return FAIL;
 
-		for (i = 0; i < n; i++)
+		for (int i = 0; i < n; i++)
 		{
 			if (0.0 >= x[i])
 			{
@@ -370,14 +354,13 @@ static int	zbx_fill_dependent(double *x, int n, zbx_fit_t fit, zbx_matrix_t *m)
 static int	zbx_fill_independent(double *t, int n, zbx_fit_t fit, int k, zbx_matrix_t *m)
 {
 	double	element;
-	int	i, j;
 
 	if (FIT_LINEAR == fit || FIT_EXPONENTIAL == fit)
 	{
 		if (SUCCEED != zbx_matrix_alloc(m, n, 2))
 			return FAIL;
 
-		for (i = 0; i < n; i++)
+		for (int i = 0; i < n; i++)
 		{
 			ZBX_MATRIX_EL(m, i, 0) = 1.0;
 			ZBX_MATRIX_EL(m, i, 1) = t[i];
@@ -388,7 +371,7 @@ static int	zbx_fill_independent(double *t, int n, zbx_fit_t fit, int k, zbx_matr
 		if (SUCCEED != zbx_matrix_alloc(m, n, 2))
 			return FAIL;
 
-		for (i = 0; i < n; i++)
+		for (int i = 0; i < n; i++)
 		{
 			ZBX_MATRIX_EL(m, i, 0) = 1.0;
 			ZBX_MATRIX_EL(m, i, 1) = log(t[i]);
@@ -402,11 +385,11 @@ static int	zbx_fill_independent(double *t, int n, zbx_fit_t fit, int k, zbx_matr
 		if (SUCCEED != zbx_matrix_alloc(m, n, k+1))
 			return FAIL;
 
-		for (i = 0; i < n; i++)
+		for (int i = 0; i < n; i++)
 		{
 			element = 1.0;
 
-			for (j = 0; j < k; j++)
+			for (int j = 0; j < k; j++)
 			{
 				ZBX_MATRIX_EL(m, i, j) = element;
 				element *= t[i];
@@ -436,18 +419,28 @@ static int	zbx_regression(double *t, double *x, int n, zbx_fit_t fit, int k, zbx
 	if (SUCCEED != (res = zbx_least_squares(independent, dependent, coefficients)))
 		goto out;
 
+	/* Reject regressions that produced Inf/NaN coefficients. */
+	for (int i = 0; i < coefficients->rows * coefficients->columns; i++)
+	{
+		if (0 == isfinite(coefficients->elements[i]))
+		{
+			zabbix_log(LOG_LEVEL_DEBUG, "%s(): regression produced non-finite coefficient", __func__);
+			res = FAIL;
+			goto out;
+		}
+	}
 out:
 	zbx_matrix_free(independent);
 	zbx_matrix_free(dependent);
+
 	return res;
 }
 
 static double	zbx_polynomial_value(double t, zbx_matrix_t *coefficients)
 {
 	double	pow = 1.0, res = 0.0;
-	int	i;
 
-	for (i = 0; i < coefficients->rows; i++, pow *= t)
+	for (int i = 0; i < coefficients->rows; i++, pow *= t)
 		res += ZBX_MATRIX_EL(coefficients, i, 0) * pow;
 
 	return res;
@@ -456,9 +449,8 @@ static double	zbx_polynomial_value(double t, zbx_matrix_t *coefficients)
 static double	zbx_polynomial_antiderivative(double t, zbx_matrix_t *coefficients)
 {
 	double	pow = t, res = 0.0;
-	int	i;
 
-	for (i = 0; i < coefficients->rows; i++, pow *= t)
+	for (int i = 0; i < coefficients->rows; i++, pow *= t)
 		res += ZBX_MATRIX_EL(coefficients, i, 0) * pow / (i + 1);
 
 	return res;
@@ -703,17 +695,15 @@ while(0)
 	}
 	else
 		res = SUCCEED;
-
 out:
 	zbx_matrix_free(denominator_multiplicands);
 	zbx_matrix_free(updates);
 	return res;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
-
 #undef ZBX_MAX_ITERATIONS
-
 #undef Re
 #undef Im
 }
@@ -782,6 +772,7 @@ out:
 	return res;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
@@ -789,7 +780,7 @@ static int	zbx_polynomial_timeleft(double now, double threshold, zbx_matrix_t *c
 {
 	zbx_matrix_t	*shifted_coefficients = NULL, *roots = NULL;
 	double		tmp;
-	int		i, res, no_root = 1;
+	int		res, no_root = 1;
 
 	if (!ZBX_VALID_MATRIX(coefficients))
 		goto error;
@@ -808,7 +799,7 @@ static int	zbx_polynomial_timeleft(double now, double threshold, zbx_matrix_t *c
 	/* choose the closest root right from now or set result to -1 otherwise */
 	/* if zbx_polynomial_value(tmp) is not close enough to zero it must be a complex root and must be skipped */
 
-	for (i = 0; i < roots->rows; i++)
+	for (int i = 0; i < roots->rows; i++)
 	{
 		tmp = ZBX_MATRIX_EL(roots, i, 0);
 
@@ -828,7 +819,7 @@ static int	zbx_polynomial_timeleft(double now, double threshold, zbx_matrix_t *c
 	}
 
 	if (no_root)
-		*result = DB_INFINITY;
+		*result = DBL_MAX;
 	else
 		*result -= now;
 
@@ -838,6 +829,7 @@ out:
 	return res;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
@@ -862,6 +854,7 @@ static int	zbx_calculate_value(double t, zbx_matrix_t *coefficients, zbx_fit_t f
 	return SUCCEED;
 error:
 	THIS_SHOULD_NEVER_HAPPEN;
+
 	return FAIL;
 }
 
@@ -876,7 +869,7 @@ int	zbx_fit_code(char *fit_str, zbx_fit_t *fit, unsigned *k, char **error)
 	{
 		*fit = FIT_POLYNOMIAL;
 
-		if (SUCCEED != is_uint_range(fit_str + strlen("polynomial"), k, 1, 6))
+		if (SUCCEED != zbx_is_uint_range(fit_str + strlen("polynomial"), k, 1, 6))
 		{
 			*error = zbx_strdup(*error, "polynomial degree is invalid");
 			return FAIL;
@@ -942,8 +935,8 @@ static void	zbx_log_expression(double now, zbx_fit_t fit, int k, zbx_matrix_t *c
 	/* x is item value, t is time in seconds counted from now */
 	if (FIT_LINEAR == fit)
 	{
-		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") + (" ZBX_FS_DBL ") * (" ZBX_FS_DBL " + t)",
-				ZBX_MATRIX_EL(coeffs, 0, 0), ZBX_MATRIX_EL(coeffs, 1, 0), now);
+		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") + (" ZBX_FS_DBL ") * ("
+				ZBX_FS_DBL " + t)", ZBX_MATRIX_EL(coeffs, 0, 0), ZBX_MATRIX_EL(coeffs, 1, 0), now);
 	}
 	else if (FIT_POLYNOMIAL == fit)
 	{
@@ -965,18 +958,19 @@ static void	zbx_log_expression(double now, zbx_fit_t fit, int k, zbx_matrix_t *c
 	}
 	else if (FIT_EXPONENTIAL == fit)
 	{
-		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") * exp( (" ZBX_FS_DBL ") * (" ZBX_FS_DBL " + t) )",
-				exp(ZBX_MATRIX_EL(coeffs, 0, 0)), ZBX_MATRIX_EL(coeffs, 1, 0), now);
+		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") * exp( (" ZBX_FS_DBL ") * ("
+				ZBX_FS_DBL " + t) )", exp(ZBX_MATRIX_EL(coeffs, 0, 0)), ZBX_MATRIX_EL(coeffs, 1, 0),
+				now);
 	}
 	else if (FIT_LOGARITHMIC == fit)
 	{
-		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") + (" ZBX_FS_DBL ") * log(" ZBX_FS_DBL " + t)",
-				ZBX_MATRIX_EL(coeffs, 0, 0), ZBX_MATRIX_EL(coeffs, 1, 0), now);
+		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") + (" ZBX_FS_DBL ") * log("
+				ZBX_FS_DBL " + t)", ZBX_MATRIX_EL(coeffs, 0, 0), ZBX_MATRIX_EL(coeffs, 1, 0), now);
 	}
 	else if (FIT_POWER == fit)
 	{
-		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") * (" ZBX_FS_DBL " + t) ^ (" ZBX_FS_DBL ")",
-				exp(ZBX_MATRIX_EL(coeffs, 0, 0)), now, ZBX_MATRIX_EL(coeffs, 1, 0));
+		zabbix_log(LOG_LEVEL_DEBUG, "fitted expression is: x = (" ZBX_FS_DBL ") * (" ZBX_FS_DBL " + t) ^ ("
+				ZBX_FS_DBL ")", exp(ZBX_MATRIX_EL(coeffs, 0, 0)), now, ZBX_MATRIX_EL(coeffs, 1, 0));
 	}
 	else
 		THIS_SHOULD_NEVER_HAPPEN;
@@ -985,7 +979,7 @@ static void	zbx_log_expression(double now, zbx_fit_t fit, int k, zbx_matrix_t *c
 double	zbx_forecast(double *t, double *x, int n, double now, double time, zbx_fit_t fit, unsigned k, zbx_mode_t mode)
 {
 	zbx_matrix_t	*coefficients = NULL;
-	double		left, right, result;
+	double		result;
 	int		res;
 
 	if (1 == n)
@@ -999,11 +993,52 @@ double	zbx_forecast(double *t, double *x, int n, double now, double time, zbx_fi
 		THIS_SHOULD_NEVER_HAPPEN;
 		return ZBX_MATH_ERROR;
 	}
+	else if (FIT_POLYNOMIAL == fit)
+	{
+		if ((unsigned)n <= k)
+			return ZBX_MATH_ERROR;
+	}
 
 	zbx_matrix_struct_alloc(&coefficients);
 
 	if (SUCCEED != (res = zbx_regression(t, x, n, fit, k, coefficients)))
+	{
+		/* When regression fails due to overflow with extreme values, fall back to a  */
+		/* linear 2-point estimate for linear and logarithmic fits in value mode.     */
+		if ((FIT_LINEAR == fit || FIT_LOGARITHMIC == fit) && MODE_VALUE == mode)
+		{
+			int	i_min_t, i_max_t;
+			double	delta_t;
+
+			/* The value cache may return data in either ascending or descending */
+			/* time order. Find indices of min and max timestamp.                */
+
+			if (t[0] < t[n-1])
+			{
+				i_min_t = 0;
+				i_max_t = n - 1;
+			}
+			else if (t[0] > t[n-1])
+			{
+				i_min_t = n - 1;
+				i_max_t = 0;
+			}
+			else
+				i_min_t = i_max_t = 0;
+
+			if (0.0 < (delta_t = t[i_max_t] - t[i_min_t]))
+			{
+				double	slope = (x[i_max_t] - x[i_min_t]) / delta_t;
+
+				result = x[i_max_t] + slope * (now + time - t[i_max_t]);
+
+				/* NaN and +/-Inf in 'result' are handled below, on return */
+				res = SUCCEED;
+			}
+		}
+
 		goto out;
+	}
 
 	zbx_log_expression(now, fit, (int)k, coefficients);
 
@@ -1035,6 +1070,8 @@ double	zbx_forecast(double *t, double *x, int n, double now, double time, zbx_fi
 
 	if (FIT_LINEAR == fit || FIT_EXPONENTIAL == fit || FIT_LOGARITHMIC == fit || FIT_POWER == fit)
 	{
+		double	left, right;
+
 		/* fit is monotone, therefore maximum and minimum are either at now or at now + time */
 		if (SUCCEED != zbx_calculate_value(now, coefficients, fit, &left) ||
 				SUCCEED != zbx_calculate_value(now + time, coefficients, fit, &right))
@@ -1117,7 +1154,6 @@ double	zbx_forecast(double *t, double *x, int n, double now, double time, zbx_fi
 		THIS_SHOULD_NEVER_HAPPEN;
 		res = FAIL;
 	}
-
 out:
 	zbx_matrix_free(coefficients);
 
@@ -1125,18 +1161,19 @@ out:
 	{
 		result = ZBX_MATH_ERROR;
 	}
-	else if (ZBX_IS_NAN(result))
+	else if (0 != isnan(result))
 	{
 		zabbix_log(LOG_LEVEL_DEBUG, "numerical error");
 		result = ZBX_MATH_ERROR;
 	}
-	else if (DB_INFINITY < result)
+	/* these checks are needed in case of +/- infinity */
+	else if (DBL_MAX < result)
 	{
-		result = DB_INFINITY;
+		result = DBL_MAX;
 	}
-	else if (-DB_INFINITY > result)
+	else if (-DBL_MAX > result)
 	{
-		result = -DB_INFINITY;
+		result = -DBL_MAX;
 	}
 
 	return result;
@@ -1145,16 +1182,91 @@ out:
 double	zbx_timeleft(double *t, double *x, int n, double now, double threshold, zbx_fit_t fit, unsigned k)
 {
 	zbx_matrix_t	*coefficients = NULL;
-	double		current, result;
+	double		current, result = -1.0;
 	int		res;
 
 	if (1 == n)
-		return (x[0] == threshold ? 0.0 : DB_INFINITY);
+		return (x[0] == threshold ? 0.0 : DBL_MAX);
 
 	zbx_matrix_struct_alloc(&coefficients);
 
 	if (SUCCEED != (res = zbx_regression(t, x, n, fit, k, coefficients)))
+	{
+		/* When regression fails due to overflow with extreme values, fall back to a linear */
+		/* 2-point slope estimate using the oldest and newest data points.                  */
+
+		if (FIT_LINEAR == fit || FIT_LOGARITHMIC == fit)
+		{
+			int	i_min_t, i_max_t;
+			double	delta_t;
+
+			/* The value cache may return data in either ascending or descending */
+			/* time order. Find indices of min and max timestamp.                */
+
+			if (t[0] < t[n-1])
+			{
+				i_min_t = 0;
+				i_max_t = n - 1;
+			}
+			else if (t[0] > t[n-1])
+			{
+				i_min_t = n - 1;
+				i_max_t = 0;
+			}
+			else
+				i_min_t = i_max_t = 0;
+
+			if (0.0 < (delta_t = t[i_max_t] - t[i_min_t]))
+			{
+				double	slope = (x[i_max_t] - x[i_min_t]) / delta_t;
+
+				if (0 == isfinite(slope))
+				{
+					/* Slope overflowed — use trend direction and newest value to decide. */
+					result = (x[i_max_t] > x[i_min_t]) ?
+							((x[i_max_t] >= threshold) ? DBL_MAX : 0.0) :
+							((x[i_max_t] <= threshold) ? DBL_MAX : 0.0);
+				}
+				else
+				{
+					double	val_now = x[i_max_t] + slope * (now - t[i_max_t]);
+
+					if (0 != isnan(val_now))
+						goto out;
+
+					if (0 != isfinite(val_now))
+					{
+						if (val_now > threshold)
+						{
+							if (0.0 > slope)
+								result = (threshold - val_now) / slope;
+							else
+								result = DBL_MAX;
+						}
+						else if (val_now < threshold)
+						{
+							if (0.0 < slope)
+								result = (threshold - val_now) / slope;
+							else
+								result = DBL_MAX;
+						}
+						else
+							result = 0.0;
+					}
+					else if (INFINITY == val_now || (-INFINITY) == val_now)
+					{
+						result = DBL_MAX;
+					}
+					else
+						result = ZBX_MATH_ERROR;
+				}
+
+				res = SUCCEED;
+			}
+		}
+
 		goto out;
+	}
 
 	zbx_log_expression(now, fit, (int)k, coefficients);
 
@@ -1194,22 +1306,22 @@ double	zbx_timeleft(double *t, double *x, int n, double now, double threshold, z
 		THIS_SHOULD_NEVER_HAPPEN;
 		res = FAIL;
 	}
-
 out:
 	if (SUCCEED != res)
 	{
 		result = ZBX_MATH_ERROR;
 	}
-	else if (ZBX_IS_NAN(result))
+	else if (0 != isnan(result))
 	{
 		zabbix_log(LOG_LEVEL_DEBUG, "numerical error");
 		result = ZBX_MATH_ERROR;
 	}
-	else if (0.0 > result || DB_INFINITY < result)
+	else if (0.0 > result || DBL_MAX < result)
 	{
-		result = DB_INFINITY;
+		result = DBL_MAX;
 	}
 
 	zbx_matrix_free(coefficients);
+
 	return result;
 }

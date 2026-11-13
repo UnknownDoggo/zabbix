@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -27,13 +22,7 @@ $request = CSessionHelper::get('request');
 CSessionHelper::unset(['request']);
 
 if (hasRequest('request')) {
-	$request = getRequest('request');
-	preg_match('/^\/?(?<filename>[a-z0-9_.]+\.php)(\?.*)?$/i', $request, $test_request);
-
-	if (!array_key_exists('filename', $test_request) || !file_exists('./'.$test_request['filename'])
-			|| $test_request['filename'] === basename(__FILE__)) {
-		$request = '';
-	}
+	$request = (new CFrontendActionValidator())->validate(getRequest('request')) ? getRequest('request') : '';
 
 	if ($request !== '') {
 		$redirect_to->setArgument('request', $request);
@@ -41,7 +30,7 @@ if (hasRequest('request')) {
 	}
 }
 
-if (CAuthenticationHelper::get(CAuthenticationHelper::SAML_AUTH_ENABLED) == ZBX_AUTH_SAML_DISABLED) {
+if (CAuthenticationHelper::getPublic(CAuthenticationHelper::SAML_AUTH_ENABLED) == ZBX_AUTH_SAML_DISABLED) {
 	CSessionHelper::unset(['request']);
 
 	redirect($redirect_to->toString());
@@ -49,231 +38,337 @@ if (CAuthenticationHelper::get(CAuthenticationHelper::SAML_AUTH_ENABLED) == ZBX_
 
 use OneLogin\Saml2\Auth;
 use OneLogin\Saml2\Utils;
+use SCIM\services\Group as ScimGroup;
 
 global $SSO;
 
-$sp_key = '';
-$sp_cert = '';
-$idp_cert = '';
-
-if (is_array($SSO) && array_key_exists('SP_KEY', $SSO)) {
-	if (is_readable($SSO['SP_KEY'])) {
-		$sp_key = file_get_contents($SSO['SP_KEY']);
-	}
-}
-elseif (is_readable('conf/certs/sp.key')) {
-	$sp_key = file_get_contents('conf/certs/sp.key');
+if (!is_array($SSO)) {
+	$SSO = [];
 }
 
-if (is_array($SSO) && array_key_exists('SP_CERT', $SSO)) {
-	if (is_readable($SSO['SP_CERT'])) {
-		$sp_cert = file_get_contents($SSO['SP_CERT']);
-	}
-}
-elseif (is_readable('conf/certs/sp.crt')) {
-	$sp_cert = file_get_contents('conf/certs/sp.crt');
+$SSO += ['SETTINGS' => []];
+
+/** @var CUser $service */
+$service = API::getApiService('user');
+$userdirectoryid = CAuthenticationHelper::getSamlUserdirectoryid();
+$provisioning = CProvisioning::forUserDirectoryId($userdirectoryid);
+$provisioning_enabled = ($provisioning->isProvisioningEnabled()
+	&& CAuthenticationHelper::getPublic(CAuthenticationHelper::SAML_JIT_STATUS) == JIT_PROVISIONING_ENABLED
+);
+
+if (array_key_exists('baseurl', $SSO['SETTINGS']) && !is_array($SSO['SETTINGS']['baseurl'])
+		&& $SSO['SETTINGS']['baseurl'] !== '') {
+	Utils::setBaseURL((string) $SSO['SETTINGS']['baseurl']);
 }
 
-if (is_array($SSO) && array_key_exists('IDP_CERT', $SSO)) {
-	if (is_readable($SSO['IDP_CERT'])) {
-		$idp_cert = file_get_contents($SSO['IDP_CERT']);
-	}
-}
-elseif (is_readable('conf/certs/idp.crt')) {
-	$idp_cert = file_get_contents('conf/certs/idp.crt');
-}
-
-if (is_array($SSO) && array_key_exists('SETTINGS', $SSO)) {
-	if (array_key_exists('baseurl', $SSO['SETTINGS']) && !is_array($SSO['SETTINGS']['baseurl'])
-			&& $SSO['SETTINGS']['baseurl'] !== '') {
-		Utils::setBaseURL((string) $SSO['SETTINGS']['baseurl']);
-	}
-
-	if (array_key_exists('use_proxy_headers', $SSO['SETTINGS']) && (bool) $SSO['SETTINGS']['use_proxy_headers']) {
-		Utils::setProxyVars(true);
-	}
+if (array_key_exists('use_proxy_headers', $SSO['SETTINGS']) && (bool) $SSO['SETTINGS']['use_proxy_headers']) {
+	Utils::setProxyVars(true);
 }
 
 $baseurl = Utils::getSelfURLNoQuery();
 $relay_state = null;
+$saml_data = null;
+$saml_settings = $provisioning->getIdpConfig();
+
+if (CAuthenticationHelper::isSamlCertsStorageDatabase()) {
+	$certs = [
+		'SP_KEY' => $saml_settings['sp_private_key'],
+		'SP_CERT' => $saml_settings['sp_certificate'],
+		'IDP_CERT' => $saml_settings['idp_certificate']
+	];
+}
+else {
+	$certs = [
+		'SP_KEY'	=> 'conf/certs/sp.key',
+		'SP_CERT'	=> 'conf/certs/sp.crt',
+		'IDP_CERT'	=> 'conf/certs/idp.crt'
+	];
+	$certs = array_merge($certs, array_intersect_key($SSO, $certs));
+	$certs = array_filter($certs, 'is_readable');
+	$certs = array_map('file_get_contents', $certs);
+	$certs += array_fill_keys(['SP_KEY', 'SP_CERT', 'IDP_CERT'], '');
+}
+
+foreach ($certs as $key => $cert) {
+	if ($cert === '' || $key === 'SP_KEY') {
+		continue;
+	}
+
+	$cert_value = Utils::getStringBetween($cert, '-----BEGIN CERTIFICATE-----', '-----END CERTIFICATE-----');
+	$certs[$key] = Utils::formatCert($cert_value !== '' ? $cert_value : $cert);
+}
+
 $settings = [
 	'sp' => [
-		'entityId' => CAuthenticationHelper::get(CAuthenticationHelper::SAML_SP_ENTITYID),
+		'entityId' => $saml_settings['sp_entityid'],
 		'assertionConsumerService' => [
 			'url' => $baseurl.'?acs'
 		],
 		'singleLogoutService' => [
 			'url' => $baseurl.'?sls'
 		],
-		'NameIDFormat' => CAuthenticationHelper::get(CAuthenticationHelper::SAML_NAMEID_FORMAT),
-		'x509cert' => $sp_cert,
-		'privateKey' => $sp_key
+		'NameIDFormat' => $saml_settings['nameid_format'],
+		'x509cert' => $certs['SP_CERT'],
+		'privateKey' => $certs['SP_KEY']
 	],
 	'idp' => [
-		'entityId' => CAuthenticationHelper::get(CAuthenticationHelper::SAML_IDP_ENTITYID),
+		'entityId' => $saml_settings['idp_entityid'],
 		'singleSignOnService' => [
-			'url' => CAuthenticationHelper::get(CAuthenticationHelper::SAML_SSO_URL)
+			'url' => $saml_settings['sso_url']
 		],
 		'singleLogoutService' => [
-			'url' => CAuthenticationHelper::get(CAuthenticationHelper::SAML_SLO_URL)
+			'url' => $saml_settings['slo_url']
 		],
-		'x509cert' => $idp_cert
+		'x509cert' => $certs['IDP_CERT']
 	],
 	'security' => [
-		'nameIdEncrypted' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_ENCRYPT_NAMEID),
-		'authnRequestsSigned' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_SIGN_AUTHN_REQUESTS),
-		'logoutRequestSigned' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_SIGN_LOGOUT_REQUESTS),
-		'logoutResponseSigned' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_SIGN_LOGOUT_RESPONSES),
-		'wantMessagesSigned' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_SIGN_MESSAGES),
-		'wantAssertionsEncrypted' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_ENCRYPT_ASSERTIONS),
-		'wantAssertionsSigned' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_SIGN_ASSERTIONS),
-		'wantNameIdEncrypted' => (bool) CAuthenticationHelper::get(CAuthenticationHelper::SAML_ENCRYPT_NAMEID)
+		'nameIdEncrypted' => (bool) $saml_settings['encrypt_nameid'],
+		'authnRequestsSigned' => (bool) $saml_settings['sign_authn_requests'],
+		'logoutRequestSigned' => (bool) $saml_settings['sign_logout_requests'],
+		'logoutResponseSigned' => (bool) $saml_settings['sign_logout_responses'],
+		'wantMessagesSigned' => (bool) $saml_settings['sign_messages'],
+		'wantAssertionsEncrypted' => (bool)$saml_settings['encrypt_assertions'],
+		'wantAssertionsSigned' => (bool) $saml_settings['sign_assertions'],
+		'wantNameIdEncrypted' => (bool) $saml_settings['encrypt_nameid']
 	]
 ];
 
-if (is_array($SSO) && array_key_exists('SETTINGS', $SSO)) {
-	foreach (['strict', 'compress', 'contactPerson', 'organization'] as $option) {
-		if (array_key_exists($option, $SSO['SETTINGS'])) {
-			$settings[$option] = $SSO['SETTINGS'][$option];
+foreach (['strict', 'compress', 'contactPerson', 'organization'] as $option) {
+	if (array_key_exists($option, $SSO['SETTINGS'])) {
+		$settings[$option] = $SSO['SETTINGS'][$option];
+	}
+}
+
+if (array_key_exists('sp', $SSO['SETTINGS'])) {
+	foreach (['attributeConsumingService', 'x509certNew'] as $option) {
+		if (array_key_exists($option, $SSO['SETTINGS']['sp'])) {
+			$settings['sp'][$option] = $SSO['SETTINGS']['sp'][$option];
 		}
 	}
+}
 
-	if (array_key_exists('sp', $SSO['SETTINGS'])) {
-		foreach (['attributeConsumingService', 'x509certNew'] as $option) {
-			if (array_key_exists($option, $SSO['SETTINGS']['sp'])) {
-				$settings['sp'][$option] = $SSO['SETTINGS']['sp'][$option];
-			}
-		}
+if (array_key_exists('idp', $SSO['SETTINGS'])) {
+	if (array_key_exists('singleLogoutService', $SSO['SETTINGS']['idp'])
+			&& array_key_exists('responseUrl', $SSO['SETTINGS']['idp']['singleLogoutService'])) {
+		$settings['idp']['singleLogoutService']['responseUrl'] =
+			$SSO['SETTINGS']['idp']['singleLogoutService']['responseUrl'];
 	}
 
-	if (array_key_exists('idp', $SSO['SETTINGS'])) {
-		if (array_key_exists('singleLogoutService', $SSO['SETTINGS']['idp'])
-				&& array_key_exists('responseUrl', $SSO['SETTINGS']['idp']['singleLogoutService'])) {
-			$settings['idp']['singleLogoutService']['responseUrl'] =
-				$SSO['SETTINGS']['idp']['singleLogoutService']['responseUrl'];
-		}
-
-		foreach (['certFingerprint', 'certFingerprintAlgorithm', 'x509certMulti'] as $option) {
-			if (array_key_exists($option, $SSO['SETTINGS']['idp'])) {
-				$settings['idp'][$option] = $SSO['SETTINGS']['idp'][$option];
-			}
+	foreach (['certFingerprint', 'certFingerprintAlgorithm', 'x509certMulti'] as $option) {
+		if (array_key_exists($option, $SSO['SETTINGS']['idp'])) {
+			$settings['idp'][$option] = $SSO['SETTINGS']['idp'][$option];
 		}
 	}
+}
 
-	if (array_key_exists('security', $SSO['SETTINGS'])) {
-		foreach (['signMetadata', 'wantNameId', 'requestedAuthnContext', 'requestedAuthnContextComparison',
-				'wantXMLValidation', 'relaxDestinationValidation', 'destinationStrictlyMatches', 'lowercaseUrlencoding',
-				'rejectUnsolicitedResponsesWithInResponseTo', 'signatureAlgorithm', 'digestAlgorithm'] as $option) {
-			if (array_key_exists($option, $SSO['SETTINGS']['security'])) {
-				$settings['security'][$option] = $SSO['SETTINGS']['security'][$option];
-			}
+if (array_key_exists('security', $SSO['SETTINGS'])) {
+	foreach (['signMetadata', 'wantNameId', 'requestedAuthnContext', 'requestedAuthnContextComparison',
+			'wantXMLValidation', 'relaxDestinationValidation', 'destinationStrictlyMatches', 'lowercaseUrlencoding',
+			'rejectUnsolicitedResponsesWithInResponseTo', 'signatureAlgorithm', 'digestAlgorithm'] as $option) {
+		if (array_key_exists($option, $SSO['SETTINGS']['security'])) {
+			$settings['security'][$option] = $SSO['SETTINGS']['security'][$option];
 		}
 	}
 }
 
 try {
+	CMessageHelper::clear();
 	$auth = new Auth($settings);
 
-	if (hasRequest('acs') && !CSessionHelper::has('saml_data')) {
+	if (hasRequest('metadata')) {
+		$metadata = $auth->getSettings()->getSPMetadata();
+
+		header('Content-Type: text/xml');
+		echo $metadata;
+
+		session_write_close();
+		exit;
+	}
+
+	if (isRequestMethod('post') && hasRequest('acs') && !CSessionHelper::has('saml_data')) {
 		$auth->processResponse();
 
 		if (!$auth->isAuthenticated()) {
 			throw new Exception($auth->getLastErrorReason());
 		}
 
-		$user_attributes = $auth->getAttributes();
+		$groups_key = $saml_settings['group_name'];
+		$user_attributes = [];
 
-		if (!array_key_exists(CAuthenticationHelper::get(CAuthenticationHelper::SAML_USERNAME_ATTRIBUTE),
-			$user_attributes
-		)) {
+		foreach ($auth->getAttributes() as $attribute => $value) {
+			if ($groups_key !== $attribute) {
+				$value = reset($value);
+			}
+
+			$user_attributes[$attribute] = $value;
+		}
+
+		if (!array_key_exists($saml_settings['username_attribute'], $user_attributes)) {
 			throw new Exception(
-				_s('The parameter "%1$s" is missing from the user attributes.', CAuthenticationHelper::get(CAuthenticationHelper::SAML_USERNAME_ATTRIBUTE))
+				_s('The parameter "%1$s" is missing from the user attributes.', $saml_settings['username_attribute'])
 			);
 		}
 
 		$saml_data = [
-			'username_attribute' => reset(
-				$user_attributes[CAuthenticationHelper::get(CAuthenticationHelper::SAML_USERNAME_ATTRIBUTE)]
-			),
-			'nameid' => $auth->getNameId(),
-			'nameid_format' => $auth->getNameIdFormat(),
-			'nameid_name_qualifier' => $auth->getNameIdNameQualifier(),
-			'nameid_sp_name_qualifier' => $auth->getNameIdSPNameQualifier(),
-			'session_index' => $auth->getSessionIndex()
+			'username_attribute'		=> $user_attributes[$saml_settings['username_attribute']],
+			'nameid'					=> $auth->getNameId(),
+			'nameid_format'				=> $auth->getNameIdFormat(),
+			'nameid_name_qualifier'		=> $auth->getNameIdNameQualifier(),
+			'nameid_sp_name_qualifier'	=> $auth->getNameIdSPNameQualifier(),
+			'session_index'				=> $auth->getSessionIndex(),
+			'provisioned_user'			=> []
 		];
-		$saml_data['sign'] = CEncryptHelper::sign(json_encode($saml_data));
 
-		CSessionHelper::set('saml_data', $saml_data);
+		if ($provisioning_enabled) {
+			$user = $provisioning->getUserAttributes($user_attributes);
+			$user['medias'] = $provisioning->getUserMedias($user_attributes);
+			$idp_groups = [];
 
-		if (hasRequest('RelayState') && strpos(getRequest('RelayState'), $baseurl) === false) {
+			if (array_key_exists($groups_key, $user_attributes) && is_array($user_attributes[$groups_key])) {
+				$idp_groups = (count($user_attributes[$groups_key]) > 1)
+					? $user_attributes[$groups_key]
+					: explode(';', $user_attributes[$groups_key][0]);
+			}
+
+			$user += $provisioning->getUserGroupsAndRole($idp_groups);
+			$saml_data['idp_groups'] = $idp_groups;
+			$saml_data['provisioned_user'] = $user;
+		}
+
+		if (hasRequest('RelayState') && (new CFrontendActionValidator())->validate(getRequest('RelayState'))) {
 			$relay_state = getRequest('RelayState');
 		}
 	}
 
-	if (CAuthenticationHelper::get(CAuthenticationHelper::SAML_SLO_URL) !== '') {
-		if (hasRequest('slo') && CSessionHelper::has('saml_data')) {
-			$saml_data = CSessionHelper::get('saml_data');
+	if ($saml_settings['slo_url'] !== '' && hasRequest('slo') && CSessionHelper::has('saml_data')) {
+		$saml_data = CSessionHelper::get('saml_data');
+		CWebUser::logout();
 
-			CWebUser::logout();
+		$url = $auth->logout(null, [], $saml_data['nameid'], $saml_data['session_index'], true,
+			$saml_data['nameid_format'], $saml_data['nameid_name_qualifier'], $saml_data['nameid_sp_name_qualifier']
+		);
 
-			$auth->logout(null, [], $saml_data['nameid'], $saml_data['session_index'], false,
-				$saml_data['nameid_format'], $saml_data['nameid_name_qualifier'], $saml_data['nameid_sp_name_qualifier']
-			);
-		}
+		header('Pragma: no-cache');
+		header('Cache-Control: no-cache, must-revalidate');
+		redirect($url);
+	}
 
-		if (hasRequest('sls')) {
-			$auth->processSLO();
+	if ($saml_settings['slo_url'] !== '' && hasRequest('sls')) {
+		CWebUser::logout();
+		$url = $auth->processSLO(true, null, false, null, true);
 
-			redirect('index.php');
-		}
+		header('Pragma: no-cache');
+		header('Cache-Control: no-cache, must-revalidate');
+		redirect($url ?: $redirect_to->getUrl());
 	}
 
 	if (CWebUser::isLoggedIn() && !CWebUser::isGuest()) {
 		redirect($redirect_to->toString());
 	}
 
-	if (CSessionHelper::has('saml_data')) {
-		$saml_data = CSessionHelper::get('saml_data');
+	if ($saml_data !== null) {
+		// Temporary disabling wrapper for API requests.
+		$wrapper = API::getWrapper();
+		API::setWrapper();
 
-		if (!array_key_exists('sign', $saml_data)) {
-			throw new Exception(_('Session initialization error.'));
+		if ($saml_data['provisioned_user'] && $provisioning_enabled) {
+			$userdirectoryid = CAuthenticationHelper::getSamlUserdirectoryid();
+
+			$db_users = CUser::findUsersByUsername($saml_data['username_attribute'],
+				CAuthenticationHelper::getPublic(CAuthenticationHelper::SAML_CASE_SENSITIVE) == ZBX_AUTH_CASE_SENSITIVE
+			);
+
+			if (!$db_users && $saml_data['provisioned_user']['roleid']) {
+				$saml_data['provisioned_user'] += [
+					'userdirectoryid' => $userdirectoryid,
+					'username' => $saml_data['username_attribute']
+				];
+				$user = API::User()->createProvisionedUser($saml_data['provisioned_user']);
+				ScimGroup::createScimGroupsFromSamlAttributes($saml_data['idp_groups'], $user['userid']);
+			}
+
+			if (count($db_users) > 1) {
+				throw new Exception(_s('Authentication failed: %1$s.', _('supplied credentials are not unique')));
+			}
+
+			if ($db_users) {
+				$db_user = $db_users[0];
+
+				CUser::addUserGroupFields($db_user, $group_status);
+
+				if (($group_status == GROUP_STATUS_ENABLED || $db_user['deprovisioned'])
+						&& bccomp($db_user['userdirectoryid'], $userdirectoryid) == 0) {
+					$saml_data['provisioned_user']['userid'] = $db_user['userid'];
+					API::User()->updateProvisionedUser($saml_data['provisioned_user']);
+					ScimGroup::createScimGroupsFromSamlAttributes($saml_data['idp_groups'], $db_user['userid']);
+				}
+			}
+
+			unset($saml_data['provisioned_user'], $saml_data['idp_groups']);
 		}
 
-		$saml_data_sign = $saml_data['sign'];
-		$saml_data_sign_check = CEncryptHelper::sign(json_encode(array_diff_key($saml_data, array_flip(['sign']))));
-
-		if (!CEncryptHelper::checkSign($saml_data_sign, $saml_data_sign_check)) {
-			throw new Exception(_('Session initialization error.'));
-		}
-
-		CWebUser::$data = API::getApiService('user')->loginByUsername($saml_data['username_attribute'],
-			(CAuthenticationHelper::get(CAuthenticationHelper::SAML_CASE_SENSITIVE) == ZBX_AUTH_CASE_SENSITIVE),
-			CAuthenticationHelper::get(CAuthenticationHelper::AUTHENTICATION_TYPE)
+		CWebUser::$data = CUser::loginByUsername($saml_data['username_attribute'],
+			CAuthenticationHelper::getPublic(CAuthenticationHelper::SAML_CASE_SENSITIVE) == ZBX_AUTH_CASE_SENSITIVE
 		);
+		API::setWrapper($wrapper);
 
 		if (CWebUser::$data['gui_access'] == GROUP_GUI_ACCESS_DISABLED) {
-			CSessionHelper::unset(['saml_data']);
-
 			throw new Exception(_('GUI access disabled.'));
 		}
 
+		CSessionHelper::set('saml_data', $saml_data);
 		CSessionHelper::set('sessionid', CWebUser::$data['sessionid']);
-		API::getWrapper()->auth = CWebUser::$data['sessionid'];
+		API::getWrapper()->auth = [
+			'type' => CJsonRpc::AUTH_TYPE_COOKIE,
+			'auth' => CWebUser::$data['sessionid']
+		];
 
-		$redirect = array_filter([$request, CWebUser::$data['url'], $relay_state, CMenuHelper::getFirstUrl()]);
-		redirect(reset($redirect));
+		CMessageHelper::clear();
+
+		$redirect = CWebUser::getRedirectUrl();
+
+		if ($redirect['error']) {
+			CMessageHelper::addError(_('Invalid redirect URL.'));
+		}
+
+		$redirect = array_filter([$request, $redirect['url'], $relay_state, CMenuHelper::getFirstUrl()]);
+
+		$response = new CControllerResponseRedirect(
+			new CUrl(reset($redirect))
+		);
+
+		$response->redirect();
 	}
 
-	$auth->login();
+	$url = $auth->login(null, [], hasRequest('force_authn'), false, true);
+
+	header('Pragma: no-cache');
+	header('Cache-Control: no-cache, must-revalidate');
+	redirect($url);
 }
 catch (Exception $e) {
 	error($e->getMessage());
+}
+
+if ($saml_data !== null && !CWebUser::isLoggedIn()) {
+	error(_('You have been authorized via Single sign-on (SSO), but logging in to Zabbix failed.'));
+	error(_('If you think this message is wrong, please consult your administrators about getting the necessary permissions.'));
 }
 
 echo (new CView('general.warning', [
 	'header' => _('You are not logged in'),
 	'messages' => array_column(get_and_clear_messages(), 'message'),
 	'buttons' => [
+		$saml_data !== null && (!CWebUser::isLoggedIn() || CWebUser::$data['gui_access'] == GROUP_GUI_ACCESS_DISABLED)
+			? (new CButton('force_authn', _('Switch SSO user')))
+					->setAttribute('data-url',
+						(new CUrl('index_sso.php'))
+							->setArgument('force_authn')
+							->setArgument('request', $request)
+							->getUrl()
+					)
+					->onClick('document.location = this.dataset.url;')
+			: null,
 		(new CButton('login', _('Login')))
 			->setAttribute('data-url',
 				$redirect_to

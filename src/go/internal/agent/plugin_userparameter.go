@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package agent
@@ -23,13 +18,17 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"zabbix.com/pkg/itemutil"
-	"zabbix.com/pkg/zbxcmd"
+	"golang.zabbix.com/agent2/pkg/zbxcmd"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/plugin/itemutil"
 )
+
+const notAllowedCharacters = "\\'\"`*?[]{}~$!&;()<>|#@%\n"
 
 type parameterInfo struct {
 	cmd      string
@@ -42,9 +41,29 @@ type UserParameterPlugin struct {
 	parameters           map[string]*parameterInfo
 	unsafeUserParameters int
 	userParameterDir     string
+	executor             zbxcmd.Executor
+	executorInitMu       sync.Mutex
 }
 
 var userParameter UserParameterPlugin
+
+func specialCharsNotAllowedMessage() string {
+	parts := make([]string, 0, len(notAllowedCharacters))
+
+	for i := range len(notAllowedCharacters) {
+		c := notAllowedCharacters[i]
+
+		if !unicode.IsPrint(rune(c)) {
+			parts = append(parts, fmt.Sprintf("0x%02x", c))
+
+			continue
+		}
+
+		parts = append(parts, string(c))
+	}
+
+	return strings.Join(parts, ", ")
+}
 
 func (p *UserParameterPlugin) cmd(key string, params []string) (string, error) {
 	var b bytes.Buffer
@@ -74,12 +93,11 @@ func (p *UserParameterPlugin) cmd(key string, params []string) (string, error) {
 				if int(s[i]-'0') <= len(params) {
 					param := params[s[i]-'0'-1]
 					if p.unsafeUserParameters == 0 {
-						if j := strings.IndexAny(param, "\\'\"`*?[]{}~$!&;()<>|#@\n"); j != -1 {
-							if unicode.IsPrint(rune(param[j])) {
-								return "", fmt.Errorf("Character \"%c\" is not allowed", param[j])
-							}
-
-							return "", fmt.Errorf("Character 0x%02x is not allowed", param[j])
+						if j := strings.IndexAny(param, notAllowedCharacters); j != -1 {
+							return "", errs.Errorf(
+								"Special characters \"%s\" are not allowed in the "+
+									"parameters.",
+								specialCharsNotAllowedMessage())
 						}
 					}
 					b.WriteString(param)
@@ -106,7 +124,11 @@ func (p *UserParameterPlugin) cmd(key string, params []string) (string, error) {
 }
 
 // Export -
-func (p *UserParameterPlugin) Export(key string, params []string, ctx plugin.ContextProvider) (result interface{}, err error) {
+func (p *UserParameterPlugin) Export(
+	key string,
+	params []string,
+	ctx plugin.ContextProvider,
+) (any, error) {
 	s, err := p.cmd(key, params)
 	if err != nil {
 		return nil, err
@@ -114,57 +136,126 @@ func (p *UserParameterPlugin) Export(key string, params []string, ctx plugin.Con
 
 	p.Debugf("executing command:'%s'", s)
 
-	stdoutStderr, err := zbxcmd.Execute(s, time.Second*time.Duration(Options.Timeout), p.userParameterDir)
+	// Needed so the executor is initialized once, this should be done in configure, but then Zabbix agent 2
+	// will not start if there are issues with finding cmd.exe on windows, and that will break backwards compatibility.
+	err = p.initExecutor()
 	if err != nil {
 		return nil, err
 	}
 
-	p.Debugf("command:'%s' length:%d output:'%.20s'", s, len(stdoutStderr), stdoutStderr)
+	stdoutStderr, err := p.executor.Execute(
+		s, time.Second*time.Duration(ctx.Timeout()), p.userParameterDir,
+	)
+	if err != nil {
+		return nil, errs.Wrap(err, "failed to execute command")
+	}
+
+	p.Debugf(
+		"command:'%s' length:%d output:'%.20s'",
+		s,
+		len(stdoutStderr),
+		stdoutStderr,
+	)
 
 	return stdoutStderr, nil
 }
 
-func InitUserParameterPlugin(userParameterConfig []string, unsafeUserParameters int, userParameterDir string) (keys []string, err error) {
-	params := make(map[string]*parameterInfo)
+func InitUserParameterPlugin(
+	userParameterConfig []string,
+	unsafeUserParameters int,
+	userParameterDir string,
+) ([]string, error) {
+	var (
+		keys   = make([]string, 0, len(userParameterConfig))
+		params = make(map[string]*parameterInfo)
+	)
 
-	for i := 0; i < len(userParameterConfig); i++ {
-		s := strings.SplitN(userParameterConfig[i], ",", 2)
-		if len(s) != 2 {
-			return nil, fmt.Errorf("cannot add user parameter \"%s\": not comma-separated", userParameterConfig[i])
+	for _, userParam := range userParameterConfig {
+		// split by first comma.
+		parts := strings.SplitN(userParam, ",", 2) //nolint:mnd
+		if len(parts) != 2 {                       //nolint:mnd
+			return nil, fmt.Errorf(
+				"cannot add user parameter %q: not comma-separated", userParam,
+			)
 		}
 
-		key, p, err := itemutil.ParseKey(s[0])
+		key, keyParams, err := itemutil.ParseKey(parts[0])
 		if err != nil {
-			return nil, fmt.Errorf("cannot add user parameter \"%s\": %s", userParameterConfig[i], err)
+			return nil, fmt.Errorf(
+				"cannot add user parameter %q: %s", userParam, err.Error(),
+			)
 		}
 
 		if acc, _ := plugin.Get(key); acc != nil {
-			return nil, fmt.Errorf(`cannot register user parameter "%s": key already used`, userParameterConfig[i])
+			return nil, fmt.Errorf(
+				"cannot register user parameter %q: key already used",
+				userParam,
+			)
 		}
 
-		if len(strings.TrimSpace(s[1])) == 0 {
-			return nil, fmt.Errorf("cannot add user parameter \"%s\": command is missing", userParameterConfig[i])
+		_, ok := params[key]
+		if ok {
+			return nil, fmt.Errorf(
+				"cannot register user parameter %q: duplicate user parameter",
+				userParam,
+			)
 		}
 
-		parameter := &parameterInfo{cmd: s[1]}
+		if len(strings.TrimSpace(parts[1])) == 0 {
+			return nil, fmt.Errorf(
+				"cannot add user parameter %q: command is missing", userParam,
+			)
+		}
 
-		if len(p) == 1 && p[0] == "*" {
+		parameter := &parameterInfo{cmd: parts[1]}
+
+		if len(keyParams) == 1 && keyParams[0] == "*" {
 			parameter.flexible = true
-		} else if len(p) != 0 {
-			return nil, fmt.Errorf("cannot add user parameter \"%s\": syntax error", userParameterConfig[i])
+		}
+
+		if len(keyParams) != 0 && !parameter.flexible {
+			return nil, fmt.Errorf(
+				"cannot add user parameter %q: syntax error", userParam,
+			)
 		}
 
 		params[key] = parameter
 		keys = append(keys, key)
 	}
 
+	for key, param := range params {
+		err := plugin.RegisterMetrics(
+			&userParameter,
+			"UserParameter",
+			key,
+			fmt.Sprintf("User parameter: %s.", param.cmd),
+		)
+		if err != nil {
+			return nil, errs.Wrap(err, "failed to register user parameter metrics")
+		}
+	}
+
 	userParameter.parameters = params
 	userParameter.unsafeUserParameters = unsafeUserParameters
 	userParameter.userParameterDir = userParameterDir
 
-	for _, key := range keys {
-		plugin.RegisterMetrics(&userParameter, "UserParameter", key, fmt.Sprintf("User parameter: %s.", userParameter.parameters[key].cmd))
+	return keys, nil
+}
+
+func (p *UserParameterPlugin) initExecutor() error {
+	p.executorInitMu.Lock()
+	defer p.executorInitMu.Unlock()
+
+	if p.executor != nil {
+		return nil
 	}
 
-	return keys, nil
+	executor, err := zbxcmd.InitExecutor()
+	if err != nil {
+		return errs.Wrap(err, "command init failed")
+	}
+
+	p.executor = executor
+
+	return nil
 }

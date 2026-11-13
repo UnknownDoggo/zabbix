@@ -1,31 +1,37 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../../include/CLegacyWebTest.php';
 
-use Facebook\WebDriver\WebDriverBy;
+require_once __DIR__.'/../../include/CLegacyWebTest.php';
+require_once __DIR__ . '/../../include/CWebTest.php';
 
 /**
  * @backup users
  */
 class testFormUserProfile extends CLegacyWebTest {
+
+	/**
+	 * Attach MessageBehavior to the test.
+	 *
+	 * @return array
+	 */
+	public function getBehaviors() {
+		return [CMessageBehavior::class];
+	}
+
+	protected static $old_password = 'zabbix';
 
 	public function testFormUserProfile_SimpleUpdate() {
 		$sqlHashUsers = 'select userid,username,name,surname,passwd,url,autologin,lang,refresh,roleid,theme,attempt_failed,attempt_clock,rows_per_page'
@@ -34,9 +40,10 @@ class testFormUserProfile extends CLegacyWebTest {
 
 		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
 
-		$this->zbxTestCheckTitle('User profile');
+		$this->zbxTestCheckTitle('Profile');
 
-		$this->zbxTestClickWait('update');
+		$this->query('button:Update')->waitUntilClickable()->one()->click();
+		$this->assertMessage(TEST_GOOD, 'User updated');
 		$this->zbxTestCheckHeader('Global view');
 
 		$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
@@ -48,11 +55,35 @@ class testFormUserProfile extends CLegacyWebTest {
 		$oldHashUsers = CDBHelper::getHash($sqlHashUsers);
 
 		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
-		$this->zbxTestCheckHeader('User profile: Zabbix Administrator');
+		$this->zbxTestCheckHeader('Profile');
 		$this->zbxTestInputTypeOverwrite('refresh', '60');
 
-		$this->zbxTestClickWait('cancel');
+		$this->query('button:Cancel')->waitUntilClickable()->one()->click();
 		$this->zbxTestCheckHeader('Global view');
+
+		$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
+	}
+
+	public function testFormUserProfile_ThemeChange() {
+		$sqlHashUsers = "select * from users where username<>'".PHPUNIT_LOGIN_NAME."' order by userid";
+		$oldHashUsers = CDBHelper::getHash($sqlHashUsers);
+
+		$this->page->login()->open('zabbix.php?action=userprofile.edit')->waitUntilReady();
+		$form = $this->query('name:userprofile_form')->asForm()->waitUntilVisible()->one();
+
+		// Check theme fields options.
+		$this->assertEquals(['System default', 'Blue', 'Blue (classic)', 'Dark', 'Dark blue', 'Dark (classic)',
+				'High-contrast light', 'High-contrast dark'], $this->query('name:theme')->asDropdown()->waitUntilVisible()
+				->one()->getOptions()->asText()
+		);
+
+		$form->fill(['Theme' => 'Blue'])->submit();
+		$this->page->waitUntilReady();
+		CDashboardElement::find()->waitUntilVisible()->waitUntilReady();
+		$this->assertMessage(TEST_GOOD, 'User updated');
+		$this->zbxTestCheckHeader('Global view');
+		$row = DBfetch(DBselect("select theme from users where username='".PHPUNIT_LOGIN_NAME."'"));
+		$this->assertEquals('blue-theme', $row['theme']);
 
 		$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
 	}
@@ -63,19 +94,33 @@ class testFormUserProfile extends CLegacyWebTest {
 				'expected' => TEST_BAD,
 				'password1' => '',
 				'password2' => '',
-				'error_msg' => 'Incorrect value for field "Password": cannot be empty.'
+				'error_msg' => ['Password' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'password1' => 'abcd1234',
 				'password2' => 'abCD1235',
-				'error_msg' => 'Both passwords must be equal.'
+				'error_msg' => ['Password' => 'Must not be one of common or context-specific passwords.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'password1' => '12345',
 				'password2' => '123456',
-				'error_msg' => 'Both passwords must be equal.'
+				'error_msg' => ['Password' => 'Must be at least 8 characters long.']
+			]],
+			[[
+				'expected' => TEST_BAD,
+				'old_password' => 'test_123',
+				'password1' => "test_123",
+				'password2' => "test_123",
+				'error_msg' => 'Incorrect current password.'
+			]],
+			[[
+				'expected' => TEST_BAD,
+				'old_password' => '',
+				'password1' => "'\'$\"\"!$@$#^%$+-=~`\`\\",
+				'password2' => "'\'$\"\"!$@$#^%$+-=~`\`\\",
+				'error_msg' => ['Current password' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_GOOD,
@@ -99,39 +144,45 @@ class testFormUserProfile extends CLegacyWebTest {
 
 		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
 
-		$this->zbxTestClickXpathWait("//ul[@id='user_form_list']//button[contains(@onclick, 'change_password')]");
-		$this->zbxTestInputTypeWait('password1', $data['password1']);
-		$this->zbxTestInputType('password2', $data['password2']);
+		$form = $this->query('name:userprofile_form')->asForm()->waitUntilVisible()->one();
+		$form->query('button:Change password')->waitUntilClickable()->one()->click();
+		foreach (['current_password', 'password1', 'password2'] as $id) {
+			$form->query('id', $id)->waitUntilVisible()->one();
+		}
+		$form->fill([
+			'Current password' => (array_key_exists('old_password', $data)) ? $data['old_password'] : self::$old_password,
+			'Password' => $data['password1'],
+			'Password (once again)' => $data['password2']
+		]);
+		$form->submit();
 
-		$this->zbxTestClickWait('update');
+		if ($this->page->isAlertPresent()) {
+			$this->page->acceptAlert();
+		}
 
 		switch ($data['expected']) {
 			case TEST_GOOD:
-				$this->zbxTestCheckHeader('Global view');
-				$this->zbxTestWaitUntilMessageTextPresent('msg-good' , 'User updated');
+				$this->assertTrue($this->query('button:Sign in')->waitUntilVisible()->one()->isClickable());
+				$this->page->assertTitle('Zabbix');
+				$this->page->userLogin('Admin', $data['password1']);
+				$this->assertTrue($this->query('xpath://a[@title="Admin (Zabbix Administrator)" and text()='.
+						'"User settings"]')->exists()
+				);
+				self::$old_password = $data['password1'];
+				// TODO: Following test fails on Jenkins with error access denied for Admin to dashboard page. Logout may help
+				$this->page->logout();
 				break;
 			case TEST_BAD:
-				$this->zbxTestWaitUntilMessageTextPresent('msg-bad' , $data['error_msg']);
-				$this->zbxTestCheckTitle('User profile');
+				if (is_array($data['error_msg'])) {
+					$this->assertInlineError($form, $data['error_msg']);
+				}
+				else {
+					$this->assertMessage(TEST_BAD, 'Cannot update user', $data['error_msg']);
+				}
+				$this->zbxTestCheckTitle('Profile');
 				$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
 				break;
 		}
-	}
-
-	public function testFormUserProfile_ThemeChange() {
-		$sqlHashUsers = "select * from users where username<>'".PHPUNIT_LOGIN_NAME."' order by userid";
-		$oldHashUsers = CDBHelper::getHash($sqlHashUsers);
-
-		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
-
-		$this->zbxTestDropdownSelect('theme', 'Blue');
-		$this->zbxTestClickWait('update');
-		$this->zbxTestCheckHeader('Global view');
-
-		$row = DBfetch(DBselect("select theme from users where username='".PHPUNIT_LOGIN_NAME."'"));
-		$this->assertEquals('blue-theme', $row['theme']);
-
-		$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
 	}
 
 	public static function refresh() {
@@ -139,37 +190,38 @@ class testFormUserProfile extends CLegacyWebTest {
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => ' ',
-				'error_msg' => 'Incorrect value for field "refresh": cannot be empty.'
+				'error_msg' => ['Refresh' => 'This field cannot be empty.']
+
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => 's',
-				'error_msg' => 'Invalid parameter "/1/refresh": a time unit is expected.'
+				'error_msg' => ['Refresh' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => '1.5',
-				'error_msg' => 'Invalid parameter "/1/refresh": a time unit is expected.'
+				'error_msg' => ['Refresh' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => '{$DEFAULT_DELAY}',
-				'error_msg' => 'Invalid parameter "/1/refresh": a time unit is expected.'
+				'error_msg' => ['Refresh' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => '1d',
-				'error_msg' => 'Invalid parameter "/1/refresh": value must be one of 0-3600.'
+				'error_msg' => ['Refresh' => 'Value must be between 0 and 3600s (1h).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => '36001',
-				'error_msg' => 'Invalid parameter "/1/refresh": value must be one of 0-3600.'
+				'error_msg' => ['Refresh' => 'Value must be between 0 and 3600s (1h).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'refresh' => '1y',
-				'error_msg' => 'Invalid parameter "/1/refresh": a time unit is expected.'
+				'error_msg' => ['Refresh' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_GOOD,
@@ -205,25 +257,26 @@ class testFormUserProfile extends CLegacyWebTest {
 	/**
 	 * @dataProvider refresh
 	 */
-	public function ttestFormUserProfile_RefreshTime($data) {
+	public function testFormUserProfile_RefreshTime($data) {
 		$sqlHashUsers = 'select * from users order by userid';
 		$oldHashUsers = CDBHelper::getHash($sqlHashUsers);
 
 		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
+		$form = $this->query('name:userprofile_form')->asForm()->waitUntilVisible()->one();
 
 		$this->zbxTestInputTypeOverwrite('refresh', $data['refresh']);
-		$this->zbxTestClickWait('update');
+		$this->query('button:Update')->waitUntilClickable()->one()->click();
 
 		switch ($data['expected']) {
 			case TEST_GOOD:
+				$this->assertMessage(TEST_GOOD, 'User updated');
 				$this->zbxTestCheckHeader('Global view');
 				$row = DBfetch(DBselect("select refresh from users where username='".PHPUNIT_LOGIN_NAME."'"));
 				$this->assertEquals($data['refresh'] , $row['refresh']);
 				break;
 			case TEST_BAD:
-				$this->zbxTestWaitUntilMessageTextPresent('msg-bad' , 'Cannot update user');
-				$this->zbxTestTextPresent($data['error_msg']);
-				$this->zbxTestCheckTitle('User profile');
+				$this->assertInlineError($form, $data['error_msg']);
+				$this->zbxTestCheckTitle('Profile');
 				$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
 				break;
 		}
@@ -234,57 +287,57 @@ class testFormUserProfile extends CLegacyWebTest {
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => ' ',
-				'error_msg' => 'Incorrect value for field "autologout": cannot be empty.'
+				'error_msg' => ['Auto-logout' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => 's',
-				'error_msg' => 'Invalid parameter "/1/autologout": a time unit is expected.'
+				'error_msg' => ['Auto-logout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '1.5',
-				'error_msg' => 'Invalid parameter "/1/autologout": a time unit is expected.'
+				'error_msg' => ['Auto-logout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '{$DEFAULT_DELAY}',
-				'error_msg' => 'Invalid parameter "/1/autologout": a time unit is expected.'
+				'error_msg' => ['Auto-logout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '1s',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '1m',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '25h',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '2d',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '89',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '86401',
-				'error_msg' => 'Invalid parameter "/1/autologout": value must be one of 0, 90-86400.'
+				'error_msg' => ['Auto-logout' => 'Value must be between 90s (1m 30s) and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'autologout' => '1y',
-				'error_msg' => 'Invalid parameter "/1/autologout": a time unit is expected.'
+				'error_msg' => ['Auto-logout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_GOOD,
@@ -317,93 +370,93 @@ class testFormUserProfile extends CLegacyWebTest {
 		$oldHashUsers = CDBHelper::getHash($sqlHashUsers);
 
 		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
+		$form = $this->query('name:userprofile_form')->asForm()->waitUntilVisible()->one();
 
 		$this->zbxTestCheckboxSelect('autologout_visible', true);
 		$this->zbxTestInputTypeOverwrite('autologout', $data['autologout']);
-		$this->zbxTestClickWait('update');
+		$this->query('button:Update')->waitUntilClickable()->one()->click();
 
 		switch ($data['expected']) {
 			case TEST_GOOD:
+				$this->assertMessage(TEST_GOOD, 'User updated');
 				$this->zbxTestCheckHeader('Global view');
 				$row = DBfetch(DBselect("select autologout from users where username='".PHPUNIT_LOGIN_NAME."'"));
 				$this->assertEquals($data['autologout'] , $row['autologout']);
 				break;
 			case TEST_BAD:
-				$this->zbxTestWaitUntilMessageTextPresent('msg-bad' , 'Cannot update user');
-				$this->zbxTestTextPresent($data['error_msg']);
-				$this->zbxTestCheckTitle('User profile');
+				$this->assertInlineError($form, $data['error_msg']);
+				$this->zbxTestCheckTitle('Profile');
 				$this->assertEquals($oldHashUsers, CDBHelper::getHash($sqlHashUsers));
 				break;
 		}
 	}
-
 	public static function messaging() {
 		return [
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => ' ',
-				'error_msg' => 'Incorrect value for field "timeout": a time unit is expected.'
+				'error_msg' => ['Message timeout' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => 's',
-				'error_msg' => 'Incorrect value for field "timeout": a time unit is expected.'
+				'error_msg' => ['Message timeout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '1.5',
-				'error_msg' => 'Incorrect value for field "timeout": a time unit is expected.'
+				'error_msg' => ['Message timeout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '{$DEFAULT_DELAY}',
-				'error_msg' => 'Incorrect value for field "timeout": a time unit is expected.'
+				'error_msg' => ['Message timeout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '0',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '1s',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '29',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '25h',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '2d',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '86401',
-				'error_msg' => 'Incorrect value for field "timeout": value must be one of 30-86400.'
+				'error_msg' => ['Message timeout' => 'Value must be between 30s and 86400s (1d).']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'messages_disabled' => true,
 				'timeout' => '1y',
-				'error_msg' => 'Incorrect value for field "timeout": a time unit is expected.'
+				'error_msg' => ['Message timeout' => 'A time unit is expected.']
 			]],
 			[[
 				'expected' => TEST_GOOD,
@@ -430,15 +483,16 @@ class testFormUserProfile extends CLegacyWebTest {
 	 * @dataProvider messaging
 	 */
 	public function testFormUserProfile_MessagesTimeout($data) {
-		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
-		$this->zbxTestCheckHeader('User profile: Zabbix Administrator');
-		$this->zbxTestTabSwitch('Messaging');
+		$this->zbxTestLogin('zabbix.php?action=userprofile.notification.edit');
+		$this->zbxTestCheckHeader('Notifications');
+		$this->zbxTestTabSwitch('Frontend notifications');
+		$form = $this->query('id:userprofile-notification-form')->asForm()->waitUntilVisible()->one();
 
 		if (array_key_exists('messages_disabled', $data)) {
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_timeout'][@disabled]");
-			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.repeat'][@disabled]");
+			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.repeat']/input[@type='hidden']");
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_triggers.recovery'][@disabled]");
-			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.recovery'][@disabled]");
+			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.recovery']/input[@type='hidden']");
 			$this->zbxTestAssertElementPresentXpath("//button[@name='start'][@disabled]");
 			$this->zbxTestAssertElementPresentXpath("//button[@name='stop'][@disabled]");
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_show_suppressed'][@disabled]");
@@ -457,9 +511,9 @@ class testFormUserProfile extends CLegacyWebTest {
 		else {
 			$this->zbxTestCheckboxSelect('messages_enabled', false);
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_timeout'][@disabled]");
-			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.repeat'][@disabled]");
+			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.repeat']/input[@type='hidden']");
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_triggers.recovery'][@disabled]");
-			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.recovery'][@disabled]");
+			$this->zbxTestAssertElementPresentXpath("//z-select[@id='messages_sounds.recovery']/input[@type='hidden']");
 			$this->zbxTestAssertElementPresentXpath("//button[@name='start'][@disabled]");
 			$this->zbxTestAssertElementPresentXpath("//button[@name='stop'][@disabled]");
 			$this->zbxTestAssertElementPresentXpath("//input[@id='messages_show_suppressed'][@disabled]");
@@ -469,15 +523,15 @@ class testFormUserProfile extends CLegacyWebTest {
 			$this->zbxTestCheckboxSelect('messages_show_suppressed', $data['suppressed']);
 		}
 
-		$this->zbxTestClickWait('update');
+		$this->query('button:Update')->waitUntilClickable()->one()->click();
 
 		switch ($data['expected']) {
 			case TEST_GOOD:
+				$this->assertMessage(TEST_GOOD, 'User updated');
 				$this->zbxTestCheckHeader('Global view');
 				break;
 			case TEST_BAD:
-				$this->zbxTestWaitUntilMessageTextPresent('msg-bad' , 'Cannot update user');
-				$this->zbxTestTextPresent($data['error_msg']);
+				$this->assertInlineError($form, $data['error_msg']);
 				break;
 		}
 	}
@@ -487,43 +541,43 @@ class testFormUserProfile extends CLegacyWebTest {
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => '',
-				'error_msg' => 'Incorrect value for field "sendto": cannot be empty.'
+				'error_msg' => ['Send to' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test',
-				'period' => ' ',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => ' ',
+				'error_msg' => ['When active' => 'This field cannot be empty.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test@zabbix.com',
-				'period' => '0-0,00:00-00:00',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => '0-0,00:00-00:00',
+				'error_msg' => ['When active' => 'Invalid period.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test@zabbix.com',
-				'period' => '1-11,00:00-24:00',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => '1-11,00:00-24:00',
+				'error_msg' => ['When active' => 'Invalid period.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test@zabbix.com',
-				'period' => '1-7,00:00-25:00',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => '1-7,00:00-25:00',
+				'error_msg' => ['When active' => 'Invalid period.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test@zabbix.com',
-				'period' => '1-7,24:00-00:00',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => '1-7,24:00-00:00',
+				'error_msg' => ['When active' => 'Invalid period.']
 			]],
 			[[
 				'expected' => TEST_BAD,
 				'send_to' => 'test@zabbix.com',
-				'period' => 'test',
-				'error_msg' => 'Incorrect value for field "period": a time period is expected.'
+				'When active' => 'test',
+				'error_msg' => ['When active' => 'Invalid period.']
 			]]
 		];
 	}
@@ -532,20 +586,19 @@ class testFormUserProfile extends CLegacyWebTest {
 	 * @dataProvider media
 	 */
 	public function testFormUserProfile_Media($data) {
-		$this->zbxTestLogin('zabbix.php?action=userprofile.edit');
-		$this->zbxTestCheckHeader('User profile: Zabbix Administrator');
-		$this->zbxTestTabSwitch('Media');
+		$this->zbxTestLogin('zabbix.php?action=userprofile.notification.edit');
+		$this->zbxTestCheckHeader('Notifications');
 		$this->zbxTestClickButtonText('Add');
-		$this->zbxTestLaunchOverlayDialog('Media');
+		$form = COverlayDialogElement::get('New media')->asForm();
 
 		if (array_key_exists('type', $data)) {
 			$this->zbxTestDropdownSelect('mediatypeid', $data['type']);
 		}
 
-		$this->zbxTestInputTypeByXpath('//div[@class="overlay-dialogue-body"]//input[@id="sendto"]', $data['send_to']);
+		$this->query('id:sendto')->one()->fill($data['send_to']);
 
-		if (array_key_exists('period', $data)) {
-			$this->zbxTestInputClearAndTypeByXpath('//div[@class="overlay-dialogue-body"]//input[@id="period"]', $data['period']);
+		if (array_key_exists('When active', $data)) {
+			$form->fill(['When active' => $data['When active']]);
 		}
 
 		$this->zbxTestClickXpath('//div[@class="overlay-dialogue-footer"]//button[text()="Add"]');
@@ -554,15 +607,40 @@ class testFormUserProfile extends CLegacyWebTest {
 			case TEST_GOOD:
 				$this->zbxTestWaitForPageToLoad();
 				COverlayDialogElement::ensureNotPresent();
-				$this->zbxTestClickWait('update');
+				$this->zbxTestClickXpathWait('//button[contains(@class,"js-submit")]');
+				$this->assertMessage(TEST_GOOD, 'User updated');
 				$this->zbxTestCheckHeader('Global view');
 				$sql = "SELECT * FROM media WHERE sendto = '".$data['send_to']."'";
 				$this->assertEquals(1, CDBHelper::getCount($sql));
 				break;
 			case TEST_BAD:
-				$this->zbxTestWaitUntilElementVisible(WebDriverBy::xpath("//div[@class='overlay-dialogue-body']//div[@class='msg-details']"));
-				$this->zbxTestTextPresent($data['error_msg']);
+				$this->assertInlineError($form, $data['error_msg']);
 				break;
 		}
+	}
+
+	/**
+	 * Verify that checkbox state is preserved after failed update.
+	 */
+	public function testFormUserProfile_triggerSeverity() {
+		$trigger_severity = [
+			'Recovery' => false,
+			'Not classified' => false,
+			'Information' => false,
+			'Warning' => false,
+			'Average' => false,
+			'High' => false,
+			'Disaster' => false
+		];
+
+		$this->page->login()->open('zabbix.php?action=userprofile.notification.edit')->waitUntilReady();
+		$form = $this->query('id:userprofile-notification-form')->asForm()->one();
+		$form->selectTab('Frontend notifications');
+		$form->fill(['Frontend notifications' => true, 'Message timeout' => '86401']);
+		$form->fill($trigger_severity);
+		$this->page->removeFocus();
+		$this->assertInlineError($form, ['Message timeout' => 'Value must be between 30s and 86400s (1d).']);
+		$form->submit();
+		$form->checkValue($trigger_severity);
 	}
 }

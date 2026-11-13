@@ -1,27 +1,22 @@
 <?php
-
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
 require_once dirname(__FILE__).'/../../include/defines.inc.php';
+require_once dirname(__FILE__).'/../../include/classes/core/ZBase.php';
 require_once dirname(__FILE__).'/../../include/classes/server/CZabbixServer.php';
 
 /**
@@ -32,7 +27,7 @@ class CZabbixClient extends CZabbixServer {
 	/**
 	 * @inheritdoc
 	 */
-	protected function normalizeResponse(array &$response) {
+	protected function normalizeResponse(array &$response): bool {
 		// Response for item data requests contain success status without data.
 		if (array_key_exists('response', $response) && $response['response'] === self::RESPONSE_SUCCESS
 				&& !array_key_exists('data', $response) && array_key_exists('info', $response)) {
@@ -46,17 +41,88 @@ class CZabbixClient extends CZabbixServer {
 	/**
 	 * Send value for items to server/proxy.
 	 *
-	 * @param string $type      data type
-	 * @param array  $values    trapper values
+	 * @param string  $type      data type
+	 * @param array   $values    trapper values
+	 * @param integer $time      clock
 	 *
 	 * @return array|false    array with result data or false otherwise
 	 */
-	public function sendDataValues($type, $values) {
+	public function sendDataValues($type, $values, $time = null) {
 		$response = parent::request([
 			'request' => $type.' data',
 			'data' => $values,
-			'clock' => time(),
+			'clock' => $time ?? time(),
 			'ns' => 0
+		]);
+
+		if ($response !== false && $this->error === null) {
+			$result = [];
+
+			foreach (explode('; ', $response) as $line) {
+				$parts = explode(': ', $line);
+				if (count($parts) !== 2) {
+					continue;
+				}
+
+				$result[$parts[0]] = floatval($parts[1]);
+			}
+
+			return $result;
+		}
+
+		return false;
+	}
+
+	/**
+	 * Send item values to server/proxy using the agent data protocol (variant 2).
+	 *
+	 * When $proxy is specified, the values are sent as a 'proxy data' request impersonating
+	 * the named proxy instead of the active agent protocol.
+	 *
+	 * @param array       $data       item values, each with keys: itemid, value, clock, ns
+	 * @param string      $session    agent/proxy session identifier
+	 * @param string      $host       host name
+	 * @param string      $version    agent/proxy version
+	 * @param string|null $proxy      proxy name to send as, or null for agent data
+	 *
+	 * @return array|bool    array with result data, true for proxy data on success, or false otherwise
+	 */
+	public function sendAgentDataValues(array $data, string $session, string $host, string $version = ZABBIX_VERSION,
+			$proxy = null) {
+		$id = 1;
+		foreach ($data as &$item) {
+			// Non-object rows are passed as-is to allow malformed data in tests.
+			if (is_array($item)) {
+				$item['id'] = $id++;
+			}
+		}
+		unset($item);
+
+		if ($proxy !== null) {
+			$response = parent::request([
+				'request' => 'proxy data',
+				'session' => $session,
+				'version' => $version,
+				'host' => $proxy,
+				'history data' => $data,
+				'clock' => time(),
+				'ns' => 0
+			]);
+
+			if ($response !== false && $this->error === null) {
+				return true;
+			}
+
+			return false;
+		}
+
+		$response = parent::request([
+			'request' => 'agent data',
+			'data' => $data,
+			'session' => $session,
+			'host' => $host,
+			'version' => $version,
+			'variant' => 2
 		]);
 
 		if ($response !== false && $this->error === null) {
@@ -89,5 +155,46 @@ class CZabbixClient extends CZabbixServer {
 			'request' => 'active checks',
 			'host' => $host
 		]);
+	}
+
+	/**
+	 * Send active check heartbeat for a host.
+	 *
+	 * @param string $host            host name
+	 * @param mixed  $heartbeat_freq  heartbeat frequency value (sent as-is to allow invalid values in tests)
+	 * @param array  $extra           optional extra fields merged into the request (e.g. padding for large-packet tests)
+	 *
+	 * @return array|false    server response or false on connection error
+	 */
+	public function sendHeartbeat($host, $heartbeat_freq, array $extra = []) {
+		return parent::request(array_merge([
+			'request' => 'active check heartbeat',
+			'host' => $host,
+			'heartbeat_freq' => $heartbeat_freq
+		], $extra));
+	}
+
+	/**
+	 * Send a batch of autoregistration entries to server, impersonating a proxy.
+	 *
+	 * @param string $proxy      proxy name to send as
+	 * @param array  $entries    autoregistration entries (each with keys such as: clock, host,
+	 *                           host_metadata, ip)
+	 * @param string $version    proxy version to report to server
+	 *
+	 * @return bool    true on success, false otherwise
+	 */
+	public function sendAutoregistrationData(string $proxy, array $entries, string $version = ZABBIX_VERSION) {
+		$response = parent::request([
+			'request' => 'proxy data',
+			'host' => $proxy,
+			'version' => $version,
+			'session' => md5(uniqid('', true)),
+			'auto registration' => $entries,
+			'clock' => time(),
+			'ns' => 0
+		]);
+
+		return ($response !== false && $this->error === null);
 	}
 }

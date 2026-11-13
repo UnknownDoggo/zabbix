@@ -1,28 +1,51 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CLineGraphDraw extends CGraphDraw {
-	const GRAPH_WIDTH_MIN = 20;
-	const GRAPH_HEIGHT_MIN = 20;
+
 	const LEGEND_OFFSET_Y = 90;
+	const MAX_YAXIS_WIDTH = 213;
+	const MIN_YAXIS_WIDTH = 85;
+	const NO_YAXIS_WIDTH = 30;
+	const YAXIS_LABEL_GAP = 9;
+	const YAXIS_WIDTH_STEP = 16;
+
+	private $cell_height_min;
+	private $cell_width;
+	private $drawExLegend;
+	private $drawItemsLegend;
+	private $intervals;
+	private $itemsHost;
+	private $outer;
+	private $oxy;
+	private $percentile;
+	private $power;
+	private $scale_values;
+	private $show_triggers;
+	private $show_work_period;
+	private $triggers;
+	private $unit2px;
+	private $yaxis;
+	private $yaxismin;
+	private $yaxismax;
+	private $ymin_itemid;
+	private $ymax_itemid;
+	private $ymin_type;
+	private $ymax_type;
+	private $zero;
 
 	public function __construct($type = GRAPH_TYPE_NORMAL) {
 		parent::__construct($type);
@@ -66,7 +89,7 @@ class CLineGraphDraw extends CGraphDraw {
 
 		$this->intervals = [];
 		$this->power = [];
-		$this->is_binary = [];
+		$this->scale_values = [];
 
 		$this->drawItemsLegend = false; // draw items legend
 		$this->drawExLegend = false; // draw percentile and triggers legend
@@ -84,31 +107,36 @@ class CLineGraphDraw extends CGraphDraw {
 	 * Add single item object to graph. If invalid 'delay' interval passed method will interrupt current request with
 	 * error message.
 	 *
-	 * @param array  $graph_item                   Array of graph item properties.
-	 * @param string $graph_item['itemid']         Item id.
-	 * @param string $graph_item['type']           Item type.
-	 * @param string $graph_item['name']           Item host display name.
-	 * @param string $graph_item['hostname']       Item hostname.
-	 * @param string $graph_item['key_']           Item key_ field value.
-	 * @param string $graph_item['value_type']     Item value type.
-	 * @param string $graph_item['history']        Item history field value.
-	 * @param string $graph_item['trends']         Item trends field value.
-	 * @param string $graph_item['delay']          Item delay.
-	 * @param string $graph_item['master_itemid']  Master item id for item of type ITEM_TYPE_DEPENDENT.
-	 * @param string $graph_item['units']          Item units value.
-	 * @param string $graph_item['hostid']         Item host id.
-	 * @param string $graph_item['hostname']       Item host name.
-	 * @param string $graph_item['color']          Item presentation color.
-	 * @param int    $graph_item['drawtype']       Item presentation draw type, could be one of
-	 *                                             GRAPH_ITEM_DRAWTYPE_* constants.
-	 * @param int    $graph_item['yaxisside']      Item axis side, could be one of GRAPH_YAXIS_SIDE_* constants.
-	 * @param int    $graph_item['calc_fnc']       Item calculation function, could be one of CALC_FNC_* constants.
-	 * @param int    $graph_item['calc_type']      Item graph presentation calculation type, GRAPH_ITEM_SIMPLE or
-	 *                                             GRAPH_ITEM_SUM.
+	 * @param array  $graph_item                               Array of graph item properties.
+	 * @param string $graph_item['itemid']                     Item id.
+	 * @param string $graph_item['type']                       Item type.
+	 * @param string $graph_item['name']                       Item host display name.
+	 * @param string $graph_item['hostname']                   Item hostname.
+	 * @param string $graph_item['key_']                       Item key_ field value.
+	 * @param string $graph_item['value_type']                 Item value type.
+	 * @param string $graph_item['history']                    Item history field value.
+	 * @param string $graph_item['trends']                     Item trends field value.
+	 * @param string $graph_item['delay']                      Item delay.
+	 * @param string $graph_item['master_itemid']              Master item id for item of type ITEM_TYPE_DEPENDENT.
+	 * @param string $graph_item['units']                      Item units value.
+	 * @param string $graph_item['hostid']                     Item host id.
+	 * @param string $graph_item['hostname']                   Item host name.
+	 * @param string $graph_item['color']                      Item presentation color.
+	 * @param int    $graph_item['drawtype']                   Item presentation draw type, could be one of
+	 *                                                         GRAPH_ITEM_DRAWTYPE_* constants.
+	 * @param int    $graph_item['yaxisside']                  Item axis side, could be one of GRAPH_YAXIS_SIDE_*
+	 *                                                         constants.
+	 * @param int    $graph_item['calc_fnc']                   Item calculation function, could be one of CALC_FNC_*
+	 *                                                         constants.
+	 * @param int    $graph_item['calc_type']                  Item graph presentation calculation type,
+	 *                                                         GRAPH_ITEM_SIMPLE or GRAPH_ITEM_SUM.
+	 * @param array  $graph_item['preprocessing']              Item preprocessing steps.
+	 * @param string $graph_item['preprocessing'][]['type']    Item preprocessing step type.
+	 * @param string $graph_item['preprocessing'][]['params']  Item preprocessing step parameters.
 	 */
 	public function addItem(array $graph_item) {
 		if ($this->type == GRAPH_TYPE_STACKED) {
-			$graph_item['drawtype'] = GRAPH_ITEM_DRAWTYPE_FILLED_REGION;
+			$graph_item['drawtype'] = DRAWTYPE_FILLED_REGION;
 		}
 		$update_interval_parser = new CUpdateIntervalParser(['usermacros' => true]);
 
@@ -120,7 +148,7 @@ class CLineGraphDraw extends CGraphDraw {
 		// Set graph item safe default values.
 		$graph_item += [
 			'color' => 'Dark Green',
-			'drawtype' => GRAPH_ITEM_DRAWTYPE_LINE,
+			'drawtype' => DRAWTYPE_LINE,
 			'yaxisside' => GRAPH_YAXIS_SIDE_DEFAULT,
 			'calc_fnc' => CALC_FNC_AVG,
 			'calc_type' => GRAPH_ITEM_SIMPLE
@@ -198,6 +226,7 @@ class CLineGraphDraw extends CGraphDraw {
 		$this->itemsHost = null;
 
 		$items = [];
+		$this->items = CMacrosResolverHelper::resolveTimeUnitMacros($this->items, ['history', 'trends']);
 
 		for ($i = 0; $i < $this->num; $i++) {
 			$item = $this->items[$i];
@@ -211,52 +240,37 @@ class CLineGraphDraw extends CGraphDraw {
 				$this->itemsHost = false;
 			}
 
-			$to_resolve = [];
+			[
+				'keep_history' => $item['history'],
+				'history_has_errors' => $history_has_errors,
+				'keep_trends' => $item['trends'],
+				'trends_has_errors' => $trends_has_errors
+			] = CItemHelper::getStoragePeriods((int) $item['value_type'], $item['history'], $item['trends']);
 
-			// Override item history setting with housekeeping settings, if they are enabled in config.
-			if (CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY_GLOBAL)) {
-				$item['history'] = timeUnitToSeconds(CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY));
-			}
-			else {
-				$to_resolve[] = 'history';
-			}
-
-			if (CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS_GLOBAL)) {
-				$item['trends'] = timeUnitToSeconds(CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS));
-			}
-			else {
-				$to_resolve[] = 'trends';
+			if ($history_has_errors) {
+				show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'history',
+					_('invalid history storage period')
+				));
+				exit;
 			}
 
-			// Otherwise, resolve user macro and parse the string. If successful, convert to seconds.
-			if ($to_resolve) {
-				$item = CMacrosResolverHelper::resolveTimeUnitMacros([$item], $to_resolve)[0];
-
-				$simple_interval_parser = new CSimpleIntervalParser();
-
-				if (!CHousekeepingHelper::get(CHousekeepingHelper::HK_HISTORY_GLOBAL)) {
-					if ($simple_interval_parser->parse($item['history']) != CParser::PARSE_SUCCESS) {
-						show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'history',
-							_('invalid history storage period')
-						));
-						exit;
-					}
-					$item['history'] = timeUnitToSeconds($item['history']);
-				}
-
-				if (!CHousekeepingHelper::get(CHousekeepingHelper::HK_TRENDS_GLOBAL)) {
-					if ($simple_interval_parser->parse($item['trends']) != CParser::PARSE_SUCCESS) {
-						show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'trends',
-							_('invalid trend storage period')
-						));
-						exit;
-					}
-					$item['trends'] = timeUnitToSeconds($item['trends']);
-				}
+			if ($trends_has_errors) {
+				show_error_message(_s('Incorrect value for field "%1$s": %2$s.', 'trends',
+					_('invalid trend storage period')
+				));
+				exit;
 			}
 
-			$item['source'] = ($item['trends'] == 0 || (($time_now - $item['history']) < $this->from_time
-					&& ($this->period / $this->sizeX) <= (ZBX_MAX_TREND_DIFF / ZBX_GRAPH_MAX_SKIP_CELL)))
+			if ($item['history'] === null) {
+				$item['history'] = 25 * SEC_PER_YEAR;
+			}
+
+			if ($item['trends'] === null) {
+				$item['trends'] = 25 * SEC_PER_YEAR;
+			}
+
+			$item['source'] = $item['trends'] == 0 || ($time_now - $item['history'] < $this->from_time
+					&& $this->period / $this->sizeX <= ZBX_MAX_TREND_DIFF / ZBX_GRAPH_MAX_SKIP_CELL)
 				? 'history'
 				: 'trends';
 
@@ -267,6 +281,10 @@ class CLineGraphDraw extends CGraphDraw {
 
 		$results = Manager::History()->getGraphAggregationByWidth($items, $this->from_time, $this->to_time,
 			$this->sizeX
+		);
+
+		$results = self::populateValuesBetweenHeartbeats($items, $this->from_time, $this->to_time, $this->sizeX,
+			$results
 		);
 
 		foreach ($items as $item) {
@@ -282,18 +300,8 @@ class CLineGraphDraw extends CGraphDraw {
 				$result = $results[$item['itemid']];
 
 				foreach ($result['data'] as $data_row) {
-					$idx = $data_row['i'] - 1;
-					if ($idx < 0) {
-						continue;
-					}
+					$idx = $data_row['i'];
 
-					/* --------------------------------------------------
-						We are taking graph on 1px more than we need,
-						and here we are skipping first px, because of MOD (in SELECT),
-						it combines prelast point (it would be last point if not that 1px in beginning)
-						and first point, but we still losing prelast point :(
-						but now we've got the first point.
-					--------------------------------------------------*/
 					$data['count'][$idx] = $data_row['count'];
 					$data['min'][$idx] = (float) $data_row['min'];
 					$data['max'][$idx] = (float) $data_row['max'];
@@ -313,7 +321,7 @@ class CLineGraphDraw extends CGraphDraw {
 				cj - count of missed in one go
 				dx - offset to first value (count to last existing point)
 			*/
-			for ($ci = 0, $cj = 0; $ci < $this->sizeX; $ci++) {
+			for ($ci = 0, $cj = 0; $ci <= $this->sizeX; $ci++) {
 				if (!array_key_exists($ci, $data['count']) || ($data['count'][$ci] == 0)) {
 					$data['count'][$ci] = 0;
 					$data['shift_min'][$ci] = 0;
@@ -396,7 +404,7 @@ class CLineGraphDraw extends CGraphDraw {
 
 					$prev_data = &$this->data[$item2['itemid']];
 
-					for ($ci = 0; $ci < $this->sizeX; $ci++) {
+					for ($ci = 0; $ci <= $this->sizeX; $ci++) {
 						foreach (['min', 'max', 'avg'] as $var_name) {
 							$shift_var_name = 'shift_'.$var_name;
 							$curr_shift = &$curr_data[$shift_var_name];
@@ -415,6 +423,81 @@ class CLineGraphDraw extends CGraphDraw {
 		}
 	}
 
+	private static function populateValuesBetweenHeartbeats(array $items, int $time_from, int $time_to, int $width,
+			array $results) {
+		foreach ($items as $item) {
+			if ($item['throttling_type'] != ZBX_PREPROC_THROTTLE_VALUE
+					&& $item['throttling_type'] != ZBX_PREPROC_THROTTLE_TIMED_VALUE) {
+				continue;
+			}
+
+			if ($item['delay'] === null || $item['delay'] == 0) {
+				continue;
+			}
+
+			$throttling_delay = null;
+
+			if ($item['throttling_type'] == ZBX_PREPROC_THROTTLE_TIMED_VALUE
+					&& ($throttling_delay = timeUnitToSeconds($item['throttling_delay'])) === null) {
+				continue;
+			}
+
+			if (!array_key_exists($item['itemid'], $results)) {
+				continue;
+			}
+
+			$delay = $item['source'] === 'trends' ? max($item['delay'], ZBX_MAX_TREND_DIFF) : $item['delay'];
+			$period = $time_to - $time_from;
+
+			if (($delay_width = $delay * $width / $period) < 1) {
+				$delay = (int) ceil($delay / $delay_width);
+				$delay_width = $delay * $width / $period;
+			}
+
+			$prev_data = null;
+			$new_data = [];
+
+			foreach ($results[$item['itemid']]['data'] as $data) {
+				if ($prev_data != null && $data['clock'] - $prev_data['clock'] > $delay && ($throttling_delay === null
+						|| $data['clock'] - $prev_data['clock'] <= 2 * $throttling_delay)) {
+					$n = round(($data['clock'] - $prev_data['clock']) / $delay) - 1;
+					for ($i = 1; $i < $n; $i += 3) {
+						$new_data[] = [
+							'i' => round($prev_data['i'] + $i * $delay_width),
+							'clock' => $prev_data['clock'] + $i * $delay
+						] + $prev_data;
+					}
+					$new_data[] = [
+						'i' => round($prev_data['i'] + $n * $delay_width),
+						'clock' => $prev_data['clock'] + $n * $delay
+					] + $prev_data;
+				}
+
+				$new_data[] = $data;
+				$prev_data = $data;
+			}
+
+			if ($prev_data != null && $time_to - $prev_data['clock'] > $delay && ($throttling_delay === null
+					|| $time_to - $prev_data['clock'] <= 2 * $throttling_delay)) {
+				$n = round(($time_to - $prev_data['clock']) / $delay);
+				for ($i = 1; $i < $n; $i += 3) {
+					$new_data[] = [
+						'i' => round($prev_data['i'] + $i * $delay_width),
+						'clock' => $prev_data['clock'] + $i * $delay
+					] + $prev_data;
+				}
+				$new_data[] = [
+					'i' => round($prev_data['i'] + $n * $delay_width),
+					'clock' => $prev_data['clock'] + $n * $delay
+				] + $prev_data;
+			}
+
+			$results[$item['itemid']]['data'] = $new_data;
+		}
+
+		return $results;
+	}
+
 	protected function selectTriggers() {
 		$this->triggers = [];
 
@@ -429,9 +512,10 @@ class CLineGraphDraw extends CGraphDraw {
 
 		foreach ($this->items as $item) {
 			$db_triggers = DBselect(
-				'SELECT DISTINCT h.host,tr.description,tr.triggerid,tr.expression,tr.priority,tr.value'.
-				' FROM triggers tr,functions f,items i,hosts h'.
+				'SELECT DISTINCT h.host,tr.description,tr.triggerid,tr.expression,tr.priority,trd.value'.
+				' FROM triggers tr, trigger_rtdata trd,functions f,items i,hosts h'.
 				' WHERE tr.triggerid=f.triggerid'.
+					' AND trd.triggerid=f.triggerid'.
 					" AND f.name IN ('last','min','avg','max')".
 					' AND tr.status='.TRIGGER_STATUS_ENABLED.
 					' AND i.itemid=f.itemid'.
@@ -539,12 +623,21 @@ class CLineGraphDraw extends CGraphDraw {
 		}
 
 		if ($this->ymin_type == GRAPH_YAXIS_TYPE_ITEM_VALUE && $this->ymin_itemid != 0) {
-			$item = get_item_by_itemid($this->ymin_itemid);
-			if ($item) {
-				$history = Manager::History()->getLastValues([$item]);
-				if (isset($history[$item['itemid']])) {
-					return $history[$item['itemid']][0]['value'];
+			$items = API::Item()->get([
+				'output' => ['itemid', 'value_type'],
+				'itemids' => [$this->ymin_itemid],
+				'webitems' => true
+			]);
+
+			if ($items) {
+				$history = Manager::History()->getLastValues($items);
+
+				if ($history) {
+					return $history[$items[0]['itemid']][0]['value'];
 				}
+			}
+			else {
+				$this->ymin_type = GRAPH_YAXIS_TYPE_CALCULATED;
 			}
 		}
 
@@ -609,12 +702,21 @@ class CLineGraphDraw extends CGraphDraw {
 		}
 
 		if ($this->ymax_type == GRAPH_YAXIS_TYPE_ITEM_VALUE && $this->ymax_itemid != 0) {
-			$item = get_item_by_itemid($this->ymax_itemid);
-			if ($item) {
-				$history = Manager::History()->getLastValues([$item]);
-				if (isset($history[$item['itemid']])) {
-					return $history[$item['itemid']][0]['value'];
+			$items = API::Item()->get([
+				'output' => ['itemid', 'value_type'],
+				'itemids' => [$this->ymax_itemid],
+				'webitems' => true
+			]);
+
+			if ($items) {
+				$history = Manager::History()->getLastValues($items);
+
+				if ($history) {
+					return $history[$items[0]['itemid']][0]['value'];
 				}
+			}
+			else {
+				$this->ymax_type = GRAPH_YAXIS_TYPE_CALCULATED;
 			}
 		}
 
@@ -715,41 +817,35 @@ class CLineGraphDraw extends CGraphDraw {
 		if ($this->yaxis[GRAPH_YAXIS_SIDE_LEFT]) {
 			zbx_imageline(
 				$this->im,
-				$this->shiftXleft + $this->shiftXCaption,
+				$this->shiftXleft,
 				$this->shiftY - 5,
-				$this->shiftXleft + $this->shiftXCaption,
+				$this->shiftXleft,
 				$this->sizeY + $this->shiftY + 4,
 				$gbColor
 			);
 
-			imagefilledpolygon(
-				$this->im,
-				[
-					$this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-					$this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
-					$this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10
-				],
-				3,
-				$this->getColor('White')
-			);
+			$points = [
+				$this->shiftXleft - 3, $this->shiftY - 5,
+				$this->shiftXleft + 3, $this->shiftY - 5,
+				$this->shiftXleft, $this->shiftY - 10
+			];
+
+			imagefilledpolygon($this->im, $points, $this->getColor('White'));
 
 			/* draw left axis triangle */
-			zbx_imageline($this->im, $this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-					$this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
+			zbx_imageline($this->im, $this->shiftXleft - 3, $this->shiftY - 5, $this->shiftXleft + 3, $this->shiftY - 5,
 					$gbColor);
-			zbx_imagealine($this->im, $this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-					$this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10,
+			zbx_imagealine($this->im, $this->shiftXleft - 3, $this->shiftY - 5, $this->shiftXleft, $this->shiftY - 10,
 					$gbColor);
-			zbx_imagealine($this->im, $this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
-					$this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10,
+			zbx_imagealine($this->im, $this->shiftXleft + 3, $this->shiftY - 5, $this->shiftXleft, $this->shiftY - 10,
 					$gbColor);
 		}
 		else {
 			dashedLine(
 				$this->im,
-				$this->shiftXleft + $this->shiftXCaption,
+				$this->shiftXleft,
 				$this->shiftY,
-				$this->shiftXleft + $this->shiftXCaption,
+				$this->shiftXleft,
 				$this->sizeY + $this->shiftY,
 				$this->getColor($this->graphtheme['gridcolor'], 0)
 			);
@@ -758,41 +854,35 @@ class CLineGraphDraw extends CGraphDraw {
 		if ($this->yaxis[GRAPH_YAXIS_SIDE_RIGHT]) {
 			zbx_imageline(
 				$this->im,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption,
+				$this->sizeX + $this->shiftXleft,
 				$this->shiftY - 5,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption,
+				$this->sizeX + $this->shiftXleft,
 				$this->sizeY + $this->shiftY + 4,
 				$gbColor
 			);
 
-			imagefilledpolygon(
-				$this->im,
-				[
-					$this->sizeX + $this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-					$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
-					$this->sizeX + $this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10
-				],
-				3,
-				$this->getColor('White')
-			);
+			$points = [
+				$this->sizeX + $this->shiftXleft - 3, $this->shiftY - 5,
+				$this->sizeX + $this->shiftXleft + 3, $this->shiftY - 5,
+				$this->sizeX + $this->shiftXleft, $this->shiftY - 10
+			];
+
+			imagefilledpolygon($this->im, $points, $this->getColor('White'));
 
 			/* draw right axis triangle */
-			zbx_imageline($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
-				$gbColor);
-			zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption + 3, $this->shiftY - 5,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10,
-				$gbColor);
-			zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption - 3, $this->shiftY - 5,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption, $this->shiftY - 10,
-				$gbColor);
+			zbx_imageline($this->im, $this->sizeX + $this->shiftXleft - 3, $this->shiftY - 5,
+				$this->sizeX + $this->shiftXleft + 3, $this->shiftY - 5, $gbColor);
+			zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + 3, $this->shiftY - 5,
+				$this->sizeX + $this->shiftXleft, $this->shiftY - 10, $gbColor);
+			zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft - 3, $this->shiftY - 5,
+				$this->sizeX + $this->shiftXleft, $this->shiftY - 10, $gbColor);
 		}
 		else {
 			dashedLine(
 				$this->im,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption,
+				$this->sizeX + $this->shiftXleft,
 				$this->shiftY,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption,
+				$this->sizeX + $this->shiftXleft,
 				$this->sizeY + $this->shiftY,
 				$this->getColor($this->graphtheme['gridcolor'], 0)
 			);
@@ -800,34 +890,28 @@ class CLineGraphDraw extends CGraphDraw {
 
 		zbx_imageline(
 			$this->im,
-			$this->shiftXleft + $this->shiftXCaption - 3,
+			$this->shiftXleft - 3,
 			$this->sizeY + $this->shiftY + 1,
-			$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5,
+			$this->sizeX + $this->shiftXleft + 5,
 			$this->sizeY + $this->shiftY + 1,
 			$gbColor
 		);
 
-		imagefilledpolygon(
-			$this->im,
-			[
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY - 2,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY + 4,
-				$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 10, $this->sizeY + $this->shiftY + 1
-			],
-			3,
-			$this->getColor('White')
-		);
+		$points = [
+			$this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY - 2,
+			$this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY + 4,
+			$this->sizeX + $this->shiftXleft + 10, $this->sizeY + $this->shiftY + 1
+		];
+
+		imagefilledpolygon($this->im, $points, $this->getColor('White'));
 
 		/* draw X axis triangle */
-		zbx_imageline($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY - 2,
-			$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY + 4,
-			$gbColor);
-		zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY + 4,
-			$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 10, $this->sizeY + $this->shiftY + 1,
-			$gbColor);
-		zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + $this->shiftXCaption + 10, $this->sizeY + $this->shiftY + 1,
-			$this->sizeX + $this->shiftXleft + $this->shiftXCaption + 5, $this->sizeY + $this->shiftY - 2,
-			$gbColor);
+		zbx_imageline($this->im, $this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY - 2,
+			$this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY + 4, $gbColor);
+		zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY + 4,
+			$this->sizeX + $this->shiftXleft + 10, $this->sizeY + $this->shiftY + 1, $gbColor);
+		zbx_imagealine($this->im, $this->sizeX + $this->shiftXleft + 10, $this->sizeY + $this->shiftY + 1,
+			$this->sizeX + $this->shiftXleft + 5, $this->sizeY + $this->shiftY - 2, $gbColor);
 	}
 
 	private function drawTimeGrid() {
@@ -927,12 +1011,14 @@ class CLineGraphDraw extends CGraphDraw {
 	/**
 	 * Get best matching X-axis interval specification for the preferred sub-interval.
 	 *
-	 * @param int   $pref_sub_interval  Preferred sub-interval in seconds.
-	 * @param float $min_sub_interval   Preferred minimal sub-interval in seconds (float). Discarded if no matches.
+	 * @param int    $pref_sub_interval  Preferred sub-interval in seconds.
+	 * @param float  $min_sub_interval   Preferred minimal sub-interval in seconds (float). Discarded if no matches.
+	 * @param string $magnitude          The highest non-permanent date component (Y, m, d, H, i, s).
 	 *
 	 * @return array
 	 */
-	private function getOptimalDateTimeIntervalSpec(int $pref_sub_interval, float $min_sub_interval): array {
+	private function getOptimalDateTimeIntervalSpec(int $pref_sub_interval, float $min_sub_interval,
+			string $magnitude): array {
 		// Possible X-axis main and sub-intervals.
 		$intervals = [
 			'PT1M' => ['PT1S', 'PT5S', 'PT10S', 'PT30S'],
@@ -957,11 +1043,11 @@ class CLineGraphDraw extends CGraphDraw {
 
 		// Date and time label formats.
 		$formats = [
-			'PT1M' => ['main' => TIME_FORMAT, 'sub' => _('H:i:s')],
+			'PT1M' => ['main' => TIME_FORMAT, 'sub' => TIME_FORMAT_SECONDS],
 			'PT1H' => ['main' => TIME_FORMAT, 'sub' => TIME_FORMAT],
-			'P1D' => ['main' => _('m-d'), 'sub' => TIME_FORMAT],
-			'P1W' => ['main' => _('m-d'), 'sub' => _('m-d')],
-			'P1M' => ['main' => _('m-d'), 'sub' => _('m-d')],
+			'P1D' => ['main' => $magnitude === 'Y' ? DATE_FORMAT : _('m-d'), 'sub' => TIME_FORMAT],
+			'P1W' => ['main' => $magnitude === 'Y' ? DATE_FORMAT : _('m-d'), 'sub' => _('m-d')],
+			'P1M' => ['main' => $magnitude === 'Y' ? DATE_FORMAT : _('m-d'), 'sub' => _('m-d')],
 			'P1Y' => ['main' => _x('Y', DATE_FORMAT_CONTEXT), 'sub' => _('M')],
 			'P10Y' => ['main' => _x('Y', DATE_FORMAT_CONTEXT), 'sub' => _x('Y', DATE_FORMAT_CONTEXT)]
 		];
@@ -1077,9 +1163,15 @@ class CLineGraphDraw extends CGraphDraw {
 		// Calculate standard label width in time units.
 		$label_size = imageTextSize(7, 90, 'WWW')['width'] * $this->period / $this->sizeX * 2;
 
-		$preferred_sub_interval = (int) ($this->period * $this->cell_width / $this->sizeX);
+		$preferred_sub_interval = (int) ($this->period * $this->cell_width / $this->sizeX) ?: 1;
 
-		$optimal = $this->getOptimalDateTimeIntervalSpec($preferred_sub_interval, $label_size);
+		foreach (['Y', 'm', 'd', 'H', 'i', 's'] as $magnitude) {
+			if (date($magnitude, $this->stime) !== date($magnitude, $this->stime + $this->period)) {
+				break;
+			}
+		}
+
+		$optimal = $this->getOptimalDateTimeIntervalSpec($preferred_sub_interval, $label_size, $magnitude);
 
 		// Align starting date and time with the interval.
 		$start = strtotime(date($optimal['aligner']['trim'], $this->stime));
@@ -1128,21 +1220,11 @@ class CLineGraphDraw extends CGraphDraw {
 
 	private function drawVerticalScale() {
 		foreach ($this->getVerticalScalesInUse() as $side_index => $side) {
-			$units = null;
 			$units_long = '';
 
 			foreach ($this->items as $item) {
-				if ($item['yaxisside'] == $side) {
-					if ($units === null) {
-						$units = $item['units'];
-					}
-					elseif ($item['units'] !== $units) {
-						$units = '';
-					}
-
-					if ($item['units_long'] !== '') {
-						$units_long = $item['units_long'];
-					}
+				if ($item['yaxisside'] == $side && $item['units_long'] !== '') {
+					$units_long = $item['units_long'];
 				}
 			}
 
@@ -1167,16 +1249,13 @@ class CLineGraphDraw extends CGraphDraw {
 				);
 			}
 
-			$scale_values = calculateGraphScaleValues($this->m_minY[$side], $this->m_maxY[$side],
-				$this->ymin_type == GRAPH_YAXIS_TYPE_CALCULATED, $this->ymax_type == GRAPH_YAXIS_TYPE_CALCULATED,
-				$this->intervals[$side], $units, $this->is_binary[$side], $this->power[$side], 10
-			);
+			$scale_values = $this->scale_values[$side];
 
 			$line_color = $this->getColor($this->graphtheme['gridcolor'], 0);
 
 			foreach ($scale_values as ['relative_pos' => $relative_pos, 'value' => $value]) {
 				$pos_X = ($side == GRAPH_YAXIS_SIDE_LEFT)
-					? $this->shiftXleft - imageTextSize(8, 0, $value)['width'] - 9
+					? $this->shiftXleft - imageTextSize(8, 0, $value)['width'] - self::YAXIS_LABEL_GAP
 					: $this->sizeX + $this->shiftXleft + 12;
 
 				$pos_Y = $this->shiftY + $this->sizeY * (1 - $relative_pos);
@@ -1279,33 +1358,30 @@ class CLineGraphDraw extends CGraphDraw {
 		}
 
 		foreach ($this->percentile as $side => $percentile) {
-			if ($percentile['percent'] > 0 && $percentile['value']) {
-				$minY = $this->m_minY[$side];
-				$maxY = $this->m_maxY[$side];
+			if ($percentile['percent'] > 0 && $percentile['value'] != 0) {
+				$min_y = $this->m_minY[$side];
+				$max_y = $this->m_maxY[$side];
 
-				$color = ($side == GRAPH_YAXIS_SIDE_LEFT)
-					? $this->graphtheme['leftpercentilecolor']
-					: $this->graphtheme['rightpercentilecolor'];
+				if ($percentile['value'] >= $min_y && $percentile['value'] <= $max_y) {
+					$color = ($side == GRAPH_YAXIS_SIDE_LEFT)
+						? $this->graphtheme['leftpercentilecolor']
+						: $this->graphtheme['rightpercentilecolor'];
 
-				if ($maxY - $minY == INF) {
-					$y = $this->sizeY + $this->shiftY - CMathHelper::safeMul([$this->sizeY,
-						$percentile['value'] / 10 - $minY / 10, 1 / ($maxY / 10 - $minY / 10)]
+					if ($max_y - $min_y == INF) {
+						$y = $this->sizeY + $this->shiftY - CMathHelper::safeMul([$this->sizeY,
+							$percentile['value'] / 10 - $min_y / 10, 1 / ($max_y / 10 - $min_y / 10)]
+						);
+					}
+					else {
+						$y = $this->sizeY + $this->shiftY - CMathHelper::safeMul([$this->sizeY,
+							$percentile['value'] - $min_y, 1 / ($max_y - $min_y)]
+						);
+					}
+
+					zbx_imageline($this->im, $this->shiftXleft, $y, $this->sizeX + $this->shiftXleft, $y,
+						$this->getColor($color)
 					);
 				}
-				else {
-					$y = $this->sizeY + $this->shiftY - CMathHelper::safeMul([$this->sizeY,
-						$percentile['value'] - $minY, 1 / ($maxY - $minY)]
-					);
-				}
-
-				zbx_imageline(
-					$this->im,
-					$this->shiftXleft,
-					$y,
-					$this->sizeX + $this->shiftXleft,
-					$y,
-					$this->getColor($color)
-				);
 			}
 		}
 	}
@@ -1342,6 +1418,25 @@ class CLineGraphDraw extends CGraphDraw {
 			dashedLine( $this->im, $this->shiftXleft, $y, $this->sizeX + $this->shiftXleft, $y, $lineStyle);
 			dashedLine( $this->im, $this->shiftXleft, $y + 1, $this->sizeX + $this->shiftXleft, $y + 1, $lineStyle);
 		}
+	}
+
+	private function getLastValue(array $data, int $calc_fnc) {
+		for ($i = $this->sizeX; $i >= 0; $i--) {
+			if ($data['count'][$i] != 0) {
+				switch ($calc_fnc) {
+					case CALC_FNC_MIN:
+						return $data['min'][$i];
+					case CALC_FNC_MAX:
+						return $data['max'][$i];
+					case CALC_FNC_ALL:
+					case CALC_FNC_AVG:
+					default:
+						return $data['avg'][$i];
+				}
+			}
+		}
+
+		return 0;
 	}
 
 	protected function drawLegend() {
@@ -1392,13 +1487,7 @@ class CLineGraphDraw extends CGraphDraw {
 			}
 
 			// draw color square
-			if (function_exists('imagecolorexactalpha') && function_exists('imagecreatetruecolor') && @imagecreatetruecolor(1, 1)) {
-				$colorSquare = imagecreatetruecolor(11, 11);
-			}
-			else {
-				$colorSquare = imagecreate(11, 11);
-			}
-
+			$colorSquare = imagecreatetruecolor(11, 11);
 			imagefill($colorSquare, 0, 0, $this->getColor($this->graphtheme['backgroundcolor'], 0));
 			imagefilledrectangle($colorSquare, 0, 0, 10, 10, $color);
 			imagerectangle($colorSquare, 0, 0, 10, 10, $this->getColor('Black'));
@@ -1426,7 +1515,7 @@ class CLineGraphDraw extends CGraphDraw {
 				$legend->addCell($rowNum, ['text' => '['.$fncRealName.']']);
 				$legend->addCell($rowNum, [
 					'text' => convertUnits([
-						'value' => $this->getLastValue($i),
+						'value' => $this->getLastValue($data, $this->items[$i]['calc_fnc']),
 						'units' => $this->items[$i]['units'],
 						'convert' => ITEM_CONVERT_NO_UNITS
 					]),
@@ -1505,34 +1594,31 @@ class CLineGraphDraw extends CGraphDraw {
 						: '-';
 					$side_str = ($side == GRAPH_YAXIS_SIDE_LEFT) ? _('left') : _('right');
 					$legend->addCell($rowNum, [
-						'text' => $percentile['percent'].'th percentile: '.$convertedUnit.' ('.$side_str.')',
+						'text' => _s('Percentile %1$s: %2$s', $percentile['percent'],
+							$convertedUnit.' ('.$side_str.')'
+						),
 						ITEM_CONVERT_NO_UNITS
 					]);
 					$color = ($side == GRAPH_YAXIS_SIDE_LEFT)
 						? $this->graphtheme['leftpercentilecolor']
 						: $this->graphtheme['rightpercentilecolor'];
 
-					imagefilledpolygon(
-						$this->im,
-						[
-							$leftXShift + 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
-							$leftXShift - 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
-							$leftXShift, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y - 10
-						],
-						3,
-						$this->getColor($color)
-					);
+					$points = [
+						$leftXShift + 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
+						$leftXShift - 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
+						$leftXShift, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y - 10
+					];
 
-					imagepolygon(
-						$this->im,
-						[
-							$leftXShift + 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
-							$leftXShift - 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
-							$leftXShift, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y - 10
-						],
-						3,
-						$this->getColor('Black No Alpha')
-					);
+					imagefilledpolygon($this->im, $points, $this->getColor($color));
+
+					$points = [
+						$leftXShift + 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
+						$leftXShift - 5, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y,
+						$leftXShift, $this->sizeY + $this->shiftY + 14 * $rowNum + self::LEGEND_OFFSET_Y - 10
+					];
+
+					imagepolygon($this->im, $points, $this->getColor('Black No Alpha'));
+
 					$rowNum++;
 				}
 			}
@@ -1582,7 +1668,7 @@ class CLineGraphDraw extends CGraphDraw {
 	protected function limitToBounds(&$value1, &$value2, $min, $max, $drawtype) {
 		// fixes graph out of bounds problem
 		if ((($value1 > ($max + $min)) && ($value2 > ($max + $min))) || ($value1 < $min && $value2 < $min)) {
-			if (!in_array($drawtype, [GRAPH_ITEM_DRAWTYPE_FILLED_REGION, GRAPH_ITEM_DRAWTYPE_GRADIENT_LINE])) {
+			if (!in_array($drawtype, [DRAWTYPE_FILLED_REGION, DRAWTYPE_GRADIENT_LINE])) {
 				return false;
 			}
 		}
@@ -1601,7 +1687,7 @@ class CLineGraphDraw extends CGraphDraw {
 		return true;
 	}
 
-	protected function drawElement(&$data, $from, $to, $minX, $maxX, $minY, $maxY, $drawtype, $max_color, $avg_color, $min_color, $minmax_color, $calc_fnc, $yaxisside) {
+	protected function drawElement(&$data, $from, $to, $drawtype, $max_color, $avg_color, $min_color, $minmax_color, $calc_fnc, $yaxisside) {
 		if (!isset($data['max'][$from]) || !isset($data['max'][$to])) {
 			return;
 		}
@@ -1647,14 +1733,14 @@ class CLineGraphDraw extends CGraphDraw {
 		$x1 = $from + $this->shiftXleft - 1;
 		$x2 = $to + $this->shiftXleft;
 
-		$y1min = $zero - ($min_from - $oxy) / $unit2px;
-		$y2min = $zero - ($min_to - $oxy) / $unit2px;
+		$y1min = (int) round($zero - ($min_from - $oxy) / $unit2px);
+		$y2min = (int) round($zero - ($min_to - $oxy) / $unit2px);
 
-		$y1max = $zero - ($max_from - $oxy) / $unit2px;
-		$y2max = $zero - ($max_to - $oxy) / $unit2px;
+		$y1max = (int) round($zero - ($max_from - $oxy) / $unit2px);
+		$y2max = (int) round($zero - ($max_to - $oxy) / $unit2px);
 
-		$y1avg = $zero - ($avg_from - $oxy) / $unit2px;
-		$y2avg = $zero - ($avg_to - $oxy) / $unit2px;
+		$y1avg = (int) round($zero - ($avg_from - $oxy) / $unit2px);
+		$y2avg = (int) round($zero - ($avg_to - $oxy) / $unit2px);
 
 		switch ($calc_fnc) {
 			case CALC_FNC_MAX:
@@ -1729,12 +1815,13 @@ class CLineGraphDraw extends CGraphDraw {
 
 		// draw main line
 		switch ($drawtype) {
-			case GRAPH_ITEM_DRAWTYPE_LINE:
-			case GRAPH_ITEM_DRAWTYPE_BOLD_LINE:
-				$style = $drawtype == GRAPH_ITEM_DRAWTYPE_BOLD_LINE ? LINE_TYPE_BOLD : LINE_TYPE_NORMAL;
+			case DRAWTYPE_LINE:
+			case DRAWTYPE_BOLD_LINE:
+				$style = $drawtype == DRAWTYPE_BOLD_LINE ? LINE_TYPE_BOLD : LINE_TYPE_NORMAL;
 
 				if ($calc_fnc == CALC_FNC_ALL) {
-					imagefilledpolygon($this->im, $a, 4, $minmax_color);
+					imagefilledpolygon($this->im, $a, $minmax_color);
+
 					if (!$y1x || !$y2x) {
 						zbx_imagealine($this->im, $x1, $y1max, $x2, $y2max, $max_color, $style);
 					}
@@ -1746,35 +1833,28 @@ class CLineGraphDraw extends CGraphDraw {
 				zbx_imagealine($this->im, $x1, $y1, $x2, $y2, $avg_color, $style);
 				break;
 
-			case GRAPH_ITEM_DRAWTYPE_DOT:
+			case DRAWTYPE_DOT:
 				imagefilledrectangle($this->im, $x1 - 1, $y1 - 1, $x1, $y1, $avg_color);
 				break;
 
-			case GRAPH_ITEM_DRAWTYPE_BOLD_DOT:
+			case DRAWTYPE_BOLD_DOT:
 				imagefilledrectangle($this->im, $x2 - 1, $y2 - 1, $x2 + 1, $y2 + 1, $avg_color);
 				break;
 
-			case GRAPH_ITEM_DRAWTYPE_DASHED_LINE:
-				if (function_exists('imagesetstyle')) {
-					// use imagesetstyle+imageline instead of bugged imagedashedline
-					$style = [$avg_color, $avg_color, IMG_COLOR_TRANSPARENT, IMG_COLOR_TRANSPARENT];
-					imagesetstyle($this->im, $style);
-					zbx_imageline($this->im, $x1, $y1, $x2, $y2, IMG_COLOR_STYLED);
-				}
-				else {
-					imagedashedline($this->im, $x1, $y1, $x2, $y2, $avg_color);
-				}
+			case DRAWTYPE_DASHED_LINE:
+				imagesetstyle($this->im, [$avg_color, $avg_color, IMG_COLOR_TRANSPARENT, IMG_COLOR_TRANSPARENT]);
+				zbx_imageline($this->im, $x1, $y1, $x2, $y2, IMG_COLOR_STYLED);
 				break;
 
-			case GRAPH_ITEM_DRAWTYPE_GRADIENT_LINE:
-			case GRAPH_ITEM_DRAWTYPE_FILLED_REGION:
+			case DRAWTYPE_GRADIENT_LINE:
+			case DRAWTYPE_FILLED_REGION:
 				/*
 				 * Graphs should be at least 50px in height in order to visually see the gradient. Though 51px would not
 				 * make any difference either. If graph height is too small to see gradient, use standard solid color
 				 * filling function instead.
 				 */
-				if ($drawtype == GRAPH_ITEM_DRAWTYPE_FILLED_REGION
-						|| ($drawtype == GRAPH_ITEM_DRAWTYPE_GRADIENT_LINE && $this->sizeY <= 50)) {
+				if ($drawtype == DRAWTYPE_FILLED_REGION
+						|| ($drawtype == DRAWTYPE_GRADIENT_LINE && $this->sizeY <= 50)) {
 					$a[0] = $x1;
 					$a[1] = $y1;
 					$a[2] = $x1;
@@ -1784,7 +1864,7 @@ class CLineGraphDraw extends CGraphDraw {
 					$a[6] = $x2;
 					$a[7] = $y2;
 
-					imagefilledpolygon($this->im, $a, 4, $avg_color);
+					imagefilledpolygon($this->im, $a, $avg_color);
 				}
 				else {
 					imageLine($this->im, $x1, $y1, $x2, $y2, $avg_color); // draw the initial line
@@ -1817,15 +1897,12 @@ class CLineGraphDraw extends CGraphDraw {
 						$steps = $this->sizeY + $this->shiftY - $gy + 1;
 
 						for ($j = 0; $j < $steps; $j++) {
-							if (($gy + $j) < ($this->shiftY + $startAlpha)) {
-								$alpha = 0;
-							}
-							else {
-								$alpha = 127 - abs(127 - ($alphaRatio * ($gy + $j - $this->shiftY - $startAlpha)));
-							}
+							$alpha = ($gy + $j) < ($this->shiftY + $startAlpha)
+								? 0
+								: 127 - (int) abs(127 - ($alphaRatio * ($gy + $j - $this->shiftY - $startAlpha)));
 
 							$color = imagecolorexactalpha($this->im, $red, $green, $blue, $alpha);
-							imagesetpixel($this->im, $x2 + $i, $gy + $j, $color);
+							imagesetpixel($this->im, $x2 + $i, (int) $gy + $j, $color);
 						}
 					}
 				}
@@ -1856,17 +1933,24 @@ class CLineGraphDraw extends CGraphDraw {
 				$min = min(0, $min);
 			}
 
-			$is_binary = false;
-			$calc_power = false;
+			$units = '';
+			$side_units = [];
 
 			foreach ($this->items as $item) {
 				if ($item['yaxisside'] == $side) {
-					$is_binary = $is_binary || in_array($item['units'], ['B', 'Bps']);
-					$calc_power = $calc_power || $item['units'] === '' || $item['units'][0] !== '!';
+					if (!$side_units) {
+						$units = $item['units'];
+					}
+
+					$side_units[] = $item['units'];
 				}
 			}
 
-			$result = calculateGraphScaleExtremes($min, $max, $is_binary, $calc_power, $calc_min, $calc_max, $rows_min,
+			$display_units = self::getYAxisDisplayUnits($side_units);
+
+			$calc_power = $units === '' || $units[0] !== '!';
+
+			$result = calculateGraphScaleExtremes($min, $max, $units, $calc_power, $calc_min, $calc_max, $rows_min,
 				$rows_max
 			);
 
@@ -1882,7 +1966,15 @@ class CLineGraphDraw extends CGraphDraw {
 				'power' => $this->power[$side]
 			] = $result;
 
-			$this->is_binary[$side] = $is_binary;
+			$scale_values = calculateGraphScaleValues($this->m_minY[$side], $this->m_maxY[$side],
+				$this->intervals[$side], $display_units, $this->power[$side], 10, false
+			);
+
+			$shift = $side == GRAPH_YAXIS_SIDE_LEFT ? $this->shiftXleft : $this->shiftXright;
+
+			$this->scale_values[$side] = $this->truncateYAxisLabels($scale_values, $display_units,
+				$shift - self::YAXIS_LABEL_GAP * 2
+			);
 
 			if ($calc_min && $calc_max) {
 				$rows_min = $rows_max = $result['rows'];
@@ -1890,9 +1982,135 @@ class CLineGraphDraw extends CGraphDraw {
 		}
 	}
 
+	private function truncateToWidth(string $value, int $max_width): string {
+		if (imageTextSize(8, 0, $value)['width'] <= $max_width) {
+			return $value;
+		}
+
+		$ellipsis = '...';
+		$truncated = $value;
+
+		while ($truncated !== '' && imageTextSize(8, 0, $truncated.$ellipsis)['width'] > $max_width) {
+			$truncated = mb_substr($truncated, 0, -1);
+		}
+
+		return $truncated.$ellipsis;
+	}
+
+	private function truncateYAxisLabels(array $rows, string $units, int $max_width): array {
+		if ($units !== '' && $units[0] === '!')
+		{
+			$units = substr($units, 1);
+		}
+
+		$needs_truncation = false;
+		$split_ok = true;
+
+		foreach ($rows as $row) {
+			if (imageTextSize(8, 0, $row['value'])['width'] > $max_width) {
+				$needs_truncation = true;
+			}
+
+			if ($units !== '' && !str_ends_with($row['value'], $units)) {
+				$split_ok = false;
+			}
+		}
+
+		if (!$needs_truncation) {
+			return $rows;
+		}
+
+		if ($units === '' || !$split_ok) {
+			foreach ($rows as &$row) {
+				$row['value'] = $this->truncateToWidth($row['value'], $max_width);
+			}
+			unset($row);
+
+			return $rows;
+		}
+
+		$max_prefix_width = 0;
+
+		foreach ($rows as $row) {
+			$prefix = mb_substr($row['value'], 0, -mb_strlen($units));
+			$max_prefix_width = max($max_prefix_width, imageTextSize(8, 0, $prefix)['width']);
+		}
+
+		$truncated_units = $this->truncateToWidth($units, max(0, $max_width - $max_prefix_width));
+
+		foreach ($rows as &$row) {
+			$prefix = mb_substr($row['value'], 0, -mb_strlen($units));
+			$row['value'] = $prefix.$truncated_units;
+		}
+		unset($row);
+
+		return $rows;
+	}
+
+	public static function getYAxisDisplayUnits(array $units): string {
+		$units = array_unique($units);
+
+		return count($units) == 1 ? (string) reset($units) : '';
+	}
+
+	public static function getYAxisWidth(string $display_units): int {
+		$label = convertUnits([
+			'value' => 99990000,
+			'units' => $display_units,
+			'convert' => ITEM_CONVERT_NO_UNITS
+		]);
+
+		$width = imageTextSize(8, 0, $label)['width'];
+
+		$stepped = (int) (ceil(($width + self::YAXIS_LABEL_GAP * 2) / self::YAXIS_WIDTH_STEP) * self::YAXIS_WIDTH_STEP);
+
+		return min(self::MAX_YAXIS_WIDTH, max(self::MIN_YAXIS_WIDTH, $stepped));
+	}
+
+	public static function fitYAxisWidths(int $left, bool $left_shown, int $right, bool $right_shown,
+			int $full_width): array {
+		$left_floor = $left_shown ? self::MIN_YAXIS_WIDTH : self::NO_YAXIS_WIDTH;
+		$right_floor = $right_shown ? self::MIN_YAXIS_WIDTH : self::NO_YAXIS_WIDTH;
+
+		$excess = $left + $right + 1 - ($full_width - self::GRAPH_WIDTH_MIN);
+
+		while ($excess > 0) {
+			if ($left - $left_floor >= $right - $right_floor) {
+				if ($left <= $left_floor) {
+					break;
+				}
+
+				$left--;
+			}
+			else {
+				$right--;
+			}
+
+			$excess--;
+		}
+
+		return [$left, $right];
+	}
+
+	private function getYAxisWidthOfSide($side) {
+		if (!$this->yaxis[$side]) {
+			return self::NO_YAXIS_WIDTH;
+		}
+
+		$units = [];
+
+		foreach ($this->items as $item) {
+			if ($item['yaxisside'] == $side) {
+				$units[] = $item['units'];
+			}
+		}
+
+		return self::getYAxisWidth(self::getYAxisDisplayUnits($units));
+	}
+
 	private function calcDimensions() {
-		$this->shiftXleft = $this->yaxis[GRAPH_YAXIS_SIDE_LEFT] ? 85 : 30;
-		$this->shiftXright = $this->yaxis[GRAPH_YAXIS_SIDE_RIGHT] ? 85 : 30;
+		$this->shiftXleft = $this->getYAxisWidthOfSide(GRAPH_YAXIS_SIDE_LEFT);
+		$this->shiftXright = $this->getYAxisWidthOfSide(GRAPH_YAXIS_SIDE_RIGHT);
 
 		// Calculate graph summary padding for both axes.
 		$x_offsets = $this->shiftXleft + $this->shiftXright + 1;
@@ -1902,6 +2120,10 @@ class CLineGraphDraw extends CGraphDraw {
 			$y_offsets -= ($this->show_triggers && count($this->triggers) > 0)
 				? static::DEFAULT_TOP_BOTTOM_PADDING / 2
 				: static::DEFAULT_TOP_BOTTOM_PADDING;
+		}
+
+		if ($this->with_bottom_padding) {
+			$y_offsets += static::DEFAULT_TOP_BOTTOM_PADDING / 2;
 		}
 
 		// Actual outer dimensions, regardless $this->outer setting.
@@ -1923,6 +2145,13 @@ class CLineGraphDraw extends CGraphDraw {
 
 		// Normalize dimensions according to which dimensions were initially provided.
 		if ($this->outer) {
+			[$this->shiftXleft, $this->shiftXright] = self::fitYAxisWidths($this->shiftXleft,
+				$this->yaxis[GRAPH_YAXIS_SIDE_LEFT], $this->shiftXright,
+				$this->yaxis[GRAPH_YAXIS_SIDE_RIGHT], $this->fullSizeX
+			);
+
+			$x_offsets = $this->shiftXleft + $this->shiftXright + 1;
+
 			// Adjust inner graph dimensions.
 			$this->sizeX = $this->fullSizeX - $x_offsets;
 			$this->sizeY = $this->fullSizeY - $y_offsets;
@@ -1957,77 +2186,24 @@ class CLineGraphDraw extends CGraphDraw {
 	}
 
 	public function getMinDimensions() {
-		$min_dimentions = [
+		$min_dimensions = [
 			'width' => self::GRAPH_WIDTH_MIN,
 			'height' => self::GRAPH_HEIGHT_MIN
 		];
 
 		if ($this->outer) {
-			$min_dimentions['width'] += $this->yaxis[GRAPH_YAXIS_SIDE_LEFT] ? 85 : 30;
-			$min_dimentions['width'] += $this->yaxis[GRAPH_YAXIS_SIDE_RIGHT] ? 85 : 30;
-			$min_dimentions['width']++;
+			$min_dimensions['width'] += $this->yaxis[GRAPH_YAXIS_SIDE_LEFT]
+				? self::MIN_YAXIS_WIDTH
+				: self::NO_YAXIS_WIDTH;
+			$min_dimensions['width'] += $this->yaxis[GRAPH_YAXIS_SIDE_RIGHT]
+				? self::MIN_YAXIS_WIDTH
+				: self::NO_YAXIS_WIDTH;
+			$min_dimensions['width']++;
 
-			$min_dimentions['height'] += $this->shiftY + self::LEGEND_OFFSET_Y;
+			$min_dimensions['height'] += $this->shiftY + self::LEGEND_OFFSET_Y;
 		}
 
-		return $min_dimentions;
-	}
-
-	/**
-	 * Expands graph item objects data: macros in item name, time units, dependent item
-	 */
-	private function expandItems() {
-		$items_cache = zbx_toHash($this->items, 'itemid');
-		$items = $this->items;
-
-		do {
-			$master_itemids = [];
-
-			foreach ($items as $item) {
-				if ($item['type'] == ITEM_TYPE_DEPENDENT && !array_key_exists($item['master_itemid'], $items_cache)) {
-					$master_itemids[$item['master_itemid']] = true;
-				}
-				$items_cache[$item['itemid']] = $item;
-			}
-			$master_itemids = array_keys($master_itemids);
-
-			$items = API::Item()->get([
-				'output' => ['itemid', 'type', 'master_itemid', 'delay'],
-				'itemids' => $master_itemids
-			]);
-		} while ($items);
-
-		$update_interval_parser = new CUpdateIntervalParser();
-
-		foreach ($this->items as &$graph_item) {
-			if ($graph_item['type'] == ITEM_TYPE_DEPENDENT) {
-				$master_item = $graph_item;
-
-				while ($master_item && $master_item['type'] == ITEM_TYPE_DEPENDENT) {
-					$master_item = $items_cache[$master_item['master_itemid']];
-				}
-				$graph_item['type'] = $master_item['type'];
-				$graph_item['delay'] = $master_item['delay'];
-			}
-
-			$graph_item = CMacrosResolverHelper::resolveTimeUnitMacros([$graph_item], ['delay'])[0];
-
-			$update_interval_parser->parse($graph_item['delay']);
-			$graph_item['delay'] = getItemDelay($update_interval_parser->getDelay(),
-				$update_interval_parser->getIntervals(ITEM_DELAY_FLEXIBLE)
-			);
-
-			$graph_item['has_scheduling_intervals']
-				= (bool) $update_interval_parser->getIntervals(ITEM_DELAY_SCHEDULING);
-
-			if (strpos($graph_item['units'], ',') === false) {
-				$graph_item['units_long'] = '';
-			}
-			else {
-				list($graph_item['units'], $graph_item['units_long']) = explode(',', $graph_item['units'], 2);
-			}
-		}
-		unset($graph_item);
+		return $min_dimensions;
 	}
 
 	/**
@@ -2040,14 +2216,7 @@ class CLineGraphDraw extends CGraphDraw {
 		$this->selectTriggers();
 		$this->calcDimensions();
 
-		if (function_exists('imagecolorexactalpha') && function_exists('imagecreatetruecolor')
-				&& @imagecreatetruecolor(1, 1)
-		) {
-			$this->im = imagecreatetruecolor(1, 1);
-		}
-		else {
-			$this->im = imagecreate(1, 1);
-		}
+		$this->im = imagecreatetruecolor(1, 1);
 
 		$this->initColors();
 
@@ -2064,7 +2233,7 @@ class CLineGraphDraw extends CGraphDraw {
 
 		$this->calculateTopPadding();
 
-		$this->expandItems();
+		CGraphHelper::calculateMetricsDelay($this->items);
 		$this->selectTriggers();
 		$this->calcDimensions();
 
@@ -2077,13 +2246,7 @@ class CLineGraphDraw extends CGraphDraw {
 		$this->calcPercentile();
 		$this->calcZero();
 
-		if (function_exists('imagecolorexactalpha') && function_exists('imagecreatetruecolor')
-				&& @imagecreatetruecolor(1, 1)) {
-			$this->im = imagecreatetruecolor($this->fullSizeX, $this->fullSizeY);
-		}
-		else {
-			$this->im = imagecreate($this->fullSizeX, $this->fullSizeY);
-		}
+		$this->im = imagecreatetruecolor($this->fullSizeX, $this->fullSizeY);
 
 		$this->initColors();
 		$this->drawRectangle();
@@ -2095,7 +2258,7 @@ class CLineGraphDraw extends CGraphDraw {
 
 		// Correct item 'delay' field value when graph data requested for trends.
 		foreach ($this->items as &$item) {
-			if ($item['source'] === 'trends' && (!$item['has_scheduling_intervals'] || $item['delay'] != 0)) {
+			if ($item['source'] === 'trends' && $item['delay'] !== null) {
 				$item['delay'] = max($item['delay'], ZBX_MAX_TREND_DIFF);
 			}
 		}
@@ -2103,9 +2266,6 @@ class CLineGraphDraw extends CGraphDraw {
 
 		// for each metric
 		for ($item = 0; $item < $this->num; $item++) {
-			$minY = $this->m_minY[$this->items[$item]['yaxisside']];
-			$maxY = $this->m_maxY[$this->items[$item]['yaxisside']];
-
 			if (!array_key_exists($this->items[$item]['itemid'], $this->data)) {
 				continue;
 			}
@@ -2122,17 +2282,14 @@ class CLineGraphDraw extends CGraphDraw {
 
 			// for each X
 			$prevDraw = true;
-			for ($i = 1, $j = 0; $i < $this->sizeX; $i++) { // new point
-				if ($data['count'][$i] == 0 && $i != $this->sizeX - 1) {
+			for ($i = 1, $j = 0; $i <= $this->sizeX; $i++) { // new point
+				if ($data['count'][$i] == 0 && $i != $this->sizeX) {
 					continue;
 				}
 
 				$delay = $this->items[$item]['delay'];
 
-				if ($this->items[$item]['type'] == ITEM_TYPE_TRAPPER
-						|| ($this->items[$item]['type'] == ITEM_TYPE_ZABBIX_ACTIVE
-							&& preg_match('/^(event)?log(rt)?\[/', $this->items[$item]['key_']))
-						|| ($this->items[$item]['has_scheduling_intervals'] && $delay == 0)) {
+				if ($delay === null) {
 					$draw = true;
 				}
 				else {
@@ -2155,7 +2312,7 @@ class CLineGraphDraw extends CGraphDraw {
 
 				if (!$draw && !$prevDraw) {
 					$draw = true;
-					$valueDrawType = GRAPH_ITEM_DRAWTYPE_BOLD_DOT;
+					$valueDrawType = DRAWTYPE_BOLD_DOT;
 				}
 				else {
 					$valueDrawType = $drawtype;
@@ -2167,10 +2324,6 @@ class CLineGraphDraw extends CGraphDraw {
 						$data,
 						$i,
 						$j,
-						0,
-						$this->sizeX,
-						$minY,
-						$maxY,
 						$valueDrawType,
 						$max_color,
 						$avg_color,

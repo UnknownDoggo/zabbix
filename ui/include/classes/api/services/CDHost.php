@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -31,6 +26,8 @@ class CDHost extends CApiService {
 	protected $tableName = 'dhosts';
 	protected $tableAlias = 'dh';
 	protected $sortColumns = ['dhostid', 'druleid'];
+
+	public const OUTPUT_FIELDS = ['dhostid', 'druleid', 'status', 'lastup', 'lastdown'];
 
 	/**
 	 * Get host data.
@@ -62,7 +59,7 @@ class CDHost extends CApiService {
 
 		$sqlParts = [
 			'select'	=> ['dhosts' => 'dh.dhostid'],
-			'from'		=> ['dhosts' => 'dhosts dh'],
+			'from'		=> 'dhosts dh',
 			'where'		=> [],
 			'group'		=> [],
 			'order'		=> [],
@@ -121,9 +118,8 @@ class CDHost extends CApiService {
 		if (!is_null($options['dserviceids'])) {
 			zbx_value2array($options['dserviceids']);
 
-			$sqlParts['from']['dservices'] = 'dservices ds';
+			$sqlParts['join']['ds'] = ['table' => 'dservices', 'using' => 'dhostid'];
 			$sqlParts['where'][] = dbConditionInt('ds.dserviceid', $options['dserviceids']);
-			$sqlParts['where']['dhds'] = 'dh.dhostid=ds.dhostid';
 
 			if ($options['groupCount']) {
 				$sqlParts['group']['dserviceids'] = 'ds.dserviceid';
@@ -143,6 +139,15 @@ class CDHost extends CApiService {
 // limit
 		if (zbx_ctype_digit($options['limit']) && $options['limit']) {
 			$sqlParts['limit'] = $options['limit'];
+		}
+
+		if (self::$userData['type'] != USER_TYPE_SUPER_ADMIN && !$options['nopermissions']) {
+			$sqlParts['join']['dr'] = ['table' => 'drules', 'using' => 'druleid'];
+			$sqlParts['join']['p'] = ['type' => 'left', 'left_table' => 'dr', 'table' => 'proxy', 'using' => 'proxyid'];
+			$sqlParts['where'][] = '('.
+				'dr.proxyid IS NULL'.
+				' OR '.CApiUserGroupHelper::getProxyPermissionsCondition('p').
+			')';
 		}
 //-------
 
@@ -170,11 +175,10 @@ class CDHost extends CApiService {
 		if ($result) {
 			$result = $this->addRelatedObjects($options, $result);
 			$result = $this->unsetExtraFields($result, ['druleid'], $options['output']);
-		}
 
-		// removing keys (hash -> array)
-		if (!$options['preservekeys']) {
-			$result = zbx_cleanHashes($result);
+			if (!$options['preservekeys']) {
+				$result = array_values($result);
+			}
 		}
 
 		return $result;

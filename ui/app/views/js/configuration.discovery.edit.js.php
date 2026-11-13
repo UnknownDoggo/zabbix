@@ -1,21 +1,16 @@
-<?php
+<?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -24,432 +19,543 @@
  */
 ?>
 
-<script type="text/x-jquery-tmpl" id="dcheck-row-tmpl">
-	<?= (new CRow([
-			(new CCol(
-				(new CDiv('#{name}'))->addClass(ZBX_STYLE_WORDWRAP)
-			))->setId('dcheckCell_#{dcheckid}'),
-			(new CHorList([
-				(new CButton(null, _('Edit')))
-					->addClass(ZBX_STYLE_BTN_LINK)
-					->setAttribute('data-action', 'edit'),
-				(new CButton(null, _('Remove')))
-					->addClass(ZBX_STYLE_BTN_LINK)
-					->onClick("removeDCheckRow('#{dcheckid}');")
-			]))->addClass(ZBX_STYLE_NOWRAP)
-		]))
-			->setId('dcheckRow_#{dcheckid}')
-			->toString()
-	?>
-</script>
-<script type="text/x-jquery-tmpl" id="unique-row-tmpl">
-	<?= (new CListItem([
-			(new CInput('radio', 'uniqueness_criteria', '#{dcheckid}'))
-				->addClass(ZBX_STYLE_CHECKBOX_RADIO)
-				->setId('uniqueness_criteria_#{dcheckid}'),
-			(new CLabel([new CSpan(), '#{name}'], 'uniqueness_criteria_#{dcheckid}'))->addClass(ZBX_STYLE_WORDWRAP)
-		]))
-			->setId('uniqueness_criteria_row_#{dcheckid}')
-			->toString()
-	?>
-</script>
-<script type="text/x-jquery-tmpl" id="host-source-row-tmpl">
-	<?= (new CListItem([
-			(new CInput('radio', 'host_source', '_#{dcheckid}'))
-				->addClass(ZBX_STYLE_CHECKBOX_RADIO)
-				->setAttribute('data-id', '#{dcheckid}')
-				->setId('host_source_#{dcheckid}'),
-			(new CLabel([new CSpan(), '#{name}'], 'host_source_#{dcheckid}'))->addClass(ZBX_STYLE_WORDWRAP)
-		]))
-			->setId('host_source_row_#{dcheckid}')
-			->toString()
-	?>
-</script>
-<script type="text/x-jquery-tmpl" id="name-source-row-tmpl">
-	<?= (new CListItem([
-			(new CInput('radio', 'name_source', '_#{dcheckid}'))
-				->addClass(ZBX_STYLE_CHECKBOX_RADIO)
-				->setAttribute('data-id', '#{dcheckid}')
-				->setId('name_source_#{dcheckid}'),
-			(new CLabel([new CSpan(), '#{name}'], 'name_source_#{dcheckid}'))->addClass(ZBX_STYLE_WORDWRAP)
-		]))
-			->setId('name_source_row_#{dcheckid}')
-			->toString()
-	?>
-</script>
+window.drule_edit_popup = new class {
 
-<script type="text/javascript">
-	var ZBX_CHECKLIST = {};
+	#overlay;
+	#dialogue;
+	#form_element;
+	#form;
+	#clone_rules;
+	#dchecks;
+	#drule;
+	#can_select_server_for_discovery_by;
+	#dcheckid;
+	#available_device_types;
 
-	function addDCheck(list) {
-		var available_device_types = [<?= SVC_AGENT ?>, <?= SVC_SNMPv1 ?>, <?= SVC_SNMPv2c ?>, <?= SVC_SNMPv3 ?>];
+	init({rules, clone_rules, dchecks, drule, can_select_server_for_discovery_by}) {
+		this.#overlay = overlays_stack.getById('discovery.edit');
+		this.#dialogue = this.#overlay.$dialogue[0];
+		this.#form_element = this.#overlay.$dialogue.$body[0].querySelector('form');
+		this.#form = new CForm(this.#form_element, rules);
+		this.#clone_rules = clone_rules;
 
-		var addNewValue = function(value) {
-			ZBX_CHECKLIST[value.dcheckid] = value;
+		this.#dchecks = dchecks;
+		this.#drule = drule;
+		this.#can_select_server_for_discovery_by = can_select_server_for_discovery_by;
+		this.#dcheckid = getUniqueId();
+		this.#available_device_types = [<?= SVC_AGENT ?>, <?= SVC_SNMPv1 ?>, <?= SVC_SNMPv2c ?>, <?= SVC_SNMPv3 ?>];
 
-			jQuery('#dcheckListFooter').before(new Template(jQuery('#dcheck-row-tmpl').html()).evaluate(value));
+		const return_url = new URL('zabbix.php', location.href);
+		return_url.searchParams.set('action', 'discovery.list');
+		ZABBIX.PopupManager.setReturnUrl(return_url.href);
 
-			for (var field_name in value) {
-				if (value.hasOwnProperty(field_name)) {
-					var $input = jQuery('<input>', {
-						name: 'dchecks[' + value.dcheckid + '][' + field_name + ']',
-						type: 'hidden',
-						value: value[field_name]
-					});
+		document.getElementById('discovery_by').addEventListener('change', () => this.#updateForm());
 
-					jQuery('#dcheckCell_' + value.dcheckid).append($input);
-				}
-			}
+		// Append existing discovery checks to check table.
+		if (typeof dchecks === 'object') {
+			dchecks = Object.values(dchecks);
+		}
+		for (const dcheck of dchecks) {
+			this.#addCheck(dcheck);
 		}
 
-		var updateNewValue = function(value) {
-			ZBX_CHECKLIST[value.dcheckid] = value;
+		this.#addRadioButtonValues(drule);
+		this.#form.discoverAllFields();
+		this.#initEvents();
+		this.#form_element.style.display = '';
+		this.#overlay.recoverFocus();
+	}
 
-			var ignore_names = ['druleid', 'dcheckid', 'name', 'ports', 'type', 'uniq'];
-
-			// Clean values.
-			jQuery('#dcheckCell_' + value.dcheckid + ' input').each(function(i, item) {
-				var $item = jQuery(item);
-
-				var name = $item
-					.attr('name')
-					.replace('dchecks[' + value.dcheckid + '][', '');
-				name = name.substring(0, name.length - 1);
-
-				if (jQuery.inArray(name, ignore_names) == -1) {
-					$item.remove();
-				}
-			});
-
-			// Set values.
-			for (var field_name in value) {
-				if (value.hasOwnProperty(field_name)) {
-					var $obj = jQuery('input[name="dchecks[' + value.dcheckid + '][' + field_name + ']"]');
-
-					// If the input exists, update the value or create it otherwise.
-					if ($obj.length) {
-						$obj.val(value[field_name]);
-					}
-					else {
-						var $input = jQuery('<input>', {
-							name: 'dchecks[' + value.dcheckid + '][' + field_name + ']',
-							type: 'hidden',
-							value: value[field_name]
-						});
-
-						jQuery('#dcheckCell_' + value.dcheckid).append($input);
-					}
-				}
+	#initEvents() {
+		this.#dialogue.addEventListener('click', (e) => {
+			if (e.target.classList.contains('js-check-add')) {
+				this.#editCheck();
 			}
-
-			// Update check name.
-			jQuery('#dcheckCell_' + value.dcheckid + ' .wordwrap').text(value['name']);
-		}
-
-		for (var i = 0; i < list.length; i++) {
-			if (empty(list[i])) {
-				continue;
+			else if (e.target.classList.contains('js-remove')) {
+				this.#removeDCheckRow(e.target.closest('tr').id);
+				e.target.closest('tr').remove();
+				this.#form.discoverAllFields();
 			}
-
-			var value = list[i];
-
-			if (typeof value.dcheckid === 'undefined') {
-				for (;;) {
-					value.dcheckid = getUniqueId();
-
-					if (typeof ZBX_CHECKLIST[value.dcheckid] === 'undefined') {
-						break;
-					}
-				}
+			else if (e.target.classList.contains('js-edit')) {
+				this.#editCheck(e.target.closest('tr'));
 			}
+		});
 
-			if (typeof ZBX_CHECKLIST[value.dcheckid] === 'undefined') {
-				addNewValue(value);
-			}
-			else {
-				updateNewValue(value);
-			}
+		this.#overlay.$dialogue.$footer[0].querySelector('.js-submit')
+			.addEventListener('click', () => this.#submit());
 
-			var elements = {
-				uniqueness_criteria: ['ip',  new Template(jQuery('#unique-row-tmpl').html()).evaluate(value)],
-				host_source: ['chk_dns', new Template(jQuery('#host-source-row-tmpl').html()).evaluate(value)],
-				name_source: ['chk_host', new Template(jQuery('#name-source-row-tmpl').html()).evaluate(value)]
-			};
+		this.#overlay.$dialogue.$footer[0].querySelector('.js-clone')
+			?.addEventListener('click', () => this.#clone());
 
-			jQuery.each(elements, function(key, param) {
-				var $obj = jQuery('#' + key + '_row_' + value.dcheckid);
+		this.#overlay.$dialogue.$footer[0].querySelector('.js-delete')
+			?.addEventListener('click', () => this.#delete());
 
-				if (jQuery.inArray(parseInt(value.type, 10), available_device_types) > -1) {
-					var new_obj = param[1];
-					if ($obj.length) {
-						var checked_id = jQuery('input:radio[name=' + key + ']:checked').attr('id');
-						$obj.replaceWith(new_obj);
-						jQuery('#' + checked_id).prop('checked', true);
-					}
-					else {
-						jQuery('#' + key).append(new_obj);
-					}
-				}
-				else {
-					if ($obj.length) {
-						$obj.remove();
-						jQuery('#' + key + '_' + param[0]).prop('checked', true);
-					}
-				}
-			});
+		this.#form_element.querySelector('#concurrency_max_type').addEventListener('change', () => this.#updateForm());
+
+		this.#updateForm();
+	}
+
+	#updateForm() {
+		const discovery_by = this.#form_element.querySelector('[name="discovery_by"]:checked').value;
+
+		this.#form_element.querySelector('.js-field-proxy').style.display = discovery_by == <?= ZBX_DISCOVERY_BY_PROXY ?>
+			? ''
+			: 'none';
+
+		const concurrency_max_type = this.#form.findFieldByName('concurrency_max_type').getValue()
+		const concurrency_max = this.#form_element.querySelector('#concurrency_max');
+		const is_custom = concurrency_max_type == <?= ZBX_DISCOVERY_CHECKS_CUSTOM ?>;
+
+		concurrency_max.classList.toggle('<?= ZBX_STYLE_DISPLAY_NONE ?>', !is_custom);
+		if (is_custom) {
+			concurrency_max.focus();
 		}
 	}
 
-	function removeDCheckRow(dcheckid) {
-		jQuery('#dcheckRow_' + dcheckid).remove();
+	#updateCheck(row, input) {
+		delete input.dchecks;
+		input.dcheckid = row.dataset.dcheckid;
+		input.warning = row.querySelector('.btn-icon')?.getAttribute('data-hintbox-html');
 
-		delete(ZBX_CHECKLIST[dcheckid]);
+		this.#addCheck(input, row, true);
+		row.remove();
+		this.#updateCheckWarningIcon(input);
+		this.#addInputFields(input);
+		this.#form.discoverAllFields();
+	}
 
-		var elements = {
+	#editCheck(row = null) {
+		let params = {};
+
+		if (row !== null) {
+			params = {
+				update: 1
+			};
+
+			const hidden_inputs = row.querySelectorAll('input[type="hidden"]');
+
+			for (let i = 0; i < hidden_inputs.length; i++) {
+				const input = hidden_inputs[i];
+				const name = input.getAttribute('name').match(/\[([^\]]+)]$/);
+
+				if (name) {
+					params[name[1]] = input.value;
+				}
+			}
+		}
+
+		params.dchecks = this.#form.findFieldByName('dchecks').getValue();
+
+		if (row !== null) {
+			const current_dcheckid = row.dataset.dcheckid;
+
+			if (Object.prototype.hasOwnProperty.call(params.dchecks, current_dcheckid)) {
+				delete params.dchecks[current_dcheckid];
+			}
+		}
+
+		const overlay = PopUp('discovery.check.edit', params, {
+			dialogueid: 'discovery-check',
+			dialogue_class: 'modal-popup-medium'
+		});
+
+		overlay.$dialogue[0].addEventListener('check.submit', (e) => {
+			if (row !== null) {
+				this.#updateCheck(row, e.detail);
+			}
+			else {
+				e.detail.dcheckid = getUniqueId();
+				this.#addCheck(e.detail, null);
+				this.#form.discoverAllFields();
+			}
+		});
+	}
+
+	#addRadioButtonValues(drule) {
+		['uniqueness_criteria', 'host_source', 'name_source'].forEach((field) => {
+			if (field === 'uniqueness_criteria' && drule.uniq === 1) {
+				drule[field] = `_${drule.dcheckid}`;
+			}
+
+			const radioButton = document.querySelector(
+				`input[type="radio"][name="${field}"][value="${CSS.escape(drule[field])}"]`
+			);
+
+			if (radioButton) {
+				radioButton.checked = true;
+			}
+		});
+
+		document.querySelectorAll('#host_source, #name_source').forEach((element) => {
+			element.addEventListener('change', (e) => {
+				this.#updateRadioButtonValues(e);
+			});
+		});
+
+		document.querySelectorAll('#device-uniqueness-list').forEach((element) => {
+			element.addEventListener('change', (e) => {
+				this.#updateRadioButtonUniquenessCriteria(e);
+			});
+		});
+	}
+
+	#updateRadioButtonUniquenessCriteria(event) {
+		const target = event.target;
+
+		document.querySelectorAll('[name^=dchecks][name$="[uniq]"]')
+			.forEach((dcheck) => {
+				dcheck.value = 0;
+			});
+
+		if (typeof target.dataset.id !== 'undefined') {
+			document.querySelector(`[name="dchecks[${target.dataset.id}][uniq]"]`).value = 1;
+		}
+	}
+
+	#updateRadioButtonValues(event) {
+		const target = event.target;
+		const name = target.getAttribute('name');
+
+		if (typeof target.dataset.id !== 'undefined') {
+			document.querySelectorAll(`[name^=dchecks][name$="[${name}]"]`)
+				.forEach(function (dcheck) {
+					dcheck.value = (name === 'name_source') ? <?= ZBX_DISCOVERY_UNSPEC ?> : <?= ZBX_DISCOVERY_DNS ?>;
+				});
+
+			document.querySelector(`[name="dchecks[${target.dataset.id}][${name}]"]`);
+
+			document
+				.querySelector(`[name="dchecks[${target.dataset.id}][${name}]"]`).value = <?= ZBX_DISCOVERY_VALUE ?>;
+		}
+		else {
+			document.querySelectorAll(`[name^=dchecks][name$="[${name}]"]`)
+				.forEach(function (dcheck) {
+					dcheck.value = target.value;
+				});
+		}
+	}
+
+	#addCheck(input, row = null, update = false) {
+		delete input.dchecks;
+
+		if (update === false) {
+			if (typeof input.uniq === 'undefined') {
+				const checked_uniqueness_criteria = document.querySelector(
+					'[name="uniqueness_criteria"]:checked:not([data-id])'
+				);
+
+				if (checked_uniqueness_criteria !== null && checked_uniqueness_criteria.value === input.dcheckid) {
+					input.uniq = 1;
+				} else {
+					input.uniq = 0;
+				}
+			}
+
+			if (typeof input.host_source === 'undefined') {
+				const checked_host_source = document.querySelector('[name="host_source"]:checked:not([data-id])');
+				input.host_source = checked_host_source === null
+					? '<?= ZBX_DISCOVERY_DNS ?>'
+					: checked_host_source.value;
+			}
+
+			if (typeof input.name_source === 'undefined') {
+				const checked_name_source = document.querySelector('[name="name_source"]:checked:not([data-id])');
+				input.name_source = checked_name_source === null
+					? '<?= ZBX_DISCOVERY_UNSPEC ?>'
+					: checked_name_source.value;
+			}
+		}
+		else {
+			if (this.#available_device_types.includes(parseInt(input.type))) {
+				input.host_source = document.querySelector('input[name=host_source]:checked').value;
+				input.name_source = document.querySelector('input[name=name_source]:checked').value;
+				const checked_uniqueness_criteria = document.querySelector('input[name=uniqueness_criteria]:checked');
+
+				input.uniq = checked_uniqueness_criteria.value === '_'+input.dcheckid ? 1 : 0;
+			}
+		}
+
+		if (input.type == <?= SVC_ICMPPING ?>) {
+			input.allow_redirect = typeof input.allow_redirect === 'undefined' ? 0 : input.allow_redirect;
+		}
+
+		const template = new Template(document.getElementById('dcheck-row-tmpl').innerHTML);
+
+		if (row !== null) {
+			row.insertAdjacentHTML('afterend', template.evaluate(input));
+			this.#addInputFields(input);
+		}
+		else {
+			document
+				.querySelector('#dcheckList tbody')
+				.insertAdjacentHTML('beforeend', template.evaluate(input));
+
+			this.#updateCheckWarningIcon(input);
+			this.#addInputFields(input);
+		}
+
+		this.#updateRadioButtonRows(input, update);
+	}
+
+	#updateCheckWarningIcon(input) {
+		const row = document.getElementById(`dcheckRow_${input.dcheckid}`);
+		const warning_icon = row.querySelector('.btn-icon');
+
+		if (input.dcheckid.includes('new')) {
+			warning_icon.remove();
+		}
+
+		this.#dchecks.forEach(dcheck => {
+			if (dcheck.dcheckid === input.dcheckid) {
+				dcheck.warning === '' ? warning_icon.remove() : row.querySelector('.js-remove').disabled = true;
+			}
+		});
+	}
+
+	#addInputFields(input) {
+		for (let field_name in input) {
+			if (input.hasOwnProperty(field_name)) {
+				const input_element = document.createElement('input');
+				input_element.name = `dchecks[${input.dcheckid}][${field_name}]`;
+				input_element.type = 'hidden';
+				input_element.value = input[field_name];
+				input_element.setAttribute('data-field-type', 'hidden');
+
+				const dcheck_cell = document.getElementById(`dcheckCell_${input.dcheckid}`);
+				dcheck_cell.appendChild(input_element);
+			}
+		}
+	}
+
+	#updateRadioButtonRows(input, update) {
+		const templates = {
+			unique_template: ['unique-row-tmpl', 'device-uniqueness-list', 'uniqueness_criteria_', 'ip'],
+			host_template: ['host-source-row-tmpl', 'host_source', 'host_source_', 'chk_dns'],
+			name_template: ['name-source-row-tmpl', 'name_source', 'name_source_', 'chk_host']
+		};
+
+		const need_to_add_row = this.#available_device_types.includes(parseInt(input.type));
+
+		for (const [template_id, list_id, key, def] of Object.values(templates)) {
+			if (need_to_add_row) {
+				const row = new Template(document.getElementById(template_id).innerHTML).evaluateToElement(input);
+
+				if (update === false) {
+					document.getElementById(list_id).append(row);
+				}
+				else {
+					const list_item = document.getElementById(`${key}${input.dcheckid}`)?.closest('li');
+
+					if (list_item) {
+						list_item.replaceWith(row);
+					}
+					else {
+						document.getElementById(list_id).append(row);
+					}
+				}
+			}
+			else {
+				const dcheck_checkbox = document.querySelector(`#${list_id} input[value$="${input.dcheckid}"]`);
+
+				if (dcheck_checkbox !== null) {
+					if (dcheck_checkbox.checked) {
+						document.getElementById(`${key + def}`).checked = true;
+					}
+
+					dcheck_checkbox.closest('li')?.remove();
+				}
+			}
+		}
+
+		if (update === false) {
+			this.#addRadioButtonValues(this.#drule);
+		}
+		else {
+			this.#addRadioButtonValues(input);
+
+			const setInputSource = (field, default_value) => {
+				const checked_source = document.querySelector(`input[name="${field}"]:checked`);
+
+				if (typeof checked_source.dataset.id !== 'undefined') {
+					if (checked_source.dataset.id === input.dcheckid) {
+						input[field] = <?= ZBX_DISCOVERY_VALUE ?>;
+					}
+					else {
+						input[field] = default_value;
+					}
+				}
+				else {
+					input[field] = checked_source.value;
+				}
+			};
+
+			setInputSource('host_source', <?= ZBX_DISCOVERY_DNS ?>);
+			setInputSource('name_source', <?= ZBX_DISCOVERY_UNSPEC ?>);
+		}
+	}
+
+	#removeDCheckRow(dcheckid) {
+		dcheckid = dcheckid.substring(dcheckid.indexOf('_') + 1);
+
+		const elements = {
 			uniqueness_criteria_: 'ip',
 			host_source_: 'chk_dns',
 			name_source_: 'chk_host'
 		};
 
-		jQuery.each(elements, function(key, def) {
-			var $obj = jQuery('#' + key + dcheckid);
+		for (const [key, def] of Object.entries(elements)) {
+			const obj = document.querySelector(`#${key}${dcheckid}`);
 
-			if ($obj.length) {
-				if ($obj.is(':checked')) {
-					jQuery('#' + key + def).prop('checked', true);
+			if (obj !== null) {
+				if (obj.checked) {
+					document.querySelector(`#${key}${def}`).checked = true;
 				}
-				jQuery('#' + key + 'row_' + dcheckid).remove();
+
+				document.querySelector(`#${key}row_${dcheckid}`).remove();
 			}
-		});
+		}
 	}
 
-	jQuery(function() {
-		addDCheck(<?= json_encode(array_values($data['drule']['dchecks'])) ?>);
+	#clone() {
+		this.#removePopupMessages();
+		const druleid = this.#form_element.querySelector('[name="druleid"]');
+		druleid.remove();
 
-		jQuery('input:radio[name="uniqueness_criteria"][value=<?= json_encode($data['drule']['uniqueness_criteria']) ?>]').attr('checked', 'checked');
-		jQuery('input:radio[name="host_source"][value=<?= json_encode($data['drule']['host_source']) ?>]').attr('checked', 'checked');
-		jQuery('input:radio[name="name_source"][value=<?= json_encode($data['drule']['name_source']) ?>]').attr('checked', 'checked');
+		if (!this.#can_select_server_for_discovery_by) {
+			const discovery_by_server = this.#form_element.querySelector(
+				'[name="discovery_by"][value="<?= ZBX_DISCOVERY_BY_SERVER ?>"]'
+			);
 
-		jQuery('#clone').click(function() {
-			jQuery('#update')
-				.text(t('Add'))
-				.val('discovery.create')
-				.attr({id: 'add'});
-			jQuery('#druleid, #delete, #clone').remove();
-			jQuery('#form').val('clone');
-			jQuery('#name').focus();
-		});
+			if (discovery_by_server.checked) {
+				const discovery_by_proxy = this.#form_element.querySelector(
+					'[name="discovery_by"][value="<?= ZBX_DISCOVERY_BY_PROXY ?>"]'
+				);
 
-		jQuery('#host_source, #name_source').on('change', 'input', function() {
-			var $elem = jQuery(this),
-				name = $elem.attr('name');
+				discovery_by_proxy.checked = true;
+				discovery_by_proxy.removeAttribute('readonly');
 
-			if ($elem.data('id')) {
-				jQuery('[name^=dchecks][name$="[' + name + ']"]')
-					.val((name === 'name_source') ? <?= ZBX_DISCOVERY_UNSPEC ?> : <?= ZBX_DISCOVERY_DNS ?>);
-				jQuery('[name="dchecks[' + $elem.data('id') + '][' + name + ']"]').val(<?= ZBX_DISCOVERY_VALUE ?>);
+				this.#updateForm();
 			}
-			else {
-				jQuery('[name^=dchecks][name$="[' + name + ']"]').val($elem.val());
-			}
-		});
-
-		jQuery('#dcheckList').on('click', '[data-action]', function() {
-			var $btn = jQuery(this),
-				$rows = jQuery('#dcheckList > table > tbody > tr'),
-				params;
-
-			switch ($btn.data('action')) {
-				case 'add':
-					PopUp('popup.discovery.check', {}, {
-						dialogue_class: 'modal-popup-medium',
-						trigger_element: this
-					});
-					break;
-
-				case 'edit':
-					var $row = $btn.closest('tr');
-
-					params = {
-						update: 1
-					};
-
-					$row.find('input[type="hidden"]').each(function() {
-						var $input = jQuery(this),
-							name = $input.attr('name').match(/\[([^\]]+)]$/);
-
-						if (name) {
-							params[name[1]] = $input.val();
-						}
-					});
-
-					PopUp('popup.discovery.check', params, {
-						dialogue_class: 'modal-popup-medium',
-						trigger_element: this
-					});
-					break;
-			}
-		});
-	});
-
-	/**
-	 * Returns a default port number for the specified discovery check type.
-	 *
-	 * @param {string} dcheck_type  Discovery check type.
-	 *
-	 * @returns {string}
-	 */
-	function getDCheckDefaultPort(dcheck_type) {
-		var default_ports = {
-			<?= SVC_SSH ?>: '22',
-			<?= SVC_LDAP ?>: '389',
-			<?= SVC_SMTP ?>: '25',
-			<?= SVC_FTP ?>:  '21',
-			<?= SVC_HTTP ?>: '80',
-			<?= SVC_POP ?>: '110',
-			<?= SVC_NNTP ?>: '119',
-			<?= SVC_IMAP ?>: '143',
-			<?= SVC_AGENT ?>: '10050',
-			<?= SVC_SNMPv1 ?>: '161',
-			<?= SVC_SNMPv2c ?>: '161',
-			<?= SVC_SNMPv3 ?>: '161',
-			<?= SVC_HTTPS ?>: '443',
-			<?= SVC_TELNET ?>: '23'
-		};
-
-		return default_ports.hasOwnProperty(dcheck_type) ? default_ports[dcheck_type] : '0';
-	}
-
-	/**
-	 * Set default discovery check port to input.
-	 *
-	 * @return {object}
-	 */
-	function setDCheckDefaultPort() {
-		return jQuery('#ports').val(getDCheckDefaultPort(jQuery('#type-select').val()));
-	}
-
-	/**
-	 * Sends discovery check form data to the server for validation before adding it to the main form.
-	 *
-	 * @param {Overlay} overlay
-	 */
-	function submitDCheck(overlay) {
-		var $form = overlay.$dialogue.find('form');
-
-		$form.trimValues([
-			'#ports', '#key_', '#snmp_community', '#snmp_oid', '#snmpv3_contextname', '#snmpv3_securityname',
-			'#snmpv3_authpassphrase', '#snmpv3_privpassphrase'
-		]);
-
-		var data = $form
-				.find('#type, #ports, input[type=hidden], input[type=text]:visible, input[type=radio]:checked:visible')
-				.serialize(),
-			dialogueid = $form
-				.closest("[data-dialogueid]")
-				.data('dialogueid');
-
-		if (!dialogueid) {
-			return false;
 		}
 
-		overlay.setLoading();
-		overlay.xhr = sendAjaxData('zabbix.php', {
-			data: data,
-			dataType: 'json',
+		// Remove all warning icons and enable all Remove buttons in Checks table.
+		const table = document.getElementById('dcheckList');
+
+		table.querySelectorAll('.js-remove').forEach(element => element.disabled = false);
+		table.querySelectorAll('.btn-icon').forEach(element => element.remove());
+
+		const title = <?= json_encode(_('New discovery rule')) ?>;
+		const buttons = [
+			{
+				title: <?= json_encode(_('Add')) ?>,
+				class: 'js-submit',
+				keepOpen: true,
+				isSubmit: true
+			},
+			{
+				title: <?= json_encode(_('Cancel')) ?>,
+				class: ZBX_STYLE_BTN_ALT,
+				cancel: true,
+				action: ''
+			}
+		];
+
+		this.#overlay.unsetLoading();
+		this.#overlay.setProperties({title, buttons});
+
+		this.#overlay.$dialogue.$footer[0].querySelector('.js-submit').addEventListener('click', () => this.#submit());
+
+		this.#overlay.recoverFocus();
+		this.#overlay.containFocus();
+		this.#form.reload(this.#clone_rules);
+	}
+
+	#delete() {
+		if (window.confirm(<?= json_encode(_('Delete discovery rule?')) ?>)) {
+			this.#removePopupMessages();
+			const url_params = {
+				action: 'discovery.delete',
+				[CSRF_TOKEN_NAME]: <?= json_encode(CCsrfTokenHelper::get('discovery')) ?>
+			};
+			const druleid = this.#form.findFieldByName('druleid').getValue();
+
+			this.#post(zabbixUrl(url_params), {druleids: [druleid]}, (response) => {
+					overlayDialogueDestroy(this.#overlay.dialogueid);
+					this.#dialogue.dispatchEvent(new CustomEvent('dialogue.submit', {detail: response}));
+				}
+			);
+		}
+		else {
+			this.#overlay.unsetLoading();
+		}
+	}
+
+	#submit() {
+		this.#removePopupMessages();
+		const fields = this.#form.getAllValues();
+		const action = document.getElementById('druleid') !== null ? 'discovery.update' : 'discovery.create';
+
+		this.#form.validateSubmit(fields)
+			.then((result) => {
+				if (!result) {
+					this.#overlay.unsetLoading();
+					return;
+				}
+
+				this.#post(zabbixUrl({action}), fields, (response) => {
+					overlayDialogueDestroy(this.#overlay.dialogueid);
+
+					this.#dialogue.dispatchEvent(new CustomEvent('dialogue.submit', {detail: response}));
+				});
+			})
+	}
+
+	#post(url, data, success_callback) {
+		fetch(url, {
 			method: 'POST',
-			complete: function() {
-				overlay.unsetLoading();
-			}
-		}).done(function(response) {
-			$form
-				.parent()
-				.find('.<?= ZBX_STYLE_MSG_BAD ?>')
-				.remove();
-
-			if ('error' in response) {
-				const message_box = makeMessageBox('bad', response.error.messages, response.error.title);
-
-				message_box.insertBefore($form);
-			}
-			else {
-				var dcheck = response.params;
-
-				if (typeof dcheck.ports !== 'undefined' && dcheck.ports != getDCheckDefaultPort(dcheck.type)) {
-					dcheck.name += ' (' + dcheck.ports + ')';
-				}
-				if (dcheck.key_) {
-					dcheck.name += ' "' + dcheck.key_ + '"';
-				}
-				dcheck.host_source = jQuery('[name="host_source"]:checked:not([data-id])').val()
-					|| '<?= ZBX_DISCOVERY_DNS ?>';
-				dcheck.name_source = jQuery('[name="name_source"]:checked:not([data-id])').val()
-					|| '<?= ZBX_DISCOVERY_UNSPEC ?>';
-
-				if (hasDCheckDuplicates()) {
-					jQuery(makeMessageBox('bad', [<?= json_encode(_('Check already exists.')) ?>]))
-						.insertBefore($form);
-
-					return false;
+			headers: {'Content-Type': 'application/json'},
+			body: JSON.stringify(data)
+		})
+			.then((response) => response.json())
+			.then((response) => {
+				if ('error' in response) {
+					throw {error: response.error};
 				}
 
-				addDCheck([dcheck]);
-				overlayDialogueDestroy(overlay.dialogueid);
-			}
-		});
+				if ('form_errors' in response) {
+					this.#form.setErrors(response.form_errors, true, true);
+					this.#form.renderErrors();
+
+					return;
+				}
+
+				return success_callback(response);
+			})
+			.catch((exception) => this.#ajaxExceptionHandler(exception))
+			.finally(() => this.#overlay.unsetLoading());
 	}
 
-	/**
-	 * Check for duplicates.
-	 *
-	 * @return {boolean}
-	 */
-	function hasDCheckDuplicates() {
-		var $form = jQuery(document.forms['dcheck_form']),
-			dcheckid = jQuery('#dcheckid').val(),
-			dcheck = $form
-				.find('#ports, >input[type=hidden], input[type=text]:visible, input[type=radio]:checked:visible')
-				.serializeJSON(),
-			fields = ['type', 'ports', 'snmp_community', 'key_', 'snmpv3_contextname', 'snmpv3_securityname',
-				'snmpv3_securitylevel', 'snmpv3_authprotocol', 'snmpv3_authpassphrase', 'snmpv3_privprotocol',
-				'snmpv3_privpassphrase'
-			];
-
-		dcheck['type'] = $form.find('z-select').val();
-		dcheck.dcheckid = dcheckid ? dcheckid : getUniqueId();
-
-		if (dcheck['type'] == <?= SVC_SNMPv1 ?> || dcheck['type'] == <?= SVC_SNMPv2c ?>
-				|| dcheck['type'] == <?= SVC_SNMPv3 ?>) {
-			dcheck['key_'] = dcheck['snmp_oid'];
-		}
-
-		for (var zbx_dcheckid in ZBX_CHECKLIST) {
-			if (ZBX_CHECKLIST[zbx_dcheckid]['type'] !== dcheck['type']) {
-				continue;
-			}
-
-			if (typeof dcheckid === 'undefined' || dcheckid != zbx_dcheckid) {
-				var duplicate_fields = fields
-					.map(function(value) {
-						return typeof dcheck[value] === 'undefined'
-							|| dcheck[value] === ''
-							|| ZBX_CHECKLIST[zbx_dcheckid][value] === dcheck[value];
-					})
-					.filter(function(value) {
-						return !!value;
-					});
-
-				if (duplicate_fields.length === fields.length) {
-					return true;
-				}
+	#removePopupMessages() {
+		for (const el of this.#form_element.parentNode.children) {
+			if (el.matches('.msg-good, .msg-bad, .msg-warning')) {
+				el.parentNode.removeChild(el);
 			}
 		}
-
-		return false;
 	}
 
-	$(() => {
-		const $form = $(document.forms['discoveryForm']);
-		$form.on('submit', () => $form.trimValues(['#name', '#iprange', '#delay']));
-	});
-</script>
+	#ajaxExceptionHandler(exception) {
+		let title, messages;
+
+		if (typeof exception === 'object' && 'error' in exception) {
+			title = exception.error.title;
+			messages = exception.error.messages;
+		}
+		else {
+			messages = [<?= json_encode(_('Unexpected server error.')) ?>];
+		}
+
+		const message_box = makeMessageBox('bad', messages, title)[0];
+
+		this.#form_element.parentNode.insertBefore(message_box, this.#form_element);
+	}
+}

@@ -1,27 +1,20 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-#include "zbxnix.h"
-#include "pid.h"
+#include "zbxcommon.h"
 
-#include "common.h"
-#include "log.h"
+#include "pid.h"
 
 static FILE	*fpid = NULL;
 static int	fdpid = -1;
@@ -52,8 +45,13 @@ int	create_pid_file(const char *pidfile)
 		close(fd);
 	}
 
+	mode_t	old_umask = umask(0026);
+
 	/* open pid file */
-	if (NULL == (fpid = fopen(pidfile, "w")))
+	fpid = fopen(pidfile, "w");
+	umask(old_umask);
+
+	if (NULL == fpid)
 	{
 		zbx_error("cannot create PID file [%s]: %s", pidfile, zbx_strerror(errno));
 		return FAIL;
@@ -63,7 +61,7 @@ int	create_pid_file(const char *pidfile)
 	if (-1 != (fdpid = fileno(fpid)) && (-1 == fcntl(fdpid, F_SETLK, &fl) || -1 == fcntl(fdpid,
 			F_SETFD, FD_CLOEXEC)))
 	{
-		zbx_error("error in setting the status flag: %s", zbx_strerror(errno));
+		zbx_error("error in setting the status flag for PID file: [%s] %s", pidfile, zbx_strerror(errno));
 	}
 
 	/* write pid to file */

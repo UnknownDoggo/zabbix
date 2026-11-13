@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -47,7 +42,7 @@ function getSystemStatusData(array $filter) {
 		? $filter['ext_ack']
 		: EXTACK_OPTION_ALL;
 	$filter_evaltype = array_key_exists('evaltype', $filter) ? $filter['evaltype'] : TAG_EVAL_TYPE_AND_OR;
-	$filter_tags = array_key_exists('tags', $filter) ? $filter['tags'] : [];
+	$filter_tags = array_key_exists('tags', $filter) && $filter['tags'] ? $filter['tags'] : null;
 	$show_opdata = array_key_exists('show_opdata', $filter) && $filter['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE;
 
 	if (array_key_exists('exclude_groupids', $filter) && $filter['exclude_groupids']) {
@@ -56,7 +51,7 @@ function getSystemStatusData(array $filter) {
 			if ($filter_groupids === null) {
 				$filter_groupids = array_keys(API::HostGroup()->get([
 					'output' => [],
-					'real_hosts' => true,
+					'with_hosts' => true,
 					'preservekeys' => true
 				]));
 			}
@@ -85,7 +80,7 @@ function getSystemStatusData(array $filter) {
 			'output' => ['groupid', 'name'],
 			'groupids' => $filter_groupids,
 			'hostids' => $filter_hostids,
-			'monitored_hosts' => true,
+			'with_monitored_hosts' => true,
 			'preservekeys' => true
 		]),
 		'triggers' => [],
@@ -96,7 +91,8 @@ function getSystemStatusData(array $filter) {
 			'add_comments' => CWebUser::checkAccess(CRoleHelper::ACTIONS_ADD_PROBLEM_COMMENTS),
 			'change_severity' => CWebUser::checkAccess(CRoleHelper::ACTIONS_CHANGE_SEVERITY),
 			'acknowledge' => CWebUser::checkAccess(CRoleHelper::ACTIONS_ACKNOWLEDGE_PROBLEMS),
-			'close' => CWebUser::checkAccess(CRoleHelper::ACTIONS_CLOSE_PROBLEMS)
+			'close' => CWebUser::checkAccess(CRoleHelper::ACTIONS_CLOSE_PROBLEMS),
+			'suppress' => CWebUser::checkAccess(CRoleHelper::ACTIONS_SUPPRESS_PROBLEMS)
 		]
 	];
 
@@ -120,7 +116,7 @@ function getSystemStatusData(array $filter) {
 
 	$options = [
 		'output' => ['eventid', 'r_eventid', 'objectid', 'clock', 'ns', 'name', 'acknowledged', 'severity'],
-		'selectAcknowledges' => ['action'],
+		'selectAcknowledges' => ['action', 'clock', 'userid'],
 		'groupids' => array_keys($data['groups']),
 		'hostids' => $filter_hostids,
 		'evaltype' => $filter_evaltype,
@@ -128,23 +124,19 @@ function getSystemStatusData(array $filter) {
 		'source' => EVENT_SOURCE_TRIGGERS,
 		'object' => EVENT_OBJECT_TRIGGER,
 		'suppressed' => false,
+		'symptom' => false,
 		'sortfield' => ['eventid'],
 		'sortorder' => ZBX_SORT_DOWN,
 		'preservekeys' => true
 	];
 
-	if (array_key_exists('severities', $filter)) {
-		$filter_severities = implode(',', $filter['severities']);
-		$all_severities = implode(',', range(TRIGGER_SEVERITY_NOT_CLASSIFIED, TRIGGER_SEVERITY_COUNT - 1));
-
-		if ($filter_severities !== '' && $filter_severities !== $all_severities) {
-			$options['severities'] = $filter['severities'];
-		}
+	if (array_key_exists('severities', $filter) && $filter['severities']) {
+		$options['severities'] = $filter['severities'];
 	}
 
 	if (array_key_exists('show_suppressed', $filter) && $filter['show_suppressed']) {
 		unset($options['suppressed']);
-		$options['selectSuppressionData'] = ['maintenanceid', 'suppress_until'];
+		$options['selectSuppressionData'] = ['maintenanceid', 'suppress_until', 'userid', 'cep_ruleid'];
 	}
 
 	if ($filter_ext_ack == EXTACK_OPTION_UNACK) {
@@ -165,7 +157,7 @@ function getSystemStatusData(array $filter) {
 
 		$options = [
 			'output' => ['priority', 'manual_close'],
-			'selectGroups' => ['groupid'],
+			'selectHostGroups' => ['groupid'],
 			'selectHosts' => ['name'],
 			'triggerids' => array_keys($triggerids),
 			'monitored' => true,
@@ -183,13 +175,13 @@ function getSystemStatusData(array $filter) {
 		$data['triggers'] = API::Trigger()->get($options);
 
 		if ($show_opdata && $data['triggers']) {
-			$items = API::Item()->get([
-				'output' => ['itemid', 'hostid', 'name', 'key_', 'value_type', 'units'],
+			$items = CArrayHelper::renameObjectsKeys(API::Item()->get([
+				'output' => ['itemid', 'hostid', 'name_resolved', 'key_', 'value_type', 'units'],
 				'selectValueMap' => ['mappings'],
 				'triggerids' => array_keys($data['triggers']),
 				'webitems' => true,
 				'preservekeys' => true
-			]);
+			]), ['name_resolved' => 'name']);
 
 			foreach ($data['triggers'] as &$trigger) {
 				foreach ($trigger['functions'] as $function) {
@@ -211,6 +203,11 @@ function getSystemStatusData(array $filter) {
 			}
 		}
 
+		CArrayHelper::sort($problems, [
+			['field' => 'clock', 'order' => ZBX_SORT_DOWN],
+			['field' => 'ns', 'order' => ZBX_SORT_DOWN]
+		]);
+
 		$visible_problems = [];
 
 		foreach ($problems as $eventid => $problem) {
@@ -222,7 +219,7 @@ function getSystemStatusData(array $filter) {
 			}
 
 			// groups
-			foreach ($trigger['groups'] as $trigger_group) {
+			foreach ($trigger['hostgroups'] as $trigger_group) {
 				if (!array_key_exists($trigger_group['groupid'], $data['groups'])) {
 					continue;
 				}
@@ -256,9 +253,11 @@ function getSystemStatusData(array $filter) {
 		// actions & tags
 		$problems_data = API::Problem()->get([
 			'output' => ['eventid', 'r_eventid', 'clock', 'objectid', 'severity'],
-			'eventids' => array_keys($visible_problems),
-			'selectAcknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity'],
+			'selectAcknowledges' => ['userid', 'clock', 'message', 'action', 'old_severity', 'new_severity',
+				'suppress_until'
+			],
 			'selectTags' => ['tag', 'value'],
+			'eventids' => array_keys($visible_problems),
 			'preservekeys' => true
 		]);
 
@@ -302,7 +301,8 @@ function getSystemStatusData(array $filter) {
 		if (array_key_exists('show_opdata', $filter) && $filter['show_opdata'] != OPERATIONAL_DATA_SHOW_NONE) {
 			$maked_data = CScreenProblem::makeData(
 				['problems' => $problems_data, 'triggers' => $data['triggers']],
-				['show' => 0, 'details' => 0, 'show_opdata' => $filter['show_opdata']]
+				['show' => 0],
+				['details' => 0, 'show_opdata' => $filter['show_opdata']]
 			);
 			$data['triggers'] = $maked_data['triggers'];
 		}
@@ -353,6 +353,25 @@ function getSystemStatusTotals(array $data) {
 		}
 	}
 
+	foreach ($groups_totals[0]['stats'] as &$stat) {
+		if ($stat['count'] > 0 || $stat['count_unack'] > 0) {
+			$limit = CSettingsHelper::get(CSettingsHelper::SEARCH_LIMIT);
+
+			if ($stat['count'] > 0) {
+				$stat['problems'] = CScreenProblem::sortData(['problems' => $stat['problems']], $limit, 'clock',
+					ZBX_SORT_DOWN
+				)['problems'];
+			}
+
+			if ($stat['count_unack'] > 0) {
+				$stat['problems_unack'] = CScreenProblem::sortData(['problems' => $stat['problems_unack']], $limit,
+					'clock', ZBX_SORT_DOWN
+				)['problems'];
+			}
+		}
+	}
+	unset($stat);
+
 	return $groups_totals;
 }
 
@@ -369,12 +388,13 @@ function getSystemStatusTotals(array $data) {
  * @param bool  $data['allowed']['change_severity']
  * @param bool  $data['allowed']['acknowledge']
  * @param bool  $data['allowed']['close']
+ * @param bool  $data['allowed']['suppress']
  * @param bool  $hide_empty_groups
  * @param CUrl  $groupurl
  *
  * @return CTableInfo
  */
-function makeSeverityTable(array $data, $hide_empty_groups = false, CUrl $groupurl = null) {
+function makeSeverityTable(array $data, $hide_empty_groups = false, ?CUrl $groupurl = null) {
 	$table = new CTableInfo();
 
 	foreach ($data['data']['groups'] as $group) {
@@ -400,7 +420,9 @@ function makeSeverityTable(array $data, $hide_empty_groups = false, CUrl $groupu
 			$row[] = getSeverityTableCell($severity, $data, $stat);
 		}
 
-		$table->addRow($row);
+		$table->addRow(
+			(new CRow($row))->setAttribute('data-hostgroupid', $group['groupid'])
+		);
 	}
 
 	return $table;
@@ -419,6 +441,7 @@ function makeSeverityTable(array $data, $hide_empty_groups = false, CUrl $groupu
  * @param bool  $data['allowed']['change_severity']
  * @param bool  $data['allowed']['acknowledge']
  * @param bool  $data['allowed']['close']
+ * @param bool  $data['allowed']['suppress']
  *
  * @return CDiv
  */
@@ -453,6 +476,7 @@ function makeSeverityTotals(array $data) {
  * @param bool  $data['allowed']['change_severity']
  * @param bool  $data['allowed']['acknowledge']
  * @param bool  $data['allowed']['close']
+ * @param bool  $data['allowed']['suppress']
  * @param array $stat
  * @param int   $stat['count']
  * @param array $stat['problems']
@@ -466,9 +490,6 @@ function getSeverityTableCell($severity, array $data, array $stat, $is_total = f
 	if (!$is_total && $stat['count'] == 0 && $stat['count_unack'] == 0) {
 		return '';
 	}
-
-	$severity_name = $is_total ? ' '.CSeverityHelper::getName($severity) : '';
-	$ext_ack = array_key_exists('ext_ack', $data['filter']) ? $data['filter']['ext_ack'] : EXTACK_OPTION_ALL;
 
 	$allTriggersNum = $stat['count'];
 	if ($allTriggersNum) {
@@ -486,24 +507,27 @@ function getSeverityTableCell($severity, array $data, array $stat, $is_total = f
 			));
 	}
 
+	$ext_ack = array_key_exists('ext_ack', $data['filter']) ? $data['filter']['ext_ack'] : EXTACK_OPTION_ALL;
+	$severity_name = $is_total ? CSeverityHelper::getName($severity) : '';
+
 	switch ($ext_ack) {
 		case EXTACK_OPTION_ALL:
 			return CSeverityHelper::makeSeverityCell($severity, [
 				(new CSpan($allTriggersNum))->addClass(ZBX_STYLE_TOTALS_LIST_COUNT),
-				$severity_name
+				(new CSpan($severity_name))->addClass(ZBX_STYLE_TOTALS_LIST_NAME)->setTitle($severity_name)
 			], false, $is_total);
 
 		case EXTACK_OPTION_UNACK:
 			return CSeverityHelper::makeSeverityCell($severity, [
 				(new CSpan($unackTriggersNum))->addClass(ZBX_STYLE_TOTALS_LIST_COUNT),
-				$severity_name
+				(new CSpan($severity_name))->addClass(ZBX_STYLE_TOTALS_LIST_NAME)->setTitle($severity_name)
 			], false, $is_total);
 
 		case EXTACK_OPTION_BOTH:
 			return CSeverityHelper::makeSeverityCell($severity, [
 				(new CSpan([$unackTriggersNum, ' '._('of').' ', $allTriggersNum]))
 					->addClass(ZBX_STYLE_TOTALS_LIST_COUNT),
-				$severity_name
+				(new CSpan($severity_name))->addClass(ZBX_STYLE_TOTALS_LIST_NAME)->setTitle($severity_name)
 			], false, $is_total);
 
 		default:
@@ -545,6 +569,7 @@ function getSeverityTableCell($severity, array $data, array $stat, $is_total = f
  * @param bool   $allowed['change_severity']
  * @param bool   $allowed['acknowledge']
  * @param bool   $allowed['close']
+ * @param bool   $allowed['suppress']
  *
  * @return CTableInfo
  */
@@ -578,13 +603,19 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 			_('Problem'),
 			($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) ? _('Operational data') : null,
 			_('Duration'),
-			_('Ack'),
+			_('Update'),
 			_('Actions'),
 			_('Tags')
 		]));
 
+	$data = [
+		'last_clock' => 0,
+		'sortorder' => ZBX_SORT_DOWN,
+		'show_three_columns' => false,
+		'show_two_columns' => false
+	];
+
 	$today = strtotime('today');
-	$last_clock = 0;
 
 	// Unset triggers, which missing in problems array.
 	if ($problems) {
@@ -600,10 +631,29 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 	$triggers_hosts = getTriggersHostsList($triggers);
 	$triggers_hosts = makeTriggersHostsList($triggers_hosts);
 
-	$tags = makeTags($problems);
+	$tags = CTagHelper::getTagsHtml($problems, ZBX_TAG_OBJECT_PROBLEM);
 
 	if (array_key_exists('show_suppressed', $filter) && $filter['show_suppressed']) {
-		CScreenProblem::addMaintenanceNames($problems);
+		CScreenProblem::addSuppressionNames($problems);
+	}
+
+	if ($show_opdata != OPERATIONAL_DATA_SHOW_NONE) {
+		$events = [];
+
+		foreach ($problems as $problem) {
+			$trigger = $triggers[$problem['objectid']];
+
+			if ($trigger['opdata'] !== '') {
+				$events[$problem['eventid']] = [
+					'triggerid' => $trigger['triggerid'],
+					'expression' => $trigger['expression'],
+					'opdata' => $trigger['opdata'],
+					'clock' => $problem['clock'],
+					'ns' => $problem['ns']
+				];
+			}
+		}
+		$events = CMacrosResolverHelper::resolveEventOpdatas($events, ['html' => true]);
 	}
 
 	foreach ($problems as $problem) {
@@ -624,10 +674,10 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 		}
 
 		if ($show_timeline) {
-			if ($last_clock != 0) {
-				CScreenProblem::addTimelineBreakpoint($table, $last_clock, $problem['clock'], ZBX_SORT_DOWN);
+			if ($data['last_clock'] != 0) {
+				CScreenProblem::addTimelineBreakpoint($table, $data, $problem, false, false);
 			}
-			$last_clock = $problem['clock'];
+			$data['last_clock'] = $problem['clock'];
 
 			$row = [
 				$cell_clock->addClass(ZBX_STYLE_TIMELINE_DATE),
@@ -646,8 +696,33 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 		}
 
 		$info_icons = [];
-		if (array_key_exists('suppression_data', $problem) && $problem['suppression_data']) {
-			$info_icons[] = makeSuppressedProblemIcon($problem['suppression_data']);
+		if (array_key_exists('suppression_data', $problem)) {
+			if (count($problem['suppression_data']) == 1
+					&& $problem['suppression_data'][0]['maintenanceid'] == 0
+					&& isEventRecentlyUnsuppressed($problem['acknowledges'], $unsuppression_action)) {
+				// Show blinking button if the last manual suppression was recently revoked.
+				$user_unsuppressed = array_key_exists($unsuppression_action['userid'], $actions['users'])
+					? getUserFullname($actions['users'][$unsuppression_action['userid']])
+					: _('Inaccessible user');
+
+				$info_icons[] = (new CButtonIcon(ZBX_ICON_EYE))
+					->addClass(ZBX_STYLE_COLOR_ICON)
+					->addClass('js-blink')
+					->setAttribute('aria-label', _('Manually unsuppressed'))
+					->setHint(_s('Unsuppressed by: %1$s', $user_unsuppressed));
+			}
+			elseif ($problem['suppression_data']) {
+				$info_icons[] = makeSuppressedProblemIcon($problem['suppression_data'], false);
+			}
+			elseif (isEventRecentlySuppressed($problem['acknowledges'], $suppression_action)) {
+				// Show blinking button if suppression was made but is not yet processed by server.
+				$info_icons[] = makeSuppressedProblemIcon([[
+					'suppress_until' => $suppression_action['suppress_until'],
+					'username' => array_key_exists($suppression_action['userid'], $actions['users'])
+						? getUserFullname($actions['users'][$suppression_action['userid']])
+						: _('Inaccessible user')
+				]], true);
+			}
 		}
 
 		// operational data
@@ -660,19 +735,7 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 				}
 			}
 			else {
-				$opdata = CMacrosResolverHelper::resolveTriggerOpdata(
-					[
-						'triggerid' => $trigger['triggerid'],
-						'expression' => $trigger['expression'],
-						'opdata' => $trigger['opdata'],
-						'clock' => $problem['clock'],
-						'ns' => $problem['ns']
-					],
-					[
-						'events' => true,
-						'html' => true
-					]
-				);
+				$opdata = $events[$problem['eventid']]['opdata'];
 
 				if ($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) {
 					$opdata = (new CCol($opdata))
@@ -696,18 +759,18 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 			}
 		}
 
+		$problem_update_url = (new CUrl('zabbix.php'))
+			->setArgument('action', 'popup')
+			->setArgument('popup', 'acknowledge.edit')
+			->setArgument('eventids[]', $problem['eventid'])
+			->getUrl();
+
 		// Create acknowledge link.
 		$is_acknowledged = ($problem['acknowledged'] == EVENT_ACKNOWLEDGED);
 		$problem_update_link = ($allowed['add_comments'] || $allowed['change_severity'] || $allowed['acknowledge']
-				|| $can_be_closed)
-			? (new CLink($is_acknowledged ? _('Yes') : _('No')))
-				->addClass($is_acknowledged ? ZBX_STYLE_GREEN : ZBX_STYLE_RED)
-				->addClass(ZBX_STYLE_LINK_ALT)
-				->setAttribute('data-eventid', $problem['eventid'])
-				->onClick('acknowledgePopUp({eventids: [this.dataset.eventid]}, this);')
-			: (new CSpan($is_acknowledged ? _('Yes') : _('No')))->addClass(
-				$is_acknowledged ? ZBX_STYLE_GREEN : ZBX_STYLE_RED
-			);
+				|| $can_be_closed || $allowed['suppress'])
+			? (new CLink(_('Update'), $problem_update_url))->addClass(ZBX_STYLE_LINK_ALT)
+			: new CSpan(_('Update'));
 
 		$table->addRow(array_merge($row, [
 			makeInformationList($info_icons),
@@ -717,12 +780,12 @@ function makeProblemsPopup(array $problems, array $triggers, array $actions, arr
 					? [$problem['name'], ' (', $opdata, ')']
 					: $problem['name']
 				)
-			),
+			)->addClass(ZBX_STYLE_WORDBREAK),
 			($show_opdata == OPERATIONAL_DATA_SHOW_SEPARATELY) ? $opdata : null,
 			zbx_date2age($problem['clock']),
 			$problem_update_link,
-			makeEventActionsIcons($problem['eventid'], $actions['all_actions'], $actions['users']),
-			$tags[$problem['eventid']]
+			makeEventActionsIcons($problem['eventid'], $actions['all_actions'], $actions['users'], $is_acknowledged),
+			(new CDiv($tags[$problem['eventid']]))->addClass(ZBX_STYLE_TAGS_WRAPPER)
 		]));
 	}
 

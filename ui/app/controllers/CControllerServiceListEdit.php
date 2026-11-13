@@ -1,28 +1,23 @@
 <?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 class CControllerServiceListEdit extends CControllerServiceListGeneral {
 
 	protected function init(): void {
-		$this->disableSIDValidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput(): bool {
@@ -57,7 +52,7 @@ class CControllerServiceListEdit extends CControllerServiceListGeneral {
 			return false;
 		}
 
-		return parent::checkPermissions();
+		return true;
 	}
 
 	/**
@@ -102,7 +97,7 @@ class CControllerServiceListEdit extends CControllerServiceListGeneral {
 		$reset_curl = (new CUrl('zabbix.php'))
 			->setArgument('action', 'service.list.edit')
 			->setArgument('path', $path ?: null)
-			->setArgument('serviceid', $this->service !== null ? $this->service['serviceid'] : null);
+			->setArgument('serviceid', $this->hasInput('serviceid') ? $this->getInput('serviceid') : null);
 
 		$paging_curl = clone $reset_curl;
 
@@ -124,7 +119,7 @@ class CControllerServiceListEdit extends CControllerServiceListGeneral {
 			->removeArgument('filter_without_problem_tags')
 			->removeArgument('filter_tag_source');
 
-		$back_curl = (clone $paging_curl)
+		$return_curl = (clone $paging_curl)
 			->setArgument('action', 'service.list.edit')
 			->setArgument('page', $this->hasInput('page') ? $this->getInput('page') : null);
 
@@ -142,39 +137,43 @@ class CControllerServiceListEdit extends CControllerServiceListGeneral {
 			'active_tab' => CProfile::get('web.service.filter.active', 1),
 			'reset_curl' => $reset_curl,
 			'view_mode_url' => $view_mode_curl->getUrl(),
-			'back_url' => $back_curl->getUrl(),
+			'return_url' => $return_curl->getUrl(),
 			'refresh_url' => $refresh_curl->getUrl(),
 			'refresh_interval' => CWebUser::getRefresh() * 1000,
 			'max_in_table' => CSettingsHelper::get(CSettingsHelper::MAX_IN_TABLE),
-			'service' => $this->service
+			'service' => $this->service,
+			'is_inaccessible' => $this->is_inaccessible
 		];
 
 		if ($this->service !== null && !$filter['filter_set']) {
 			$data += $this->getSlas();
 		}
 
-		$db_serviceids = self::getServiceIds($filter, $filter['filter_set']);
+		if (!$this->is_inaccessible) {
+			$db_serviceids = self::getServiceIds($filter, $filter['filter_set']);
 
-		$page_num = $this->getInput('page', 1);
-		CPagerHelper::savePage('service.list.edit', $page_num);
-		$data['paging'] = CPagerHelper::paginate($page_num, $db_serviceids, ZBX_SORT_UP, $paging_curl);
+			$page_num = $this->getInput('page', 1);
+			CPagerHelper::savePage('service.list.edit', $page_num);
+			$data['paging'] = CPagerHelper::paginate($page_num, $db_serviceids, ZBX_SORT_UP, $paging_curl);
 
-		$data['services'] = API::Service()->get([
-			'output' => ['serviceid', 'name', 'status', 'created_at', 'readonly'],
-			'selectParents' => $filter['filter_set'] ? ['serviceid', 'name'] : null,
-			'selectChildren' => API_OUTPUT_COUNT,
-			'selectProblemTags' => API_OUTPUT_COUNT,
-			'selectProblemEvents' => ['eventid', 'severity', 'name'],
-			'selectTags' => ['tag', 'value'],
-			'serviceids' => $db_serviceids,
-			'sortfield' => ['sortorder', 'name'],
-			'sortorder' => ZBX_SORT_UP,
-			'preservekeys' => true
-		]);
+			$data['services'] = API::Service()->get([
+				'output' => ['serviceid', 'name', 'status', 'created_at', 'readonly'],
+				'selectParents' => $filter['filter_set'] ? ['serviceid', 'name'] : null,
+				'selectChildren' => API_OUTPUT_COUNT,
+				'selectProblemTags' => API_OUTPUT_COUNT,
+				'selectProblemEvents' => ['eventid', 'severity', 'name'],
+				'selectTags' => ['tag', 'value'],
+				'serviceids' => $db_serviceids,
+				'sortfield' => ['sortorder', 'name'],
+				'sortorder' => ZBX_SORT_UP,
+				'preservekeys' => true
+			]);
 
-		self::extendProblemEvents($data['services']);
+			self::extendProblemEvents($data['services']);
 
-		$data['tags'] = makeTags($data['services'], true, 'serviceid', ZBX_TAG_COUNT_DEFAULT, $filter['tags']);
+			$data['tags'] =
+				CTagHelper::getTagsHtml($data['services'], ZBX_TAG_OBJECT_SERVICE, ['filter_tags' => $filter['tags']]);
+		}
 
 		$response = new CControllerResponseData($data);
 		$response->setTitle(_('Services'));

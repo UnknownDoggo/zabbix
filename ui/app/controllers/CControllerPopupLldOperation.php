@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -24,14 +19,14 @@ require_once dirname(__FILE__).'/../../include/forms.inc.php';
 class CControllerPopupLldOperation extends CController {
 
 	protected function init() {
-		$this->disableSIDvalidation();
+		$this->disableCsrfValidation();
 	}
 
 	protected function checkInput() {
 		$fields = [
 			'no' =>					'int32',
-			'templated' =>			'in 0,1',
-			'operationobject' =>	'in '.implode(',', [OPERATION_OBJECT_ITEM_PROTOTYPE, OPERATION_OBJECT_TRIGGER_PROTOTYPE, OPERATION_OBJECT_GRAPH_PROTOTYPE, OPERATION_OBJECT_HOST_PROTOTYPE]),
+			'readonly' =>			'in 0,1',
+			'operationobject' =>	'in '.implode(',', [OPERATION_OBJECT_ITEM_PROTOTYPE, OPERATION_OBJECT_TRIGGER_PROTOTYPE, OPERATION_OBJECT_GRAPH_PROTOTYPE, OPERATION_OBJECT_HOST_PROTOTYPE, OPERATION_OBJECT_LLD_RULE_PROTOTYPE]),
 			'operator' =>			'in '.implode(',', [CONDITION_OPERATOR_EQUAL, CONDITION_OPERATOR_NOT_EQUAL, CONDITION_OPERATOR_LIKE, CONDITION_OPERATOR_NOT_LIKE, CONDITION_OPERATOR_REGEXP, CONDITION_OPERATOR_NOT_REGEXP]),
 			'value' =>				'string',
 			'opstatus' =>			'array',
@@ -98,7 +93,7 @@ class CControllerPopupLldOperation extends CController {
 
 		$page_options = [
 			'no' => $this->getInput('no', -1),
-			'templated' => $this->getInput('templated', 0),
+			'readonly' => $this->getInput('readonly', 0),
 			'operationobject' => $this->getInput('operationobject', OPERATION_OBJECT_ITEM_PROTOTYPE),
 			'operator' => $this->getInput('operator', CONDITION_OPERATOR_EQUAL),
 			'value' => $this->getInput('value', '')
@@ -215,7 +210,7 @@ class CControllerPopupLldOperation extends CController {
 					&& $page_options['ophistory']['history_mode'] == ITEM_STORAGE_CUSTOM
 					&& !validateTimeUnit($page_options['ophistory']['history'], SEC_PER_HOUR, 25 * SEC_PER_YEAR, true,
 						$error, ['usermacros' => true, 'lldmacros' => true])) {
-				error(_s('Incorrect value for field "%1$s": %2$s.', _('History storage period'), $error));
+				error(_s('Incorrect value for field "%1$s": %2$s.', _('History'), $error));
 			}
 
 			if (array_key_exists('optrends', $page_options)
@@ -223,7 +218,7 @@ class CControllerPopupLldOperation extends CController {
 					&& $page_options['optrends']['trends_mode'] == ITEM_STORAGE_CUSTOM
 					&& !validateTimeUnit($page_options['optrends']['trends'], SEC_PER_DAY, 25 * SEC_PER_YEAR, true,
 						$error, ['usermacros' => true, 'lldmacros' => true])) {
-				error(_s('Incorrect value for field "%1$s": %2$s.', _('Trend storage period'), $error));
+				error(_s('Incorrect value for field "%1$s": %2$s.', _('Trends'), $error));
 			}
 
 			// Return collected error messages.

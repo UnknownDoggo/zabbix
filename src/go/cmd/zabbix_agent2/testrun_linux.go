@@ -1,26 +1,21 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package main
 
 import (
-	"zabbix.com/internal/agent/scheduler"
+	"golang.zabbix.com/agent2/internal/agent/scheduler"
 )
 
 func checkMetrics(s scheduler.Scheduler) {
@@ -50,6 +45,8 @@ func checkMetrics(s scheduler.Scheduler) {
 		`vfs.dir.get[/var/log]`,
 		`net.dns[,zabbix.com]`,
 		`net.dns.record[,zabbix.com]`,
+		`net.dns.perf[,zabbix.com]`,
+		`net.dns.get[,zabbix.com]`,
 		`net.tcp.dns[,zabbix.com]`,
 		`net.tcp.dns.query[,zabbix.com]`,
 		`net.tcp.port[,80]`,
@@ -75,15 +72,27 @@ func checkMetrics(s scheduler.Scheduler) {
 		`vfs.fs.discovery`,
 		`vfs.fs.get`,
 		`vfs.dev.write[sda,operations]`,
+		`vfs.dev.get[disks,sda]`,
 		`net.if.in[lo,bytes]`,
 		`net.if.out[lo,bytes]`,
 		`net.if.total[lo,bytes]`,
 		`net.if.collisions[lo]`,
 		`net.if.discovery`,
+		`net.if.get`,
 		`vm.memory.size[total]`,
 		`proc.cpu.util[inetd]`,
 		`proc.num[inetd]`,
+		`proc.num[inetd,]`,
+		`proc.num[inetd,NONEXISTING_USER]`,
+		`proc.num[NONEXISTING_PROCESS]`,
 		`proc.mem[inetd]`,
+		`proc.mem[inetd,]`,
+		`proc.mem[inetd,NONEXISTING_USER]`,
+		`proc.mem[NONEXISTING_PROCESS]`,
+		`proc.get[inetd]`,
+		`proc.get[inetd,]`,
+		`proc.get[inetd,NONEXISTING_USER]`,
+		`proc.get[NONEXISTING_PROCESS]`,
 		`system.cpu.switches`,
 		`system.cpu.intr`,
 		`system.cpu.util[all,user,avg1]`,

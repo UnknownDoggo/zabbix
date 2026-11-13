@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
@@ -29,20 +24,29 @@ require_once dirname(__FILE__).'/helpers/CLogHelper.php';
  */
 class CIntegrationTest extends CAPITest {
 
+	protected static bool $trace_delays = true;
+
 	// Default iteration count for wait operations.
 	const WAIT_ITERATIONS			= 60;
+	const WAIT_ITERATIONS_STARTUP		= 15;
 
 	// Default delays (in seconds):
-	const WAIT_ITERATION_DELAY		= 1; // Wait iteration delay.
-	const CACHE_RELOAD_DELAY		= 5; // Configuration cache reload delay.
-	const DATA_PROCESSING_DELAY		= 5; // Data processing delay.
+	const WAIT_ITERATION_DELAY			= 1;
+	const WAIT_ITERATION_DELAY_FOR_SHUTDOWN		= 1;
+	const CACHE_RELOAD_DELAY			= 3; // Configuration cache reload delay.
+	const USER_PARAM_RELOAD_DELAY			= 3;
+	const HOUSEKEEPER_EXEC_DELAY			= 5;
+	const DATA_PROCESSING_DELAY			= 2;
 
 	// Zabbix component constants.
 	const COMPONENT_SERVER			= 'server';
-	const COMPONENT_SERVER_HANODE1	= 'server_ha1';
+	const COMPONENT_SERVER_HANODE1		= 'server_ha1';
 	const COMPONENT_PROXY			= 'proxy';
+	const COMPONENT_PROXY_HANODE1		= 'proxy_ha1';
 	const COMPONENT_AGENT			= 'agentd';
 	const COMPONENT_AGENT2			= 'agent2';
+	const COMPONENT_AGENT_3_0		= 'agentd_3.0';
+	const COMPONENT_JAVA			= 'java';
 
 	// Zabbix component port constants.
 	const AGENT_PORT_SUFFIX = '50';
@@ -50,6 +54,24 @@ class CIntegrationTest extends CAPITest {
 	const PROXY_PORT_SUFFIX = '52';
 	const SERVER_HANODE1_PORT_SUFFIX = '61';
 	const AGENT2_PORT_SUFFIX = '53';
+	const AGENT_3_0_PORT_SUFFIX = '54';
+	const PROXY_HANODE1_PORT_SUFFIX = '62';
+
+	private static $stats = [];
+
+	private const STAT_LABELS = [
+		'call_data_present'	=> 'callUntilDataIsPresent',
+		'call_count_present'	=> 'callUntilCountIsPresent',
+		'test_item_callback'	=> 'callTestItemUntilCallback',
+		'wait_log_line'		=> 'waitForLogLineToBePresent',
+		'wait_send'		=> 'sendDataValues',
+		'reload_config_cache'	=> 'reloadConfigurationCache',
+		'startup'		=> 'waitForStartup',
+		'shutdown'		=> 'waitForShutdown'
+	];
+
+	private static $suite_components_reuse = false;
+	private static $suite_components_running = false;
 
 	/**
 	 * Components required by test suite.
@@ -108,10 +130,17 @@ class CIntegrationTest extends CAPITest {
 			'configuration'	=> []
 		];
 
+		// Get suite-components-reuse flag.
+		if (in_array('true', $this->getAnnotationTokensByName($annotations, 'suite-components-reuse'))) {
+			self::$suite_components_reuse = true;
+		}
+
 		// Get required components.
 		foreach ($this->getAnnotationTokensByName($annotations, 'required-components') as $component) {
 			if ($component === 'agent') {
 				$component = self::COMPONENT_AGENT;
+			} else if ($component === 'agent_3.0') {
+				$component = self::COMPONENT_AGENT_3_0;
 			}
 
 			self::validateComponent($component);
@@ -186,6 +215,8 @@ class CIntegrationTest extends CAPITest {
 				= array_merge(self::$suite_configuration[$component], $result['configuration'][$component]);
 		}
 
+		$this->updatedAllowedHostsGlobalMacro();
+
 		try {
 			if ($this->prepareData() === false) {
 				throw new Exception('Failed to prepare data for test suite.');
@@ -205,6 +236,26 @@ class CIntegrationTest extends CAPITest {
 		// Code is not missing here.
 
 		return true;
+	}
+
+	/**
+	 * Determine which TLS library the server/agent/proxy binaries were built with.
+	 *
+	 * Mirrors the ENCRYPTION handling in build.xml's "with.encryption" property: GNUTLS, NONE, or
+	 * default to OpenSSL. Read directly from the environment, the same way IntegrationTests::suite()
+	 * reads DB/HISTORY_STORAGE to decide which suites to run.
+	 *
+	 * @return string 'gnutls', 'openssl' or 'none'
+	 */
+	protected static function detectTLSLibrary(): string {
+		switch (strtoupper((string) getenv('ENCRYPTION'))) {
+			case 'GNUTLS':
+				return 'gnutls';
+			case 'NONE':
+				return 'none';
+			default:
+				return 'openssl';
+		}
 	}
 
 	/**
@@ -232,17 +283,26 @@ class CIntegrationTest extends CAPITest {
 
 		self::setHostStatus($this->case_hosts, HOST_STATUS_MONITORED);
 
-		foreach ($this->case_components as $component) {
-			if (in_array($component, self::$suite_components)) {
-				throw new Exception('Component "'.$component.'" already started on suite level.');
+		if (!(self::$suite_components_reuse && self::$suite_components_running)) {
+			if (!self::$suite_components_reuse) {
+				foreach ($this->case_components as $component) {
+					if (in_array($component, self::$suite_components)) {
+						throw new Exception('Component "'.$component.'" already started on suite level.');
+					}
+				}
+
+				$components = array_merge(self::$suite_components, $this->case_components);
+			} else {
+				$components = self::$suite_components;
 			}
-		}
 
-		$components = array_merge(self::$suite_components, $this->case_components);
-
-		foreach ($components as $component) {
-			self::prepareComponentConfiguration($component, self::$case_configuration);
-			self::startComponent($component);
+			foreach ($components as $component) {
+				if ($component !== self::COMPONENT_JAVA) {
+					self::prepareComponentConfiguration($component, self::$case_configuration);
+				}
+				self::startComponent($component);
+			}
+			self::$suite_components_running = true;
 		}
 	}
 
@@ -252,14 +312,39 @@ class CIntegrationTest extends CAPITest {
 	 * @after
 	 */
 	public function onAfterTestCase() {
+		self::$last_test_case_name = get_class($this);
 		$components = array_merge(self::$suite_components, $this->case_components);
 
-		foreach ($components as $component) {
-			try {
+		if (self::$suite_components_reuse === false) {
+			foreach ($components as $component) {
 				self::stopComponent($component);
 			}
-			catch (Exception $e) {
-				self::zbxAddWarning($e->getMessage());
+			self::$suite_components_running = false;
+		}
+
+		$case_name = strtr($this->getName(true), [' ' => '-']);
+		$all_dir = PHPUNIT_COMPONENT_DIR.'all/'.$case_name;
+
+		// Directories are kept between runs, so they must be created only if they do not exist yet.
+		if (!is_dir($all_dir)) {
+			mkdir($all_dir, 0775, true);
+		}
+
+		if ($this->hasFailed()) {
+			$failed_dir = PHPUNIT_COMPONENT_DIR.'failed/'.$case_name;
+
+			if (!is_dir($failed_dir)) {
+				mkdir($failed_dir, 0775, true);
+			}
+		}
+
+		foreach (self::getComponents() as $component) {
+			$log_file = self::getLogPath($component);
+			if (file_exists($log_file)) {
+				copy($log_file, PHPUNIT_COMPONENT_DIR.'all/'.$case_name.'/'.basename($log_file));
+				if ($this->hasFailed()) {
+					copy($log_file, PHPUNIT_COMPONENT_DIR.'failed/'.$case_name.'/'.basename($log_file));
+				}
 			}
 		}
 
@@ -270,19 +355,23 @@ class CIntegrationTest extends CAPITest {
 		self::$case_configuration = [];
 	}
 
+	private static function recordDelay(string $key, float $elapsed): void {
+		self::$stats[$key]['file_time'] = (isset(self::$stats[$key]['file_time']) ?
+			self::$stats[$key]['file_time'] : 0.0) + $elapsed;
+		self::$stats[$key]['file_num'] = (isset(self::$stats[$key]['file_num']) ?
+			self::$stats[$key]['file_num'] : 0) + 1;
+	}
+
 	/**
 	 * Callback executed after every test suite.
 	 *
 	 * @afterClass
 	 */
 	public static function onAfterTestSuite() {
+		self::$suite_components_reuse = false;
+		self::$suite_components_running = false;
 		foreach (self::$suite_components as $component) {
-			try {
-				self::stopComponent($component);
-			}
-			catch (Exception $e) {
-				self::zbxAddWarning($e->getMessage());
-			}
+			self::stopComponent($component);
 		}
 
 		if (self::$suite_hosts) {
@@ -293,6 +382,37 @@ class CIntegrationTest extends CAPITest {
 		}
 
 		parent::onAfterTestSuite();
+
+		if (static::$trace_delays) {
+			$sum_file_time = 0.0;
+			$sum_file_num = 0;
+			$sum_total_time = 0.0;
+			$sum_total_num = 0;
+
+			foreach (self::STAT_LABELS as $key => $label) {
+				$file_time = isset(self::$stats[$key]['file_time']) ? self::$stats[$key]['file_time'] : 0.0;
+				$file_num = isset(self::$stats[$key]['file_num']) ? self::$stats[$key]['file_num'] : 0;
+				$total_time = (isset(self::$stats[$key]['total_time']) ? self::$stats[$key]['total_time'] : 0.0) +
+					$file_time;
+				$total_num = (isset(self::$stats[$key]['total_num']) ? self::$stats[$key]['total_num'] : 0) + $file_num;
+
+				self::$stats[$key]['total_time'] = $total_time;
+				self::$stats[$key]['total_num'] = $total_num;
+				self::$stats[$key]['file_time'] = 0.0;
+				self::$stats[$key]['file_num'] = 0;
+
+				fwrite(STDERR, sprintf("[%s] %s took: %.4fs num: %d [total: %.4fs, total num: %d]\n",
+					self::$last_test_case_name, $label, $file_time, $file_num, $total_time, $total_num));
+
+				$sum_file_time += $file_time;
+				$sum_file_num += $file_num;
+				$sum_total_time += $total_time;
+				$sum_total_num += $total_num;
+			}
+
+			fwrite(STDERR, sprintf("[%s] sum of delays per test file: %.4fs num: %d [total %.4fs, total num: %d]\n",
+				self::$last_test_case_name, $sum_file_time, $sum_file_num, $sum_total_time, $sum_total_num));
+		}
 	}
 
 	/**
@@ -303,7 +423,8 @@ class CIntegrationTest extends CAPITest {
 	private static function getComponents() {
 		return [
 			self::COMPONENT_SERVER, self::COMPONENT_PROXY, self::COMPONENT_AGENT, self::COMPONENT_AGENT2,
-			self::COMPONENT_SERVER_HANODE1
+			self::COMPONENT_SERVER_HANODE1, self::COMPONENT_AGENT_3_0, self::COMPONENT_PROXY_HANODE1,
+			self::COMPONENT_JAVA
 		];
 	}
 	/**
@@ -324,14 +445,16 @@ class CIntegrationTest extends CAPITest {
 	 *
 	 * @param string $component              component name
 	 * @param string $waitLogLineOverride    already log line to use to consider component as running
-	 * @param bool $skip_pid    skip PID check
+	 * @param bool   $skip_pid               skip PID check
 	 *
 	 * @throws Exception    on failed wait operation
 	 */
 	protected static function waitForStartup($component, $waitLogLineOverride = '', $skip_pid = false) {
+		$start = microtime(true);
 		self::validateComponent($component);
 
-		for ($r = 0; $r < self::WAIT_ITERATIONS; $r++) {
+		$saved_time = time();
+		for ($r = 0; $r < self::WAIT_ITERATIONS_STARTUP; $r++) {
 			$pid = @file_get_contents(self::getPidPath($component));
 			if ($skip_pid == true || ($pid && is_numeric($pid) && posix_kill($pid, 0))) {
 				switch ($component) {
@@ -341,44 +464,142 @@ class CIntegrationTest extends CAPITest {
 					case self::COMPONENT_SERVER:
 					case self::COMPONENT_PROXY:
 						$line = empty($waitLogLineOverride) ? 'started [trapper #1]' : $waitLogLineOverride;
-						self::waitForLogLineToBePresent($component, $line, false, 5, 1);
+						self::waitForLogLineToBePresent($component, $line, false, 10, 1);
 						break;
 					case self::COMPONENT_AGENT:
+					case self::COMPONENT_AGENT_3_0:
 						self::waitForLogLineToBePresent($component, 'started [listener #1]', false, 5, 1);
 						break;
 
 					case self::COMPONENT_AGENT2:
 						self::waitForLogLineToBePresent($component, 'Zabbix Agent2 hostname', false, 5, 1);
 						break;
+					case self::COMPONENT_JAVA:
+						self::waitForLogLineToBePresent($component, 'listening on', false, 10, 3);
+						break;
 				}
+
+				if (static::$trace_delays) {
+					self::recordDelay('startup', microtime(true) - $start);
+				}
+
 				return;
 			}
 
 			sleep(self::WAIT_ITERATION_DELAY);
 		}
 
-		throw new Exception('Failed to wait for component "'.$component.'" to start.');
+		if (static::$trace_delays) {
+			self::recordDelay('startup', microtime(true) - $start);
+		}
+
+		throw new Exception('Failed to wait for component "'.$component.'" to start. Waited '.(time() - $saved_time).' seconds..');
+	}
+
+	/**
+	 * Checks absence of pid file after kill.
+	 *
+	 * @param string $parent_pid
+	 */
+	private static function waitComponentStopped($parent_pid) {
+		$usleep_total = 0;
+
+		for ($i = 0; $i < self::WAIT_ITERATIONS; $i++) {
+			if (!posix_kill($parent_pid, 0)) {
+				return;
+			}
+
+			if ($usleep_total < 1000000) {
+				$usleep_total += 100000;
+				usleep(100000);
+				$i = -1;
+				continue;
+			}
+
+			sleep(self::WAIT_ITERATION_DELAY_FOR_SHUTDOWN);
+		}
 	}
 
 	/**
 	 * Wait for component to stop.
 	 *
-	 * @param string $component    component name
+	 * @param string $component
+	 * @param string $parent_pid
+	 * @param array  $child_pids
 	 *
 	 * @throws Exception    on failed wait operation
 	 */
-	protected static function waitForShutdown($component) {
-		self::validateComponent($component);
+	protected static function waitForShutdown(string $component, string $parent_pid, array $child_pids) {
+		$start = microtime(true);
+		self::waitComponentStopped($parent_pid);
 
-		for ($r = 0; $r < self::WAIT_ITERATIONS; $r++) {
-			if (!file_exists(self::getPidPath($component))) {
-				return;
+		$failed_pids = [];
+		$failed_kills = [];
+		$backtraces = [];
+		$child_pids[] = $parent_pid;
+
+		foreach ($child_pids as $child_pid) {
+			if (ctype_digit($child_pid) && posix_kill($child_pid, 0)) {
+				$bt_lines = [];
+				exec('gdb -batch -ex "set pagination 0" -ex "thread apply all bt" -p '.$child_pid.' 2>&1', $bt_lines);
+				$backtraces[$child_pid] = implode("\n", $bt_lines);
+				$failed_pids[] = $child_pid;
 			}
-
-			sleep(self::WAIT_ITERATION_DELAY);
 		}
 
-		throw new Exception('Failed to wait for component "'.$component.'" to stop.');
+		if ($failed_pids) {
+			sleep(3);
+		}
+
+		foreach ($failed_pids as $failed_pid) {
+			if (!posix_kill($failed_pid, SIGKILL)) {
+				$error_code = posix_get_last_error();
+				$failed_kills[] = ' - '.$failed_pid.' ('.$error_code.') '.posix_strerror($error_code);
+			}
+		}
+
+		if (!$failed_pids) {
+			if (static::$trace_delays) {
+				self::recordDelay('shutdown', microtime(true) - $start);
+			}
+
+			return;
+		}
+
+		$log_path = self::getLogPath($component);
+		$log = CLogHelper::readLog($log_path, false, false);
+
+		$fatal_strings = ['child process exited', '=== Backtrace: ===', '====== Fatal information: ======'];
+		$fatal_offset = null;
+
+		foreach ($fatal_strings as $fatal_string) {
+			$offset = CLogHelper::getLineOffset($log, $fatal_string);
+			if ($offset !== null && ($fatal_offset === null || $offset < $fatal_offset)) {
+				$fatal_offset = $offset;
+			}
+		}
+
+		if ($fatal_offset !== null) {
+			$log = substr($log, $fatal_offset);
+		}
+		$failed_kills = $failed_kills
+			? "\n".'The following processes could not be terminated using SIGKILL:'."\n".implode("\n", $failed_kills)
+			: '';
+
+		$bt_section = '';
+		foreach ($backtraces as $bt_pid => $bt) {
+			if ($bt !== '') {
+				$bt_section .= "\nBacktrace for PID ".$bt_pid.":\n".$bt."\n";
+			}
+		}
+
+		if (static::$trace_delays) {
+			self::recordDelay('shutdown', microtime(true) - $start);
+		}
+
+		throw new Exception('Multiple child processes for component "'.$component.'" did not stop gracefully:'."\n".
+			implode(', ', $failed_pids).$failed_kills.$bt_section."\n".
+			'Log file contents: '."\n".$log."\n");
 	}
 
 	/**
@@ -423,13 +644,15 @@ class CIntegrationTest extends CAPITest {
 	 * @return array
 	 */
 	protected static function getDefaultComponentConfiguration() {
-		global $DB;
+		global $DB, $HISTORY_PROVIDERS, $TELEMETRY_PROVIDERS;
 
 		$db = [
 			'DBName' => $DB['DATABASE'],
 			'DBUser' => $DB['USER'],
 			'DBPassword' => $DB['PASSWORD']
 		];
+		$db_history = [];
+		$db_telemetry = [];
 
 		if ($DB['SERVER'] !== 'localhost' && $DB['SERVER'] !== '127.0.0.1') {
 			$db['DBHost'] = $DB['SERVER'];
@@ -443,24 +666,65 @@ class CIntegrationTest extends CAPITest {
 			$db['DBSchema'] = $DB['SCHEMA'];
 		}
 
+		if (isset($HISTORY_PROVIDERS)) {
+			foreach ($HISTORY_PROVIDERS as $provider) {
+				$provider_str = $provider['provider'].';'.
+					'value_types="'.implode(',', $provider['types']).'",'.
+					'url='.$provider['url'];
+				foreach (['username', 'password', 'db'] as $key) {
+					if (array_key_exists($key, $provider)) {
+						$provider_str .= ','.$key.'='.$provider[$key];
+					}
+				}
+				$db_history['HistoryProvider'][] = $provider_str;
+			}
+		}
+
+		if (isset($TELEMETRY_PROVIDERS)) {
+			foreach ($TELEMETRY_PROVIDERS as $provider) {
+				// Server and proxy only support ClickHouse as the telemetry (APM) data store.
+				if ($provider['provider'] !== 'clickhouse') {
+					continue;
+				}
+
+				$provider_str = $provider['provider'].';url='.$provider['url'];
+				foreach (['username', 'password', 'db'] as $key) {
+					if (array_key_exists($key, $provider)) {
+						$provider_str .= ','.$key.'='.$provider[$key];
+					}
+				}
+				$db_telemetry['TelemetryProvider'][] = $provider_str;
+			}
+		}
+
 		$configuration = [
-			self::COMPONENT_SERVER => array_merge($db, [
+			self::COMPONENT_SERVER => array_merge($db, $db_history, $db_telemetry, [
 				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_server.log',
 				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_server.pid',
 				'SocketDir' => PHPUNIT_COMPONENT_DIR,
-				'ListenPort' => PHPUNIT_PORT_PREFIX.self::SERVER_PORT_SUFFIX
+				'ListenPort' => PHPUNIT_PORT_PREFIX.self::SERVER_PORT_SUFFIX,
+				'AllowUnsupportedDBVersions' => '1'
 			]),
-			self::COMPONENT_SERVER_HANODE1 => array_merge($db, [
+			self::COMPONENT_SERVER_HANODE1 => array_merge($db, $db_history, $db_telemetry, [
 				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_server_ha1.log',
 				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_server_ha1.pid',
 				'SocketDir' => PHPUNIT_COMPONENT_DIR.'ha1/',
-				'ListenPort' => PHPUNIT_PORT_PREFIX.self::SERVER_HANODE1_PORT_SUFFIX
+				'ListenPort' => PHPUNIT_PORT_PREFIX.self::SERVER_HANODE1_PORT_SUFFIX,
+				'AllowUnsupportedDBVersions' => '1'
 			]),
-			self::COMPONENT_PROXY => array_merge($db, [
+			self::COMPONENT_PROXY => array_merge($db, $db_telemetry, [
 				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_proxy.log',
 				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_proxy.pid',
 				'SocketDir' => PHPUNIT_COMPONENT_DIR,
-				'ListenPort' => PHPUNIT_PORT_PREFIX.self::PROXY_PORT_SUFFIX
+				'ListenPort' => PHPUNIT_PORT_PREFIX.self::PROXY_PORT_SUFFIX,
+				'AllowUnsupportedDBVersions' => '1'
+			]),
+			self::COMPONENT_PROXY_HANODE1 => array_merge($db, $db_telemetry, [
+				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_proxy_ha1.log',
+				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_proxy_ha1.pid',
+				'SocketDir' => PHPUNIT_COMPONENT_DIR.'ha1/',
+				'ListenPort' => PHPUNIT_PORT_PREFIX.self::PROXY_HANODE1_PORT_SUFFIX,
+				'AllowUnsupportedDBVersions' => '1'
 			]),
 			self::COMPONENT_AGENT => [
 				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_agent.log',
@@ -472,10 +736,16 @@ class CIntegrationTest extends CAPITest {
 				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_agent2.pid',
 				'ControlSocket' => PHPUNIT_COMPONENT_DIR.'zabbix_agent2.sock',
 				'ListenPort' => PHPUNIT_PORT_PREFIX.self::AGENT2_PORT_SUFFIX
+			],
+			self::COMPONENT_AGENT_3_0 => [
+				'LogFile' => PHPUNIT_COMPONENT_DIR.'zabbix_agent_3.0.log',
+				'PidFile' => PHPUNIT_COMPONENT_DIR.'zabbix_agent_3.0.pid',
+				'ListenPort' => PHPUNIT_PORT_PREFIX.self::AGENT_3_0_PORT_SUFFIX
 			]
 		];
 
 		$configuration[self::COMPONENT_PROXY]['DBName'] .= '_proxy';
+		$configuration[self::COMPONENT_PROXY_HANODE1]['DBName'] .= '_proxy_ha1';
 
 		return $configuration;
 	}
@@ -491,10 +761,14 @@ class CIntegrationTest extends CAPITest {
 	protected static function prepareComponentConfiguration($component, $values) {
 		self::validateComponent($component);
 
-		if ($component == self::COMPONENT_SERVER_HANODE1) {
+		switch ($component) {
+		case self::COMPONENT_SERVER_HANODE1:
 			$path = PHPUNIT_CONFIG_SOURCE_DIR.'zabbix_'.self::COMPONENT_SERVER.'.conf';
-		}
-		else {
+			break;
+		case self::COMPONENT_PROXY_HANODE1:
+			$path = PHPUNIT_CONFIG_SOURCE_DIR.'zabbix_'.self::COMPONENT_PROXY.'.conf';
+			break;
+		default:
 			$path = PHPUNIT_CONFIG_SOURCE_DIR.'zabbix_'.$component.'.conf';
 		}
 
@@ -504,7 +778,7 @@ class CIntegrationTest extends CAPITest {
 
 		if (array_key_exists($component, $values) && $values[$component] && is_array($values[$component])) {
 			foreach ($values[$component] as $key => $value) {
-				$config = preg_replace('/^(\s*'.$key.'\s*=.*)$/m', '#\1', $config);
+				$config = preg_replace('/^([ \t]*'.$key.'[ \t]*=.*)$/m', '#\1', $config);
 				foreach ((array) $value as $val) {
 					$config .= "\n".$key.'='.$val;
 				}
@@ -530,6 +804,16 @@ class CIntegrationTest extends CAPITest {
 	protected function startComponent($component, $waitLogLineOverride = '', $skip_pid = false) {
 		self::validateComponent($component);
 
+		if ($component === self::COMPONENT_JAVA) {
+			$script = PHPUNIT_BINARY_DIR.'/zabbix_java/startup.sh';
+
+			self::clearLog($component);
+			self::executeCommand($script, []);
+			self::waitForStartup($component, $waitLogLineOverride, $skip_pid);
+
+			return;
+		}
+
 		$config = PHPUNIT_CONFIG_DIR.'zabbix_'.$component.'.conf';
 		if (!file_exists($config)) {
 			throw new Exception('There is no configuration file for component "'.$component.'".');
@@ -539,22 +823,26 @@ class CIntegrationTest extends CAPITest {
 
 		$background = ($component === self::COMPONENT_AGENT2);
 
-		$bin_path = '';
-
-		if ($component === self::COMPONENT_SERVER_HANODE1) {
-			$bin_path = "/tmp/zabbix_".self::COMPONENT_SERVER_HANODE1;
-			if (file_exists($bin_path)) {
-				unlink($bin_path);
-			}
-			copy(PHPUNIT_BINARY_DIR.'zabbix_'.self::COMPONENT_SERVER, $bin_path);
-			chmod($bin_path, 0755);
-		}
-		else {
+		switch ($component) {
+		case self::COMPONENT_SERVER_HANODE1:
+			$bin_path = PHPUNIT_BINARY_DIR.'zabbix_'.self::COMPONENT_SERVER;
+			break;
+		case self::COMPONENT_PROXY_HANODE1:
+			$bin_path = PHPUNIT_BINARY_DIR.'zabbix_'.self::COMPONENT_PROXY;
+			break;
+		default:
 			$bin_path = PHPUNIT_BINARY_DIR.'zabbix_'.$component;
 		}
 
-		self::executeCommand($bin_path, ['-c', $config], $background);
-		self::waitForStartup($component, $waitLogLineOverride, $skip_pid );
+		if (defined('PHPUNIT_SERVER_GDBSERVER_DEBUG') && $component === self::COMPONENT_SERVER) {
+			fwrite(STDERR, "Starting server debug session: ".PHPUNIT_SERVER_GDBSERVER_DEBUG." $bin_path\n");
+			self::executeCommand(PHPUNIT_SERVER_GDBSERVER_DEBUG, [$bin_path, '-f', '-c', $config], true);
+			fwrite(STDOUT, "Press ENTER to continue ...");
+			fgets(STDIN);
+		} else {
+			self::executeCommand($bin_path, ['-c', $config], $background);
+			self::waitForStartup($component, $waitLogLineOverride, $skip_pid);
+		}
 	}
 
 	/**
@@ -567,11 +855,50 @@ class CIntegrationTest extends CAPITest {
 	protected static function stopComponent($component) {
 		self::validateComponent($component);
 
-		$pid = @file_get_contents(self::getPidPath($component));
-		if ($pid && is_numeric($pid)) {
-			posix_kill($pid, SIGTERM);
+		$child_pids = [];
+		$parent_pid = @file_get_contents(self::getPidPath($component));
+
+		if ($parent_pid !== false && is_numeric($parent_pid)) {
+			$output = shell_exec('pgrep -P '.$parent_pid);
+			if ($output !== false && $output !== null) {
+				$child_pids = explode("\n", trim($output));
+			}
+
+			posix_kill($parent_pid, SIGTERM);
+
+			self::waitForShutdown($component, $parent_pid, $child_pids);
 		}
-		self::waitForShutdown($component);
+	}
+
+	/**
+	 * Stop component by using SIGKILL signal.
+	 *
+	 * @param string $component    component name
+	 *
+	 * @throws Exception    on missing configuration or failed stop
+	 */
+	protected static function killComponent($component) {
+		self::validateComponent($component);
+
+		$child_pids = [];
+		$pid_path = self::getPidPath($component);
+		$pid = @file_get_contents($pid_path);
+
+		if ($pid !== false && is_numeric($pid)) {
+			$output = shell_exec('pgrep -P '.$pid);
+			if ($output !== false && $output !== null) {
+				$child_pids = explode("\n", trim($output));
+				foreach ($child_pids as $child_pid) {
+					if (ctype_digit($child_pid) && posix_kill($child_pid, 0)) {
+						posix_kill($child_pid, SIGKILL);
+					}
+				}
+			}
+
+			posix_kill($pid, SIGKILL);
+		}
+
+		unlink($pid_path);
 	}
 
 	/**
@@ -584,12 +911,12 @@ class CIntegrationTest extends CAPITest {
 	protected function getClient($component) {
 		self::validateComponent($component);
 
-		if ($component === self::COMPONENT_AGENT || $component === self::COMPONENT_AGENT2) {
+		if ($component === self::COMPONENT_AGENT || $component === self::COMPONENT_AGENT2 || $component == self::COMPONENT_AGENT_3_0) {
 			throw new Exception('There is no client available for Zabbix Agent.');
 		}
 
-		return new CZabbixClient('localhost', self::getConfigurationValue($component, 'ListenPort', 10051), 3, 3,
-			ZBX_SOCKET_BYTES_LIMIT
+		return new CZabbixClient('localhost', self::getConfigurationValue($component, 'ListenPort', 10051), 10, 10,
+			ZBX_SOCKET_BYTES_LIMIT, tls_config: ['ACTIVE' => false]
 		);
 	}
 
@@ -601,7 +928,7 @@ class CIntegrationTest extends CAPITest {
 	protected function getActiveComponent() {
 		$components = [];
 		foreach (array_merge(self::$suite_components, $this->case_components) as $component) {
-			if ($component !== self::COMPONENT_AGENT && $component !== self::COMPONENT_AGENT2) {
+			if ($component !== self::COMPONENT_AGENT && $component !== self::COMPONENT_AGENT2 && $component !== self::COMPONENT_AGENT_3_0) {
 				$components[] = $component;
 			}
 		}
@@ -617,19 +944,24 @@ class CIntegrationTest extends CAPITest {
 	/**
 	 * Send value for items to server.
 	 *
-	 * @param string $type         data type
-	 * @param array  $values       item values
-	 * @param string $component    component name or null for active component
+	 * @param string  $type          data type
+	 * @param array   $values        item values
+	 * @param string  $component     component name or null for active component
+	 * @param integer $delayOverride
+	 * @param integer $time
 	 *
 	 * @return array    processing result
 	 */
-	protected function sendDataValues($type, $values, $component = null) {
+	protected function sendDataValues($type, $values, $component = null, $delayOverride = null, $time = null) {
+
+		$start = microtime(true);
+
 		if ($component === null) {
 			$component = $this->getActiveComponent();
 		}
 
 		$client = $this->getClient($component);
-		$result = $client->sendDataValues($type, $values);
+		$result = $client->sendDataValues($type, $values, $time);
 
 		// Check that data was sent successfully.
 		$this->assertTrue(($result !== false),
@@ -642,23 +974,31 @@ class CIntegrationTest extends CAPITest {
 				'Processed value count doesn\'t match sent value count.'
 		);
 
-		sleep(self::DATA_PROCESSING_DELAY);
+		$delay = ($delayOverride !== null) ? $delayOverride : self::DATA_PROCESSING_DELAY;
 
+		if ($delay > 0) {
+			sleep($delay);
+		}
+		if (static::$trace_delays) {
+			self::recordDelay('wait_send', microtime(true) - $start);
+		}
 		return $result;
 	}
 
 	/**
 	 * Send single item value.
 	 *
-	 * @param string $type         data type
-	 * @param string $host         host name
-	 * @param string $key          item key
-	 * @param mixed  $value        item value
-	 * @param string $component    component name or null for active component
+	 * @param string  $type         data type
+	 * @param string  $host         host name
+	 * @param string  $key          item key
+	 * @param mixed   $value        item value
+	 * @param string  $component    component name or null for active component
+	 * @param integer $delayOverride
+	 * @param integer $time
 	 *
 	 * @return array    processing result
 	 */
-	protected function sendDataValue($type, $host, $key, $value, $component = null) {
+	protected function sendDataValue($type, $host, $key, $value, $component = null, $delayOverride = null, $time = null) {
 		if (!is_scalar($value)) {
 			$value = json_encode($value);
 		}
@@ -669,33 +1009,36 @@ class CIntegrationTest extends CAPITest {
 			'value' => $value
 		];
 
-		return $this->sendDataValues($type, [$data], $component);
+		return $this->sendDataValues($type, [$data], $component, $delayOverride, $time);
 	}
 
 	/**
 	 * Send values to trapper items.
 	 *
-	 * @param array  $values       item values
-	 * @param string $component    component name or null for active component
+	 * @param array   $values        item values
+	 * @param string  $component     component name or null for active component
+	 * @param integer $delayOverride
 	 *
 	 * @return array    processing result
 	 */
-	protected function sendSenderValues($values, $component = null) {
-		return $this->sendDataValues('sender', $values, $component);
+	protected function sendSenderValues($values, $component = null, $delayOverride = null) {
+		return $this->sendDataValues('sender', $values, $component, $delayOverride);
 	}
 
 	/**
 	 * Send single value for trapper item.
 	 *
-	 * @param string $host         host name
-	 * @param string $key          item key
-	 * @param mixed  $value        item value
-	 * @param string $component    component name or null for active component
+	 * @param string  $host          host name
+	 * @param string  $key           item key
+	 * @param mixed   $value         item value
+	 * @param string  $component     component name or null for active component
+	 * @param integer $delayOverride
+	 * @param integer $time
 	 *
 	 * @return array    processing result
 	 */
-	protected function sendSenderValue($host, $key, $value, $component = null) {
-		return $this->sendDataValue('sender', $host, $key, $value, $component);
+	protected function sendSenderValue($host, $key, $value, $component = null, $delayOverride = null, $time = null) {
+		return $this->sendDataValue('sender', $host, $key, $value, $component, $delayOverride, $time);
 	}
 
 	/**
@@ -708,6 +1051,52 @@ class CIntegrationTest extends CAPITest {
 	 */
 	protected function sendAgentValues($values, $component = null) {
 		return $this->sendDataValues('agent', $values, $component);
+	}
+
+	/**
+	 * Send item values using the agent data protocol (variant 2, itemid-based).
+	 *
+	 * When $proxy is specified, the values are sent as a 'proxy data' request impersonating
+	 * the named proxy instead of the active agent protocol.
+	 *
+	 * @param array       $values        item values, each with keys: itemid, value, clock, ns
+	 * @param string      $host          Zabbix host name
+	 * @param string      $component     component name or null for active component
+	 * @param integer     $delayOverride override default processing delay, or null to use default
+	 * @param string|null $proxy         proxy name to send as, or null for agent data
+	 *
+	 * @return array|bool    processing result
+	 */
+	protected function sendAgentDataValues($values, $host, $component = null, $delayOverride = null, $proxy = null) {
+		$start = microtime(true);
+
+		if ($component === null) {
+			$component = $this->getActiveComponent();
+		}
+
+		$client = $this->getClient($component);
+		$session = md5(uniqid('', true));
+		$result = $client->sendAgentDataValues($values, $session, $host, ZABBIX_VERSION, $proxy);
+
+		if ($proxy === null) {
+			$this->assertTrue(array_key_exists('processed', $result),
+				'Result doesn\'t contain "processed" count.'
+			);
+			$this->assertEquals(count($values), $result['processed'],
+				'Processed value count doesn\'t match sent value count.'
+			);
+		}
+
+		$delay = ($delayOverride !== null) ? $delayOverride : self::DATA_PROCESSING_DELAY;
+
+		if ($delay > 0) {
+			sleep($delay);
+		}
+		if (static::$trace_delays) {
+			self::recordDelay('wait_send', microtime(true) - $start);
+		}
+
+		return $result;
 	}
 
 	/**
@@ -750,16 +1139,90 @@ class CIntegrationTest extends CAPITest {
 	/**
 	 * Reload configuration cache.
 	 *
-	 * @param string $component    component name or null for active component
+	 * @param string  $component     component name or null for active component
+	 * @param integer $delayOverride
 	 */
-	protected function reloadConfigurationCache($component = null) {
+	protected function reloadConfigurationCache($component = null, $delayOverride = null) {
+		$start = microtime(true);
+
 		if ($component === null) {
 			$component = $this->getActiveComponent();
 		}
 
-		self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_'.$component, ['--runtime-control', 'config_cache_reload']);
+		if ($component == self::COMPONENT_PROXY_HANODE1) {
+			self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_proxy', [
+				'-c', PHPUNIT_CONFIG_DIR.'zabbix_'.self::COMPONENT_PROXY_HANODE1.'.conf', '--runtime-control', 'config_cache_reload'
+			]);
+		} else {
+			self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_'.$component, ['--runtime-control', 'config_cache_reload']);
+		}
 
-		sleep(self::CACHE_RELOAD_DELAY);
+		$delay = ($delayOverride !== null) ? $delayOverride : self::CACHE_RELOAD_DELAY;
+
+		if ($delay !== 0) {
+			sleep($delay);
+		}
+
+		if (static::$trace_delays) {
+			self::recordDelay('reload_config_cache', microtime(true) - $start);
+		}
+	}
+
+	/**
+	 * Reload configuration cache and wait for it to finish.
+	 *
+	 * @param string  $component     component name or null for active component
+	 * @param integer $delayOverride
+	 */
+	protected function reloadConfigurationCacheAndWaitForLogLine($component = null, $delayOverride = 0) {
+		if ($component === null) {
+			$component = $this->getActiveComponent();
+		}
+
+		self::skipLog($component);
+
+		$this->reloadConfigurationCache($component, $delayOverride);
+
+		switch ($component) {
+			case self::COMPONENT_SERVER:
+			case self::COMPONENT_PROXY:
+			case self::COMPONENT_PROXY_HANODE1:
+				$line = 'finished forced reloading of the configuration cache';
+				break;
+			default:
+				$this->fail('Configuration cache reload wait is not supported for component "'.
+					$component.'".');
+		}
+
+		$this->waitForLogLineToBePresent($component, $line);
+	}
+
+	/**
+	 * Reload user parameters.
+	 *
+	 * @param string $component    component name or null for active component
+	 */
+	protected function reloadUserParameters($component = null) {
+		if ($component === null) {
+			$component = $this->getActiveComponent();
+		}
+
+		self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_'.$component, ['--runtime-control', 'userparameter_reload']);
+
+		sleep(self::USER_PARAM_RELOAD_DELAY);
+	}
+
+	/**
+	 * @param string $component    component name or null for active component
+	 */
+	protected function executeHousekeeper($component = null) {
+		if ($component === null) {
+			$component = $this->getActiveComponent();
+		}
+
+		self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_'.$component, ['--runtime-control', 'housekeeper_execute']);
+
+		sleep(self::HOUSEKEEPER_EXEC_DELAY);
 	}
 
 	/**
@@ -783,19 +1246,46 @@ class CIntegrationTest extends CAPITest {
 		}
 
 		$exception = null;
+		$last_response = null;
+		$callback_error = null;
+		$usleep_total = 0;
+		$start = microtime(true);
+
 		for ($i = 0; $i < $iterations; $i++) {
+			$callback_error = null;
 			try {
 				$response = $this->call($method, $params);
+				$last_response = $response;
 
 				if (is_array($response['result']) && count($response['result']) > 0
-						&& ($callback === null || call_user_func($callback, $response))) {
+					&& ($callback === null || ($result = call_user_func($callback, $response)) === true)) {
+
+					if (static::$trace_delays) {
+						self::recordDelay('call_data_present', microtime(true) - $start);
+					}
+
 					return $response;
+				}
+
+				if (isset($result) && is_string($result) && $result !== '') {
+					$callback_error = $result;
 				}
 			} catch (Exception $e) {
 				$exception = $e;
 			}
 
+			if ($usleep_total < 1000000 && $iterations > 1) {
+				$usleep_total += 100000;
+				usleep(100000);
+				$i = -1;
+				continue;
+			}
+
 			sleep($delay);
+		}
+
+		if (static::$trace_delays) {
+			self::recordDelay('call_data_present', microtime(true) - $start);
 		}
 
 		if ($exception !== null) {
@@ -803,8 +1293,169 @@ class CIntegrationTest extends CAPITest {
 		}
 
 		$this->fail('Data requested from '.$method.' API is not present within specified interval. Params used:'.
-				"\n".json_encode($params)
+				"\n".json_encode($params).
+				"\nLast response: ".json_encode($last_response).
+				($callback_error !== null ? "\nCallback error: ".$callback_error : '')
 		);
+	}
+
+	/**
+	 * Request data from API until result count matches expected value (@see call).
+	 *
+	 * @param string   $method          API method to be called
+	 * @param mixed    $params          API call params
+	 * @param integer  $expected_count  expected result count
+	 * @param integer  $iterations      iteration count
+	 * @param integer  $delay           iteration delay
+	 * @param callable $callback        Callback function to test if API response is valid.
+	 * @param callable $info_callback   optional callback returning extra diagnostics for the failure message
+	 *
+	 * @return array
+	 */
+	public function callUntilCountIsPresent($method, $params, $expected_count, $iterations = null, $delay = null, $callback = null, $info_callback = null) {
+		if ($iterations === null) {
+			$iterations = self::WAIT_ITERATIONS;
+		}
+
+		if ($delay === null) {
+			$delay = self::WAIT_ITERATION_DELAY;
+		}
+
+		$count_params = array_merge($params, ['countOutput' => true]);
+		$exception = null;
+		$usleep_total = 0;
+		$last_count = null;
+		$start = microtime(true);
+		for ($i = 0; $i < $iterations; $i++) {
+			try {
+				$response = $this->call($method, $count_params);
+
+				if (isset($response['result'])) {
+					$last_count = $response['result'];
+				}
+
+				$callback_ok = ($callback === null || call_user_func($callback, $response) === true);
+
+				if (isset($response['result']) && $response['result'] == $expected_count && $callback_ok) {
+					if (static::$trace_delays) {
+						self::recordDelay('call_count_present', microtime(true) - $start);
+					}
+
+					return $response;
+				}
+			} catch (Exception $e) {
+				$exception = $e;
+			}
+
+			if ($usleep_total < 1000000 && $iterations > 1) {
+				$usleep_total += 100000;
+				usleep(100000);
+				$i = -1;
+				continue;
+			}
+
+			sleep($delay);
+		}
+
+		if (static::$trace_delays) {
+			self::recordDelay('call_count_present', microtime(true) - $start);
+		}
+
+		if ($exception !== null) {
+			throw $exception;
+		}
+
+		$message = 'Count requested from '.$method.' API did not match expected count ('.$expected_count.', '.
+				'last count '.($last_count === null ? 'unknown' : $last_count).') within '.
+				'specified interval. Params used:'."\n".json_encode($params);
+		if (isset($response)) {
+			$message .= "\nLast response:\n".json_encode($response);
+		}
+		if ($info_callback !== null) {
+			$message .= "\n".call_user_func($info_callback);
+		}
+		$this->fail($message);
+	}
+
+	/**
+	 * Test an item on the server repeatedly until the given callback accepts its result (@see testItem).
+	 *
+	 * The item is tested via the "item.test" request (@see CZabbixServer::testItem), which allows waiting on
+	 * values that are not exposed through the API (e.g. internal statistics such as zabbix["cep"]). The callback
+	 * receives the raw testItem response and decides whether the wait is satisfied - returning true stops the
+	 * loop. This keeps the comparison logic (equals, at-least, extract-from-JSON, ...) in the caller instead of
+	 * baking it into this helper.
+	 *
+	 * @param array    $item           item definition (key, type, value_type, ...)
+	 * @param callable $callback       predicate receiving the raw testItem response; return true when satisfied
+	 * @param array    $options        item.test options
+	 * @param integer  $timeout        overall timeout in milliseconds (the item is polled every 100 ms)
+	 * @param callable $info_callback  optional callback returning extra diagnostics for the failure message
+	 *
+	 * @return array  the testItem response that satisfied the callback
+	 */
+	public function callTestItemUntilCallback(array $item, callable $callback,
+			array $options = ['single' => false, 'state' => 0], $timeout = null, $info_callback = null) {
+		if ($timeout === null) {
+			$timeout = self::WAIT_ITERATIONS * self::WAIT_ITERATION_DELAY * 1000;
+		}
+
+		// The item.test request needs an authorized session; the host block is omitted as internal items
+		// (e.g. zabbix["cep"]) carry no host context - the server defaults maintenance to off/normal.
+		if (CAPIHelper::getSessionId() === null) {
+			$this->authorize(PHPUNIT_LOGIN_NAME, PHPUNIT_LOGIN_PWD);
+		}
+		$sid = CAPIHelper::getSessionId();
+
+		$data = [
+			'options' => $options,
+			'item' => $item
+		];
+
+		$client = $this->getClient(self::COMPONENT_SERVER);
+		$exception = null;
+		$last_result = null;
+		$start = microtime(true);
+		$deadline = $start + $timeout / 1000;
+		while (true) {
+			try {
+				$result = $client->testItem($data, $sid);
+				$last_result = $result;
+
+				if (call_user_func($callback, $result) === true) {
+					if (static::$trace_delays) {
+						self::recordDelay('test_item_callback', microtime(true) - $start);
+					}
+
+					return $result;
+				}
+			} catch (Exception $e) {
+				$exception = $e;
+			}
+
+			// Poll every 100 ms until the timeout is reached (do not sleep after the final attempt).
+			if (microtime(true) >= $deadline) {
+				break;
+			}
+
+			usleep(100000);
+		}
+
+		if (static::$trace_delays) {
+			self::recordDelay('test_item_callback', microtime(true) - $start);
+		}
+
+		if ($exception !== null) {
+			throw $exception;
+		}
+
+		$message = 'Item '.(isset($item['key']) ? $item['key'] : '').' tested on server'.
+				' did not satisfy the callback within '.$timeout.' ms.'.
+				"\nLast response: ".json_encode($last_result);
+		if ($info_callback !== null) {
+			$message .= call_user_func($info_callback);
+		}
+		$this->fail($message);
 	}
 
 	/**
@@ -862,6 +1513,15 @@ class CIntegrationTest extends CAPITest {
 	}
 
 	/**
+	 * Set log offset to the end of file.
+	 *
+	 * @param string $component    name of the component
+	 */
+	protected static function skipLog($component) {
+		CLogHelper::skipLog(self::getLogPath($component));
+	}
+
+	/**
 	 * Check if line is present.
 	 *
 	 * @param string       $component     name of the component
@@ -895,10 +1555,22 @@ class CIntegrationTest extends CAPITest {
 		if ($delay === null) {
 			$delay = self::WAIT_ITERATION_DELAY;
 		}
+		$usleep_total = 0;
+		$start = microtime(true);
 
 		for ($r = 0; $r < $iterations; $r++) {
 			if (self::isLogLinePresent($component, $lines, $incremental, $match_regex)) {
+				if (static::$trace_delays) {
+					self::recordDelay('wait_log_line', microtime(true) - $start);
+				}
 				return true;
+			}
+
+			if ($usleep_total < 1000000 && $iterations > 1) {
+				$usleep_total += 100000;
+				usleep(100000);
+				$r = -1;
+				continue;
 			}
 
 			sleep($delay);
@@ -916,18 +1588,23 @@ class CIntegrationTest extends CAPITest {
 			$description = 'line "'.$lines.'"';
 		}
 
-		$c = CLogHelper::readLog(self::getLogPath($component), false);
+		$error_msg = 'Failed to wait for '.$description.' to be present in '.$component.
+				'log file: '.self::getLogPath($component).' at '.date('His')."\n";
 
-		if (file_exists(self::getLogPath(self::COMPONENT_AGENT))) {
-			$c2 = @CLogHelper::readLog(self::getLogPath(self::COMPONENT_AGENT), false);
-		}
-		else {
-			$c2 = '';
+		$error_msg .= CLogHelper::readLog(self::getLogPath($component), false, true);
+
+		foreach (self::getComponents() as $c) {
+			if ($c !== $component && file_exists(self::getLogPath($c))) {
+				$error_msg .= "\n\n".$c.' log file contents:'."\n";
+				$error_msg .= @CLogHelper::readLog(self::getLogPath($c), false, true);
+			}
 		}
 
-		throw new Exception('Failed to wait for '.$description.' to be present in '.$component .
-				'log file path:'.self::getLogPath($component).' and server log file contents: ' .
-				$c  . "\n and agent log file contents: " . $c2);
+		if (static::$trace_delays) {
+			self::recordDelay('wait_log_line', microtime(true) - $start);
+		}
+
+		throw new Exception($error_msg);
 	}
 
 	/**
@@ -947,5 +1624,29 @@ class CIntegrationTest extends CAPITest {
 		$args = array_merge($params, $cmd);
 
 		self::executeCommand(PHPUNIT_BINARY_DIR.'zabbix_'.$component, $args, '> /dev/null 2>&1');
+	}
+
+	/**
+	 * Update the value of the '{$TRAPPER.ALLOWED_HOSTS}' global macro to '0.0.0.0/0,::/0'
+	 *
+	 * @return void
+	 */
+	protected function updatedAllowedHostsGlobalMacro(): void {
+		$allowed_hosts = $this->call('usermacro.get', [
+			'globalmacro' => true,
+			'filter' => ['macro' => '{$TRAPPER.ALLOWED_HOSTS}'],
+			'output' => ['globalmacroid', 'value']
+		]);
+
+		$this->assertArrayHasKey('result', $allowed_hosts);
+		$this->assertArrayHasKey(0, $allowed_hosts['result']);
+
+		if ($allowed_hosts['result'][0]['value'] !== '0.0.0.0/0,::/0') {
+			$this->call('usermacro.updateglobal', [
+				'globalmacroid' => $allowed_hosts['result'][0]['globalmacroid'],
+				'macro' => '{$TRAPPER.ALLOWED_HOSTS}',
+				'value' => '0.0.0.0/0,::/0'
+			]);
+		}
 	}
 }

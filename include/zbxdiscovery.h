@@ -1,26 +1,30 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 #ifndef ZABBIX_DISCOVERY_H
 #define ZABBIX_DISCOVERY_H
 
 #include "zbxdbhigh.h"
+#include "zbxcacheconfig.h"
+#include "zbxstats.h"
+#include "zbxip.h"
+
+#define ZBX_IPC_SERVICE_DISCOVERER	"discoverer"
+
+#define ZBX_IPC_DISCOVERER_QUEUE		10001
+#define ZBX_IPC_DISCOVERER_USAGE_STATS		10002
+#define ZBX_IPC_DISCOVERER_USAGE_STATS_RESULT	10003
 
 typedef struct
 {
@@ -31,9 +35,47 @@ typedef struct
 	int		status;
 	time_t		itemtime;
 }
-zbx_service_t;
+zbx_dservice_t;
 
-void	zbx_discovery_update_host(ZBX_DB_DHOST *dhost, int status, int now);
-void	zbx_discovery_update_service(const ZBX_DB_DRULE *drule, zbx_uint64_t dcheckid, ZBX_DB_DHOST *dhost,
-		const char *ip, const char *dns, int port, int status, const char *value, int now);
+typedef struct
+{
+	zbx_uint64_t	druleid;
+	char		*error;
+}
+zbx_discoverer_drule_error_t;
+ZBX_PTR_VECTOR_DECL(discoverer_drule_error, zbx_discoverer_drule_error_t)
+
+ZBX_VECTOR_DECL(iprange, zbx_iprange_t)
+
+void	zbx_discoverer_init(void);
+
+typedef	void*(*zbx_discovery_open_func_t)(void);
+typedef	void(*zbx_discovery_close_func_t)(void *handle);
+typedef	void(*zbx_discovery_find_host_func_t)(const zbx_uint64_t druleid, const char *ip, zbx_db_dhost *dhost);
+typedef void(*zbx_discovery_update_interface_func_t)(void *handle, zbx_uint64_t druleid, const char *ip,
+		const char *dns, int status, time_t now);
+typedef void(*zbx_discovery_update_host_func_t)(zbx_db_dhost *dhost, int status, time_t now,
+		zbx_add_event_func_t add_event_cb);
+typedef	void(*zbx_discovery_update_hosts_func_t)(const zbx_uint64_t druleid, const time_t now,
+		zbx_add_event_func_t add_event_cb);
+typedef	void(*zbx_discovery_update_service_func_t)(void *handle, zbx_uint64_t druleid, zbx_uint64_t dcheckid,
+		zbx_uint64_t unique_dcheckid, zbx_db_dhost *dhost, const char *ip, const char *dns, int port,
+		int status, const char *value, time_t now, zbx_vector_uint64_t *dserviceids,
+		zbx_add_event_func_t add_event_cb);
+typedef	void(*zbx_discovery_update_service_down_func_t)(const zbx_uint64_t dhostid, const char *ip, const time_t now,
+		const zbx_vector_uint64_t *dserviceids, const zbx_add_event_func_t add_event_cb);
+typedef	void(*zbx_discovery_update_drule_func_t)(void *handle, zbx_uint64_t druleid, const char *error, time_t now);
+
+void	zbx_discovery_dcheck_free(zbx_dc_dcheck_t *dcheck);
+void	zbx_discovery_drule_free(zbx_dc_drule_t *drule);
+int	zbx_get_usage_stats_discovery(zbx_vector_dbl_t *usage, int *count, char **error);
+int	zbx_discovery_get_queue_size(zbx_uint64_t *size, char **error);
+zbx_uint32_t	zbx_discovery_pack_usage_stats(unsigned char **data, const zbx_vector_dbl_t *usage, int count);
+void	zbx_discovery_stats_ext_get_data(struct zbx_json *json, const void *arg);
+void	zbx_discovery_stats_procinfo(zbx_process_info_t *info);
+void	zbx_discoverer_drule_error_free(zbx_discoverer_drule_error_t value);
+
+int	zbx_discovery_process_drule_iprange(const zbx_dc_drule_t *drule, zbx_vector_iprange_t *ipranges,
+		char *err, int sz_err);
+
 #endif

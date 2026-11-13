@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -30,24 +25,24 @@ $output = [
 $options = $data['options'];
 
 $overrides_popup_form = (new CForm())
-	->cleanItems()
 	->setId('lldoverride_form')
 	->addItem((new CVar('no', $options['no']))->removeId())
-	->addItem((new CVar('templated', $options['templated']))->removeId())
+	->addItem((new CVar('readonly', $options['readonly']))->removeId())
 	->addVar('old_name', $options['old_name'])
 	->addVar('overrides_names', $options['overrides_names'])
-	->addItem((new CVar('action', 'popup.lldoverride'))->removeId())
-	->addItem((new CInput('submit', 'submit'))
-		->addStyle('display: none;')
-		->removeId()
-	);
+	->addItem((new CVar('action', 'popup.lldoverride'))->removeId());
+
+// Enable form submitting on Enter.
+$overrides_popup_form->addItem((new CSubmitButton())->addClass(ZBX_STYLE_FORM_SUBMIT_HIDDEN));
 
 $overrides_popup_form_list = (new CFormList())
 	->addRow(
 		(new CLabel(_('Name'), 'override_name'))->setAsteriskMark(),
-		(new CTextBox('name', $options['old_name'], $options['templated'], DB::getFieldLength('lld_override', 'name')))
+		(new CTextAreaFlexible('name', $options['old_name']))
 			->setAriaRequired()
 			->setWidth(ZBX_TEXTAREA_STANDARD_WIDTH)
+			->setMaxlength(DB::getFieldLength('lld_override', 'name'))
+			->setReadonly($options['readonly'])
 			->setId('override_name')
 	)
 	->addRow(
@@ -56,7 +51,7 @@ $overrides_popup_form_list = (new CFormList())
 			->addValue(_('Continue overrides'), ZBX_LLD_OVERRIDE_STOP_NO)
 			->addValue(_('Stop processing'), ZBX_LLD_OVERRIDE_STOP_YES)
 			->setModern(true)
-			->setReadonly($options['templated'])
+			->setReadonly($options['readonly'])
 	);
 
 // filters
@@ -70,7 +65,7 @@ $override_evaltype_select = (new CSelect('overrides_evaltype'))
 		CONDITION_EVAL_TYPE_EXPRESSION => _('Custom expression')
 	]));
 
-if ($options['templated']) {
+if ($options['readonly']) {
 	$override_evaltype_select->setReadonly();
 }
 
@@ -82,15 +77,15 @@ $override_evaltype = (new CDiv([
 		(new CDiv())->addClass(ZBX_STYLE_FORM_INPUT_MARGIN)
 	]))->addClass(ZBX_STYLE_CELL),
 	(new CDiv([
-		(new CSpan(''))
-			->addStyle('white-space: normal;')
-			->setId('overrides_expression'),
-		(new CTextBox('overrides_formula', $options['overrides_formula'], $options['templated'],
+		(new CSpan(''))->setId('overrides_expression'),
+		(new CTextBox('overrides_formula', $options['overrides_formula'], $options['readonly'],
 				DB::getFieldLength('lld_override', 'formula')))
 			->setWidth(ZBX_TEXTAREA_STANDARD_WIDTH)
 			->setId('overrides_formula')
-			->setAttribute('placeholder', 'A or (B and C) &hellip;')
-	]))->addClass(ZBX_STYLE_CELL)
+			->setAttribute('placeholder', 'A or (B and C) ...')
+	]))
+		->addClass(ZBX_STYLE_CELL)
+		->addClass(ZBX_STYLE_CELL_EXPRESSION)
 ]))
 	->addClass(ZBX_STYLE_ROW)
 	->setId('overrideRow');
@@ -98,20 +93,7 @@ $override_evaltype = (new CDiv([
 $filter_table = (new CTable())
 	->setId('overrides_filters')
 	->addStyle('width: 100%;')
-	->setHeader([_('Label'), _('Macro'), '', _('Regular expression'), (new CColHeader(_('Action')))->setWidth('100%')]);
-
-$overrides_filters = $options['overrides_filters'];
-if (!$overrides_filters) {
-	$overrides_filters = [[
-		'macro' => '',
-		'operator' => CONDITION_OPERATOR_REGEXP,
-		'value' => '',
-		'formulaid' => num2letter(0)
-	]];
-}
-else {
-	$overrides_filters = CConditionHelper::sortConditionsByFormulaId($overrides_filters);
-}
+	->setHeader([_('Label'), _('Macro'), '', _('Regular expression'), (new CColHeader(''))->setWidth('100%')]);
 
 $operators = CSelect::createOptionsFromArray([
 	CONDITION_OPERATOR_REGEXP => _('matches'),
@@ -120,17 +102,18 @@ $operators = CSelect::createOptionsFromArray([
 	CONDITION_OPERATOR_NOT_EXISTS => _('does not exist')
 ]);
 
-foreach ($overrides_filters as $i => $overrides_filter) {
+foreach ($options['overrides_filters'] as $i => $overrides_filter) {
 	$formulaid = [
 		new CSpan($overrides_filter['formulaid']),
 		new CVar('overrides_filters['.$i.'][formulaid]', $overrides_filter['formulaid'])
 	];
 
-	$macro = (new CTextBox('overrides_filters['.$i.'][macro]', $overrides_filter['macro'], $options['templated'],
-			DB::getFieldLength('lld_override_condition', 'macro')))
+	$macro = (new CTextAreaFlexible('overrides_filters['.$i.'][macro]', $overrides_filter['macro']))
 		->setWidth(ZBX_TEXTAREA_MACRO_WIDTH)
+		->setMaxlength(DB::getFieldLength('lld_override_condition', 'macro'))
 		->addClass(ZBX_STYLE_UPPERCASE)
 		->addClass('macro')
+		->setReadonly($options['readonly'])
 		->setAttribute('placeholder', '{#MACRO}')
 		->setAttribute('data-formulaid', $overrides_filter['formulaid']);
 
@@ -139,14 +122,15 @@ foreach ($overrides_filters as $i => $overrides_filter) {
 		->addClass('js-operator')
 		->addOptions($operators);
 
-	if ($options['templated']) {
+	if ($options['readonly']) {
 		$operator_select->setReadonly();
 	}
 
-	$value = (new CTextBox('overrides_filters['.$i.'][value]', $overrides_filter['value'],$options['templated'],
-			DB::getFieldLength('lld_override_condition', 'value')))
+	$value = (new CTextAreaFlexible('overrides_filters['.$i.'][value]', $overrides_filter['value']))
 		->addClass('js-value')
 		->setWidth(ZBX_TEXTAREA_MACRO_VALUE_WIDTH)
+		->setMaxlength(DB::getFieldLength('lld_override_condition', 'value'))
+		->setReadonly($options['readonly'])
 		->setAttribute('placeholder', _('regular expression'));
 
 	if ($overrides_filter['operator'] == CONDITION_OPERATOR_EXISTS
@@ -158,14 +142,16 @@ foreach ($overrides_filters as $i => $overrides_filter) {
 		(new CButton('overrides_filters_'.$i.'_remove', _('Remove')))
 			->addClass(ZBX_STYLE_BTN_LINK)
 			->addClass('element-table-remove')
-			->setEnabled(!$options['templated'])
+			->setEnabled(!$options['readonly'])
 	];
 
 	$row = [
 		$formulaid,
-		$macro,
+		(new CCol($macro))->addClass(ZBX_STYLE_ALIGN_TOP),
 		$operator_select,
-		(new CDiv($value))->setWidth(ZBX_TEXTAREA_MACRO_VALUE_WIDTH),
+		(new CCol(
+			(new CDiv($value))->setWidth(ZBX_TEXTAREA_MACRO_VALUE_WIDTH)
+		))->addClass(ZBX_STYLE_ALIGN_TOP),
 		(new CCol($delete_button_cell))->addClass(ZBX_STYLE_NOWRAP)
 	];
 
@@ -176,7 +162,7 @@ $filter_table->setFooter(new CCol(
 	(new CButton('macro_add', _('Add')))
 		->addClass(ZBX_STYLE_BTN_LINK)
 		->addClass('element-table-add')
-		->setEnabled(!$options['templated'])
+		->setEnabled(!$options['readonly'])
 		->removeId()
 ));
 
@@ -193,7 +179,7 @@ $operations_list = (new CTable())
 	->addStyle('width: 100%;')
 	->setHeader([
 		_('Condition'),
-		(new CColHeader(''))->setWidth('50')
+		(new CColHeader('Actions'))->setWidth('50')
 	])
 	->addRow(
 		(new CCol(
@@ -201,7 +187,7 @@ $operations_list = (new CTable())
 				(new CButton('param_add', _('Add')))
 					->addClass(ZBX_STYLE_BTN_LINK)
 					->addClass('element-table-add')
-					->setEnabled(!$options['templated'])
+					->setEnabled(!$options['readonly'])
 					->removeId()
 			))->addClass('step-action')
 		))
@@ -221,7 +207,7 @@ $output['buttons'] = [
 		'class' => '',
 		'keepOpen' => true,
 		'isSubmit' => true,
-		'enabled' => !$options['templated'],
+		'enabled' => !$options['readonly'],
 		'action' => 'return lldoverrides.overrides.edit_form.validate(overlay);'
 	]
 ];

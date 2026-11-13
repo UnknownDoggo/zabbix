@@ -1,33 +1,28 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
 /**
  * @var CView $this
+ * @var array $data
  */
 
 $this->includeJsFile('administration.macros.edit.js.php');
 
-$widget = (new CWidget())
+$html_page = (new CHtmlPage())
 	->setTitle(_('Macros'))
-	->setTitleSubmenu(getAdministrationGeneralSubmenu())
 	->setDocUrl(CDocHelper::getUrl(CDocHelper::ADMINISTRATION_MACROS_EDIT));
 
 $table = (new CTable())
@@ -39,19 +34,23 @@ $table = (new CTable())
 		(new CTableColumn(_('Value')))->addClass('table-col-value'),
 		(new CTableColumn(_('Description')))->addClass('table-col-description'),
 		(new CTableColumn())->addClass('table-col-action')
-	]);
+	])
+	->setAttribute('data-field-type', 'set')
+	->setAttribute('data-field-name', 'macros');
 
 foreach ($data['macros'] as $i => $macro) {
 	$macro_input = (new CTextAreaFlexible('macros['.$i.'][macro]', $macro['macro']))
 		->addClass('macro')
 		->setWidth(ZBX_TEXTAREA_MACRO_WIDTH)
-		->setAttribute('placeholder', '{$MACRO}');
+		->setAttribute('placeholder', '{$MACRO}')
+		->disableSpellcheck()
+		->setErrorContainer('macro_'.$i.'_error_container')
+		->setErrorLabel(_('Macro'));
 
-	if ($i == 0) {
-		$macro_input->setAttribute('autofocus', 'autofocus');
-	}
-
-	$macro_value = new CMacroValue($macro['type'], 'macros['.$i.']');
+	$value = array_key_exists('value', $macro) ? $macro['value'] : null;
+	$macro_value = (new CMacroValue($macro['type'], 'macros['.$i.']', $value))
+		->setErrorContainer('macro_'.$i.'_error_container')
+		->setErrorLabel(_('Value'));
 
 	if ($macro['type'] == ZBX_MACRO_TYPE_SECRET) {
 		$macro_value->addRevertButton();
@@ -60,14 +59,12 @@ foreach ($data['macros'] as $i => $macro) {
 		);
 	}
 
-	if (array_key_exists('value', $macro)) {
-		$macro_value->setAttribute('value', $macro['value']);
-	}
-
 	$description_input = (new CTextAreaFlexible('macros['.$i.'][description]', $macro['description']))
 		->setWidth(ZBX_TEXTAREA_MACRO_VALUE_WIDTH)
 		->setMaxlength(DB::getFieldLength('globalmacro', 'description'))
-		->setAttribute('placeholder', _('description'));
+		->setAttribute('placeholder', _('description'))
+		->setErrorContainer('macro_'.$i.'_error_container')
+		->setErrorLabel(_('Description'));
 
 	$button_cell = [
 		(new CButton('macros['.$i.'][remove]', _('Remove')))
@@ -78,12 +75,20 @@ foreach ($data['macros'] as $i => $macro) {
 		$button_cell[] = new CVar('macros['.$i.'][globalmacroid]', $macro['globalmacroid']);
 	}
 
-	$table->addRow([
-		(new CCol($macro_input))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
-		(new CCol($macro_value))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
-		(new CCol($description_input))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
-		(new CCol($button_cell))->addClass(ZBX_STYLE_NOWRAP)
-	], 'form_row');
+	$table
+		->addRow([
+			(new CCol($macro_input))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol($macro_value))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol($description_input))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol($button_cell))->addClass(ZBX_STYLE_NOWRAP)
+		], 'form_row')
+		->addRow(
+			(new CCol())
+				->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT)
+				->addClass(ZBX_STYLE_ERROR_CONTAINER)
+				->setId('macro_'.$i.'_error_container')
+				->setColSpan(4)
+		);
 }
 
 $table->setFooter(new CCol(
@@ -101,12 +106,56 @@ $save_button = (new CSubmit('update', _('Update')))->setAttribute('data-removed-
 $tab_view->setFooter(makeFormFooter($save_button));
 
 $form = (new CForm())
+	->addItem((new CVar(CSRF_TOKEN_NAME, CCsrfTokenHelper::get('macros')))->removeId())
 	->setName('macrosForm')
 	->disablePasswordAutofill()
 	->setAction((new CUrl('zabbix.php'))->setArgument('action', 'macros.update')->getUrl())
-	->setAttribute('aria-labeledby', ZBX_STYLE_PAGE_TITLE)
+	->setAttribute('aria-labelledby', CHtmlPage::PAGE_TITLE_ID)
 	->addItem($tab_view);
 
-$widget
+$html_page
 	->addItem($form)
+	->show();
+
+(new CTemplateTag('macro-row-tmpl'))
+	->addItem(
+		(new CRow([
+			(new CCol(
+				(new CTextAreaFlexible('macros[#{rowNum}][macro]', ''))
+					->addClass('macro')
+					->setWidth(ZBX_TEXTAREA_MACRO_WIDTH)
+					->setAttribute('placeholder', '{$MACRO}')
+					->disableSpellcheck()
+					->setErrorContainer('macro_#{rowNum}_error_container')
+					->setErrorLabel(_('Macro'))
+			))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol(
+				(new CMacroValue(ZBX_MACRO_TYPE_TEXT, 'macros[#{rowNum}]', '', false))
+					->setErrorContainer('macro_#{rowNum}_error_container')
+					->setErrorLabel(_('Value'))
+			))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol(
+				(new CTextAreaFlexible('macros[#{rowNum}][description]', ''))
+					->setWidth(ZBX_TEXTAREA_MACRO_VALUE_WIDTH)
+					->setMaxlength(DB::getFieldLength('globalmacro', 'description'))
+					->setAttribute('placeholder', _('description'))
+					->setErrorContainer('macro_#{rowNum}_error_container')
+					->setErrorLabel(_('Description'))
+			))->addClass(ZBX_STYLE_TEXTAREA_FLEXIBLE_PARENT),
+			(new CCol(
+				(new CButton('macros[#{rowNum}][remove]', _('Remove')))
+					->addClass(ZBX_STYLE_BTN_LINK)
+					->addClass('element-table-remove')
+			))->addClass(ZBX_STYLE_NOWRAP)
+		]))
+			->addClass('form_row')
+	)
+	->addItem(
+		(new CRow([
+			(new CCol())
+				->setId('macro_#{rowNum}_error_container')
+				->addClass(ZBX_STYLE_ERROR_CONTAINER)
+				->setColSpan(4)
+		]))
+	)
 	->show();

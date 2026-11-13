@@ -1,110 +1,165 @@
-<?php
+<?php declare(strict_types = 0);
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
-class CControllerUsergroupCreate extends CController {
+class CControllerUsergroupCreate extends CControllerUsergroupUpdateGeneral {
 
-	protected function checkInput() {
-		$fields = [
-			'name' =>				'required|not_empty|db usrgrp.name',
-			'userids' =>			'array_db users.userid',
-			'gui_access' =>			'db usrgrp.gui_access|in '.implode(',', [GROUP_GUI_ACCESS_SYSTEM, GROUP_GUI_ACCESS_INTERNAL, GROUP_GUI_ACCESS_LDAP, GROUP_GUI_ACCESS_DISABLED]),
-			'users_status' =>		'db usrgrp.users_status|in '.GROUP_STATUS_ENABLED.','.GROUP_STATUS_DISABLED,
-			'debug_mode' =>			'db usrgrp.debug_mode|in '.GROUP_DEBUG_MODE_ENABLED.','.GROUP_DEBUG_MODE_DISABLED,
-			'userdirectoryid' =>	'db usrgrp.userdirectoryid',
+	protected function init(): void {
+		$this->setInputValidationMethod(self::INPUT_VALIDATION_FORM);
+		$this->setPostContentType(self::POST_CONTENT_TYPE_JSON);
+	}
 
-			'group_rights' =>		'array',
-			'tag_filters' =>		'array',
-
-			'new_group_right' =>	'array',
-			'new_tag_filter' =>		'array',
-
-			'form_refresh' =>		'int32'
+	public static function getValidationRules(): array {
+		$api_uniq = [
+			['usergroup.get', ['name' => '{name}']]
 		];
 
-		$ret = $this->validateInput($fields);
+		return ['object', 'api_uniq' => $api_uniq, 'fields' => [
+			'name' => ['db usrgrp.name', 'required', 'not_empty'],
+			'gui_access' => ['integer', 'required',
+				'in' => [GROUP_GUI_ACCESS_SYSTEM, GROUP_GUI_ACCESS_INTERNAL, GROUP_GUI_ACCESS_LDAP,
+					GROUP_GUI_ACCESS_DISABLED
+				]
+			],
+			'userdirectoryid' => ['db userdirectory.userdirectoryid',
+				'when' => ['gui_access', 'in' => [GROUP_GUI_ACCESS_SYSTEM, GROUP_GUI_ACCESS_LDAP]]
+			],
+			'mfa_status' => ['integer', 'in' => [GROUP_MFA_DISABLED, GROUP_MFA_ENABLED]],
+			'mfaid' => ['db mfa.mfaid', 'when' => ['mfa_status', 'in' => [GROUP_MFA_ENABLED]]],
+			'users_status' => ['db usrgrp.users_status', 'in' => [GROUP_STATUS_ENABLED, GROUP_STATUS_DISABLED]],
+			'userids' => [
+				['array', 'required', 'field' => ['db users_groups.userid']],
+				['array',
+					'field' => [
+						'string', 'not_in' => [CWebUser::$data['userid']],
+						'messages' => ['not_in' =>
+							_('User cannot add oneself to a disabled group or a group with disabled GUI access.')
+						]
+					],
+					'when' => ['gui_access', 'in' => [GROUP_GUI_ACCESS_DISABLED]]
+				],
+				['array',
+					'field' => [
+						'string', 'not_in' => [CWebUser::$data['userid']],
+						'messages' => ['not_in' =>
+							_('User cannot add oneself to a disabled group or a group with disabled GUI access.')
+						]
+					],
+					'when' => ['users_status', 'in' => [GROUP_STATUS_DISABLED]]
+				]
+			],
+			'debug_mode' => ['db usrgrp.debug_mode', 'in' => [GROUP_DEBUG_MODE_DISABLED, GROUP_DEBUG_MODE_ENABLED]],
+			'templategroup_rights' => ['objects', 'required', 'fields' => [
+				'groupids' => ['array', 'required', 'not_empty', 'field' => ['db rights.groupid']],
+				'permission' => ['integer', 'required', 'in' => [PERM_DENY, PERM_READ, PERM_READ_WRITE]]
+			]],
+			'hostgroup_rights' => ['objects', 'required', 'fields' => [
+				'groupids' => ['array', 'required', 'not_empty', 'field' => ['db rights.groupid']],
+				'permission' => ['integer', 'required', 'in' => [PERM_DENY, PERM_READ, PERM_READ_WRITE]]
+			]],
+			'proxy_mode' => ['integer', 'in' => [PROXY_MODE_ALLOW, PROXY_MODE_DENY]],
+			'proxyids' => ['array', 'required', 'field' => ['db proxy.proxyid']],
+			'proxy_group_mode' => ['integer', 'in' => [PROXY_GROUP_MODE_ALLOW, PROXY_GROUP_MODE_DENY]],
+			'proxy_groupids' => ['array', 'required', 'field' => ['db proxy_group.proxy_groupid']],
+			'tag_filters' => ['objects', 'required',
+				'fields' => [
+					'groupid' => ['db tag_filter.groupid', 'required'],
+					'tags' => ['objects', 'fields' => [
+						'value' => ['db tag_filter.value'],
+						'tag' => [
+							['db tag_filter.tag'],
+							['db tag_filter.tag', 'required', 'not_empty', 'when' => ['value', 'not_empty']]
+						]
+					]]
+				]
+			],
+			'apm_filters' => ['objects', 'uniq' => ['key', 'value', 'signal_type'],
+				'fields' => [
+					'key' => ['required', 'string', 'not_empty'],
+					'value' => ['required', 'string'],
+					'signal_type' => ['required', 'integer',
+						'in' => [SIGNAL_TYPE_ALL, SIGNAL_TYPE_TRACES, SIGNAL_TYPE_METRICS, SIGNAL_TYPE_LOGS]
+					]
+				],
+				'messages' => ['uniq' => _('Attribute key, value and category are not unique.')]
+			]
+		]];
+	}
+
+	protected function checkInput(): bool {
+		$ret = $this->validateInput(self::getValidationRules());
 
 		if (!$ret) {
-			switch ($this->getValidationError()) {
-				case self::VALIDATION_ERROR:
-					$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
-						->setArgument('action', 'usergroup.edit')
-						->getUrl()
-					);
-					$response->setFormData($this->getInputAll());
-					CMessageHelper::setErrorTitle(_('Cannot add user group'));
-					$this->setResponse($response);
-					break;
+			$form_errors = $this->getValidationError();
+			$response = $form_errors
+				? ['form_errors' => $form_errors]
+				: ['error' => [
+					'title' => _('Cannot add user group'),
+					'messages' => array_column(get_and_clear_messages(), 'message')
+				]];
 
-				case self::VALIDATION_FATAL_ERROR:
-					$this->setResponse(new CControllerResponseFatal());
-					break;
-			}
+			$this->setResponse(
+				new CControllerResponseData(['main_block' => json_encode($response)])
+			);
 		}
 
 		return $ret;
 	}
 
-	protected function checkPermissions() {
+	protected function checkPermissions(): bool {
 		return $this->checkAccess(CRoleHelper::UI_ADMINISTRATION_USER_GROUPS);
 	}
 
-	protected function doAction() {
-		$user_group = [
-			'users' => zbx_toObject($this->getInput('userids', []), 'userid'),
-			'rights' => []
-		];
+	protected function doAction(): void {
+		$user_group = self::processUserGroupInputData($this->getUserGroupInputData());
 
-		$this->getInputs($user_group, ['name', 'users_status', 'gui_access', 'debug_mode', 'tag_filters',
-			'userdirectoryid'
-		]);
+		$this->validateProxiesNotInProxyGroup();
 
-		$group_rights = applyHostGroupRights($this->getInput('group_rights', []));
+		$output = [];
 
-		foreach ($group_rights as $groupid => $group_right) {
-			if ($groupid != 0 && $group_right['permission'] != PERM_NONE) {
-				$user_group['rights'][] = [
-					'id' => (string) $groupid,
-					'permission' => $group_right['permission']
-				];
-			}
+		if ($messages = get_and_clear_messages()) {
+			$output['error'] = [
+				'title' => _('Cannot add user group'),
+				'messages' => array_column($messages, 'message')
+			];
+
+			$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
+
+			return;
 		}
 
 		$result = (bool) API::UserGroup()->create($user_group);
 
 		if ($result) {
-			$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
+			$output['success']['title'] = _('User group added');
+			$output['success']['redirect'] = (new CUrl('zabbix.php'))
 				->setArgument('action', 'usergroup.list')
 				->setArgument('page', CPagerHelper::loadPage('usergroup.list', null))
-			);
-			$response->setFormData(['uncheck' => '1']);
-			CMessageHelper::setSuccessTitle(_('User group added'));
+				->getUrl();
+
+			if ($messages = get_and_clear_messages()) {
+				$output['success']['messages'] = array_column($messages, 'message');
+			}
 		}
 		else {
-			$response = new CControllerResponseRedirect((new CUrl('zabbix.php'))
-				->setArgument('action', 'usergroup.edit')
-			);
-			CMessageHelper::setErrorTitle(_('Cannot add user group'));
-			$response->setFormData($this->getInputAll());
+			$output['error'] = [
+				'title' => _('Cannot add user group'),
+				'messages' => array_column(get_and_clear_messages(), 'message')
+			];
 		}
 
-		$this->setResponse($response);
+		$this->setResponse(new CControllerResponseData(['main_block' => json_encode($output)]));
 	}
 }

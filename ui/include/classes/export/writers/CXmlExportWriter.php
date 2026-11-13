@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -43,7 +38,7 @@ class CXmlExportWriter extends CExportWriter {
 		$this->xmlWriter->setIndentString('    ');
 		$this->xmlWriter->startDocument('1.0', 'UTF-8');
 
-		$this->fromArray($array);
+		$this->fromArray($array, '');
 
 		$this->xmlWriter->endDocument();
 
@@ -52,18 +47,11 @@ class CXmlExportWriter extends CExportWriter {
 
 	/**
 	 * Recursive function for processing nested arrays.
-	 *
-	 * @param array $array
-	 * @param null  $parentName name of parent node
 	 */
-	protected function fromArray(array $array, $parentName = null) {
+	protected function fromArray(array $array, string $parent_name): void {
 		foreach ($array as $name => $value) {
-			if ($newName = $this->mapName($parentName)) {
-				$this->xmlWriter->startElement($newName);
-			}
-			else {
-				$this->xmlWriter->startElement($name);
-			}
+			$new_name = static::mapName($parent_name);
+			$this->xmlWriter->startElement($new_name !== false ? $new_name : $name);
 
 			if (is_array($value)) {
 				$this->fromArray($value, $name);
@@ -84,19 +72,17 @@ class CXmlExportWriter extends CExportWriter {
 
 	/**
 	 * Returns sub node name based on parent node name.
-	 *
-	 * @param string $name
-	 *
-	 * @return bool
 	 */
-	private function mapName($name) {
+	private static function mapName(string $name): bool|string {
 		$map = [
 			'conditions' => 'condition',
 			'dashboards' => 'dashboard',
 			'dependencies' => 'dependency',
 			'discovery_rules' => 'discovery_rule',
 			'elements' => 'element',
+			'expressions' => 'expression',
 			'fields' => 'field',
+			'global_regexes' => 'global_regex',
 			'graph_items' => 'graph_item',
 			'graph_prototypes' => 'graph_prototype',
 			'graphs' => 'graph',
@@ -104,6 +90,8 @@ class CXmlExportWriter extends CExportWriter {
 			'group_prototypes' => 'group_prototype',
 			'groups' => 'group',
 			'headers' => 'header',
+			'highlights' => 'highlight',
+			'host_groups' => 'host_group',
 			'host_prototypes' => 'host_prototype',
 			'hosts' => 'host',
 			'httptests' => 'httptest',
@@ -131,16 +119,21 @@ class CXmlExportWriter extends CExportWriter {
 			'shapes' => 'shape',
 			'steps' => 'step',
 			'tags' => 'tag',
+			'template_groups' => 'template_group',
 			'templates' => 'template',
+			'thresholds' => 'threshold',
 			'tls_accept' => 'option',
 			'trigger_prototypes' => 'trigger_prototype',
 			'triggers' => 'trigger',
 			'urls' => 'url',
 			'valuemaps' => 'valuemap',
 			'variables' => 'variable',
-			'widgets' => 'widget'
+			'widgets' => 'widget',
+			'options' => 'option',
+			'columns' => 'column',
+			'aggregated_columns' => 'aggregated_column'
 		];
 
-		return isset($map[$name]) ? $map[$name] : false;
+		return array_key_exists($name, $map) ? $map[$name] : false;
 	}
 }

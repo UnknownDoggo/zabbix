@@ -1,20 +1,15 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 package webcertificate
 
@@ -30,10 +25,18 @@ import (
 	"strings"
 	"time"
 
-	"git.zabbix.com/ap/plugin-support/conf"
-	"git.zabbix.com/ap/plugin-support/plugin"
-	"git.zabbix.com/ap/plugin-support/uri"
-	"git.zabbix.com/ap/plugin-support/zbxerr"
+	"golang.zabbix.com/sdk/errs"
+	"golang.zabbix.com/sdk/plugin"
+	"golang.zabbix.com/sdk/uri"
+	"golang.zabbix.com/sdk/zbxerr"
+)
+
+const (
+	dateFormat         = "Jan 02 15:04:05 2006 GMT"
+	allParameters      = 3
+	noThirdParameter   = 2
+	onlyFirstParameter = 1
+	emptyParameters    = 0
 )
 
 type Output struct {
@@ -65,34 +68,31 @@ type ValidationResult struct {
 	Message string `json:"message"`
 }
 
-type Options struct {
-	plugin.SystemOptions `conf:"optional,name=System"`
-	Timeout              int `conf:"optional,range=1:30"`
-}
-
 type Plugin struct {
 	plugin.Base
-	options Options
+
+	supportedCipherSuites []uint16
 }
 
-const (
-	dateFormat         = "Jan 02 15:04:05 2006 GMT"
-	allParameters      = 3
-	noThirdParameter   = 2
-	onlyFirstParameter = 1
-	emptyParameters    = 0
-)
-
-var impl Plugin
-
-func (p *Plugin) Configure(global *plugin.GlobalOptions, options interface{}) {
-	p.options.Timeout = global.Timeout
+// New creates Plugin structure with preset default values.
+func New() *Plugin {
+	return &Plugin{
+		supportedCipherSuites: allCipherSuiteIDs(),
+	}
 }
 
-func (p *Plugin) Validate(options interface{}) error {
-	var o Options
+func init() {
+	webCertificatePlugin := New()
 
-	return conf.Unmarshal(options, &o)
+	err := plugin.RegisterMetrics(
+		webCertificatePlugin,
+		"WebCertificate",
+		"web.certificate.get",
+		"Get TLS/SSL website certificate.",
+	)
+	if err != nil {
+		panic(errs.Wrap(err, "failed to register metrics"))
+	}
 }
 
 func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider) (interface{}, error) {
@@ -100,16 +100,16 @@ func (p *Plugin) Export(key string, params []string, ctx plugin.ContextProvider)
 		return nil, plugin.UnsupportedMetricError
 	}
 
-	return p.webCertificateGet(params)
+	return p.webCertificateGet(params, ctx.Timeout())
 }
 
-func (p *Plugin) webCertificateGet(params []string) (interface{}, error) {
+func (p *Plugin) webCertificateGet(params []string, timeout int) (interface{}, error) {
 	address, port, domain, err := getParameters(params)
 	if err != nil {
 		return nil, zbxerr.ErrorInvalidParams.Wrap(err)
 	}
 
-	certs, err := getCertificatesPEM(fmt.Sprintf("%s:%s", address, port), domain, p.options.Timeout)
+	certs, err := p.getCertificatesPEM(fmt.Sprintf("%s:%s", address, port), domain, timeout)
 	if err != nil {
 		return nil, zbxerr.ErrorCannotFetchData.Wrap(err)
 	}
@@ -148,6 +148,34 @@ func (p *Plugin) webCertificateGet(params []string) (interface{}, error) {
 	}
 
 	return string(b), nil
+}
+
+func (p *Plugin) getCertificatesPEM(address, domain string, timeout int) ([]*x509.Certificate, error) {
+	netDialer := &net.Dialer{
+		Timeout: time.Duration(timeout) * time.Second,
+	}
+
+	tlsDialer := &tls.Dialer{
+		NetDialer: netDialer,
+		Config: &tls.Config{
+			InsecureSkipVerify: true, //nolint:gosec // unsafe by design and only checks certs
+			ServerName:         domain,
+			CipherSuites:       p.supportedCipherSuites,
+		},
+	}
+
+	rawConn, err := tlsDialer.Dial("tcp", address)
+	if err != nil {
+		return nil, errs.Wrap(err, "failed to dial TLS certificate")
+	}
+	defer rawConn.Close() //nolint:errcheck // defer close
+
+	conn, ok := rawConn.(*tls.Conn)
+	if !ok {
+		return nil, errs.New(fmt.Sprintf("expected TLS connection, got %T", rawConn))
+	}
+
+	return conn.ConnectionState().PeerCertificates, nil
 }
 
 func createVerificationOptions(domain string, certs []*x509.Certificate) x509.VerifyOptions {
@@ -290,19 +318,19 @@ func getHostAndPort(uri *uri.URI, port string) (string, string, error) {
 	return uri.Host(), uri.Port(), nil
 }
 
-func getCertificatesPEM(address, domain string, timeout int) ([]*x509.Certificate, error) {
-	var dialer net.Dialer
-	dialer.Timeout = time.Duration(timeout) * time.Second
+func allCipherSuiteIDs() []uint16 {
+	secure := tls.CipherSuites()
+	insecure := tls.InsecureCipherSuites()
 
-	conn, err := tls.DialWithDialer(&dialer, "tcp", address, &tls.Config{InsecureSkipVerify: true, ServerName: domain})
-	if err != nil {
-		return nil, err
+	ids := make([]uint16, 0, len(secure)+len(insecure))
+
+	for _, cipher := range secure {
+		ids = append(ids, cipher.ID)
 	}
-	defer conn.Close()
 
-	return conn.ConnectionState().PeerCertificates, nil
-}
+	for _, cipher := range insecure {
+		ids = append(ids, cipher.ID)
+	}
 
-func init() {
-	plugin.RegisterMetrics(&impl, "WebCertificate", "web.certificate.get", "Get TLS/SSL website certificate.")
+	return ids
 }

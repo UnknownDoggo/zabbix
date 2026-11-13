@@ -1,38 +1,95 @@
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
+#include "zbxcommon.h"
 #include "zbxnix.h"
-#include "sigcommon.h"
+#include "zbxthreads.h"
 
-#include "common.h"
-#include "log.h"
 #include "fatal.h"
-#include "zbxcrypto.h"
+#include "sigcommon.h"
+#include <setjmp.h>
+
+#if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
+#	include "zbxcomms.h"
+#endif
 
 #define ZBX_EXIT_NONE		0
 #define ZBX_EXIT_SUCCESS	1
 #define ZBX_EXIT_FAILURE	2
 
-int				sig_parent_pid = -1;
+static int				sig_parent_pid = -1;
+static ZBX_THREAD_LOCAL sigjmp_buf	*sig_jmp_ret = NULL;
+
+static pid_t	*child_pids = NULL;
+static size_t		child_pid_count = 0;
+
+void	set_sig_parent_pid(int in)
+{
+	sig_parent_pid = in;
+}
+
+int	get_sig_parent_pid(void)
+{
+	return sig_parent_pid;
+}
+
+int	zbx_init_thread_signal_handler(sigjmp_buf *jmp_ret)
+{
+	sigset_t	mask;
+	int		err;
+
+	sig_jmp_ret = jmp_ret;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGTERM);
+	sigaddset(&mask, SIGUSR1);
+	sigaddset(&mask, SIGUSR2);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGINT);
+
+	if (0 != (err = pthread_sigmask(SIG_BLOCK, &mask, NULL)))
+		zabbix_log(LOG_LEVEL_WARNING, "cannot block signals: %s", zbx_strerror(err));
+
+	return SUCCEED;
+}
+
+typedef struct
+{
+	int	sig;
+	int	pid;
+	int	uid;
+	int	code;
+	int	status;
+}
+zbx_siginfo_t;
+
 static volatile sig_atomic_t	sig_exiting;
-static volatile sig_atomic_t	sig_exit_on_terminate = 1;
+static volatile sig_atomic_t	sig_exit_on_terminate_log = 1;
 static zbx_on_exit_t		zbx_on_exit_cb = NULL;
+static void 			*zbx_on_exit_args = NULL;
+
+static zbx_siginfo_t	siginfo_exit = {-1, -1, -1, -1, -1};
+
+static void	set_siginfo_exit(int sig, siginfo_t *siginfo)
+{
+	siginfo_exit.sig = sig;
+	siginfo_exit.pid = SIG_CHECKED_FIELD(siginfo, si_pid);
+	siginfo_exit.uid = SIG_CHECKED_FIELD(siginfo, si_uid);
+	siginfo_exit.code = SIG_CHECKED_FIELD(siginfo, si_code);
+	siginfo_exit.status = SIG_CHECKED_FIELD(siginfo, si_status);
+}
 
 void	zbx_set_exiting_with_fail(void)
 {
@@ -44,14 +101,35 @@ void	zbx_set_exiting_with_succeed(void)
 	sig_exiting = ZBX_EXIT_SUCCESS;
 }
 
+static int	zbx_is_running_default(void *args)
+{
+	ZBX_UNUSED(args);
+
+	return ZBX_EXIT_NONE == sig_exiting;
+}
+
+static ZBX_THREAD_LOCAL int	(*zbx_is_running_impl)(void *args) = zbx_is_running_default;
+static ZBX_THREAD_LOCAL void	*zbx_is_running_args = NULL;
+
 int	ZBX_IS_RUNNING(void)
 {
-	return ZBX_EXIT_NONE == sig_exiting;
+	return zbx_is_running_impl(zbx_is_running_args);
+}
+
+void	zbx_set_is_running(int (*is_running_func)(void *args), void *args)
+{
+	zbx_is_running_impl = is_running_func;
+	zbx_is_running_args = args;
 }
 
 int	ZBX_EXIT_STATUS(void)
 {
 	return ZBX_EXIT_SUCCESS == sig_exiting ? SUCCEED : FAIL;
+}
+
+int	ZBX_IS_NORMAL_EXIT(void)
+{
+	return ZBX_EXIT_FAILURE != sig_exiting ? SUCCEED : FAIL;
 }
 
 static void	log_fatal_signal(int sig, siginfo_t *siginfo, void *context)
@@ -69,7 +147,7 @@ static void	exit_with_failure(void)
 #if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
 	zbx_tls_free_on_signal();
 #endif
-	_exit(EXIT_FAILURE);
+	zbx_exit_immediate(EXIT_FAILURE);
 }
 
 /******************************************************************************
@@ -81,6 +159,12 @@ static void	fatal_signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
 	log_fatal_signal(sig, siginfo, context);
 	zbx_log_fatal_info(context, ZBX_FATAL_LOG_FULL_INFO);
+
+	if (NULL != sig_jmp_ret)
+	{
+		zbx_set_exiting_with_fail();
+		siglongjmp(*sig_jmp_ret, 1);
+	}
 
 	exit_with_failure();
 }
@@ -106,9 +190,53 @@ static void	metric_thread_signal_handler(int sig, siginfo_t *siginfo, void *cont
  ******************************************************************************/
 static void	alarm_signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
-	SIG_CHECK_PARAMS(sig, siginfo, context);
+	ZBX_UNUSED(sig);
+	ZBX_UNUSED(siginfo);
+	ZBX_UNUSED(context);
 
 	zbx_alarm_flag_set();	/* set alarm flag */
+}
+
+/******************************************************************************
+ *                                                                            *
+ * Purpose: log signal information if it was shutdown cause                   *
+ *                                                                            *
+ ******************************************************************************/
+void	zbx_log_exit_signal(void)
+{
+	int	zbx_log_level_temp;
+
+	switch (siginfo_exit.sig)
+	{
+		case -1:
+			return;
+		case SIGCHLD:
+			zabbix_log(LOG_LEVEL_CRIT, "One child process died (PID:%d,exitcode/signal:%d). Exiting ...",
+					siginfo_exit.pid, siginfo_exit.status);
+			return;
+		case SIGINT:
+		case SIGQUIT:
+		case SIGHUP:
+		case SIGTERM:
+		case SIGUSR2:
+			/* temporary variable is used to avoid compiler warning */
+			zbx_log_level_temp = sig_parent_pid == siginfo_exit.pid ? LOG_LEVEL_DEBUG : LOG_LEVEL_WARNING;
+
+			zabbix_log(zbx_log_level_temp,
+					"Got signal [signal:%d(%s),sender_pid:%d,sender_uid:%d,"
+					"reason:%d]. Exiting ...",
+					siginfo_exit.sig, get_signal_name(siginfo_exit.sig), siginfo_exit.pid,
+					siginfo_exit.uid, siginfo_exit.code);
+
+			return;
+		default:
+			zabbix_log(LOG_LEVEL_WARNING,
+					"Got signal [signal:%d(%s),sender_pid:%d,sender_uid:%d,"
+					"reason:%d]. Exiting ...",
+					siginfo_exit.sig, get_signal_name(siginfo_exit.sig), siginfo_exit.pid,
+					siginfo_exit.uid, siginfo_exit.code);
+			return;
+	}
 }
 
 /******************************************************************************
@@ -118,7 +246,7 @@ static void	alarm_signal_handler(int sig, siginfo_t *siginfo, void *context)
  ******************************************************************************/
 static void	terminate_signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
-	int zbx_log_level_temp;
+	ZBX_UNUSED(context);
 
 	if (!SIG_PARENT_PROCESS)
 	{
@@ -132,28 +260,22 @@ static void	terminate_signal_handler(int sig, siginfo_t *siginfo, void *context)
 	}
 	else
 	{
-		SIG_CHECK_PARAMS(sig, siginfo, context);
-
 		if (ZBX_EXIT_NONE == sig_exiting)
 		{
 			sig_exiting = ZBX_EXIT_SUCCESS;
 
-			/* temporary variable is used to avoid compiler warning */
-			zbx_log_level_temp = sig_parent_pid == SIG_CHECKED_FIELD(siginfo, si_pid) ?
-					LOG_LEVEL_DEBUG : LOG_LEVEL_WARNING;
-			zabbix_log(zbx_log_level_temp,
-					"Got signal [signal:%d(%s),sender_pid:%d,sender_uid:%d,"
-					"reason:%d]. Exiting ...",
-					sig, get_signal_name(sig),
-					SIG_CHECKED_FIELD(siginfo, si_pid),
-					SIG_CHECKED_FIELD(siginfo, si_uid),
-					SIG_CHECKED_FIELD(siginfo, si_code));
+			if (-1 == siginfo_exit.sig)
+				set_siginfo_exit(sig, siginfo);
 
 #if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
 			zbx_tls_free_on_signal();
 #endif
-			if (0 != sig_exit_on_terminate)
-				zbx_on_exit_cb(SUCCEED);
+			if (0 != sig_exit_on_terminate_log)
+				zbx_log_exit_signal();
+
+			/* shutdown during startup must be handled as exit with failure */
+			if (NULL != zbx_on_exit_cb)
+				zbx_on_exit_cb(FAIL, zbx_on_exit_args);
 		}
 	}
 }
@@ -167,14 +289,30 @@ static void	child_signal_handler(int sig, siginfo_t *siginfo, void *context)
 {
 	SIG_CHECK_PARAMS(sig, siginfo, context);
 
+	pid_t	pid;
+	int	status;
+
+	if (0 < (pid = waitpid((pid_t)-1, &status, WNOHANG)))
+	{
+		if (FAIL == zbx_child_cleanup(pid, child_pids, child_pid_count))
+			return;
+	}
+
+	if (0 >= pid)
+		return;
+
 	if (!SIG_PARENT_PROCESS)
 		exit_with_failure();
 
 	if (ZBX_EXIT_NONE == sig_exiting)
 	{
-		sig_exiting = ZBX_EXIT_FAILURE;
-		zabbix_log(LOG_LEVEL_CRIT, "One child process died (PID:%d,exitcode/signal:%d). Exiting ...",
-				SIG_CHECKED_FIELD(siginfo, si_pid), SIG_CHECKED_FIELD(siginfo, si_status));
+		if (0 == WIFEXITED(status) || 0 != WEXITSTATUS(status))
+			sig_exiting = ZBX_EXIT_FAILURE;
+		else
+			sig_exiting = ZBX_EXIT_SUCCESS;
+
+		if (-1 == siginfo_exit.sig)
+			set_siginfo_exit(sig, siginfo);
 
 #if defined(HAVE_GNUTLS) || defined(HAVE_OPENSSL)
 		zbx_tls_free_on_signal();
@@ -221,23 +359,14 @@ void	zbx_set_common_signal_handlers(zbx_on_exit_t zbx_on_exit_cb_arg)
 
 /******************************************************************************
  *                                                                            *
- * Purpose: make main process to exit on terminate signals                    *
- *                                                                            *
- ******************************************************************************/
-void	zbx_set_exit_on_terminate(void)
-{
-	sig_exit_on_terminate = 1;
-}
-
-/******************************************************************************
- *                                                                            *
  * Purpose: make main process to set exit flag and continue to work on        *
  *          terminate signals                                                 *
  *                                                                            *
  ******************************************************************************/
-void	zbx_unset_exit_on_terminate(void)
+void	zbx_unset_exit_on_terminate(zbx_on_exit_t on_exit_cb)
 {
-	sig_exit_on_terminate = 0;
+	sig_exit_on_terminate_log = 0;
+	zbx_on_exit_cb = on_exit_cb;
 }
 
 /******************************************************************************
@@ -289,6 +418,27 @@ void 	zbx_set_metric_thread_signal_handler(void)
  * Purpose: block signals to avoid interruption                               *
  *                                                                            *
  ******************************************************************************/
+void	zbx_block_thread_signals(sigset_t *orig_mask)
+{
+	sigset_t	mask;
+
+	sigemptyset(&mask);
+	sigaddset(&mask, SIGTERM);
+	sigaddset(&mask, SIGUSR1);
+	sigaddset(&mask, SIGUSR2);
+	sigaddset(&mask, SIGHUP);
+	sigaddset(&mask, SIGQUIT);
+	sigaddset(&mask, SIGINT);
+
+	if (0 > zbx_sigmask(SIG_BLOCK, &mask, orig_mask))
+		zabbix_log(LOG_LEVEL_WARNING, "cannot set signal mask to block the signal");
+}
+
+/******************************************************************************
+ *                                                                            *
+ * Purpose: block signals to avoid interruption                               *
+ *                                                                            *
+ ******************************************************************************/
 void	zbx_block_signals(sigset_t *orig_mask)
 {
 	sigset_t	mask;
@@ -300,8 +450,8 @@ void	zbx_block_signals(sigset_t *orig_mask)
 	sigaddset(&mask, SIGINT);
 	sigaddset(&mask, SIGQUIT);
 
-	if (0 > sigprocmask(SIG_BLOCK, &mask, orig_mask))
-		zabbix_log(LOG_LEVEL_WARNING, "cannot set sigprocmask to block the signal");
+	if (0 > zbx_sigmask(SIG_BLOCK, &mask, orig_mask))
+		zabbix_log(LOG_LEVEL_WARNING, "cannot set signal mask to block the signal");
 }
 
 /******************************************************************************
@@ -311,6 +461,18 @@ void	zbx_block_signals(sigset_t *orig_mask)
  ******************************************************************************/
 void	zbx_unblock_signals(const sigset_t *orig_mask)
 {
-	if (0 > sigprocmask(SIG_SETMASK, orig_mask, NULL))
-		zabbix_log(LOG_LEVEL_WARNING,"cannot restore sigprocmask");
+	if (0 > zbx_sigmask(SIG_SETMASK, orig_mask, NULL))
+		zabbix_log(LOG_LEVEL_WARNING,"cannot restore signal mask");
 }
+
+void	zbx_set_on_exit_args(void *args)
+{
+	zbx_on_exit_args = args;
+}
+
+void	zbx_set_child_pids(pid_t *pids, size_t pid_num)
+{
+	child_pids = pids;
+	child_pid_count = pid_num;
+}
+

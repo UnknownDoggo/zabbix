@@ -1,23 +1,15 @@
-//go:build linux
-// +build linux
-
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 package procfs
@@ -25,7 +17,6 @@ package procfs
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 	"syscall"
@@ -37,28 +28,6 @@ const (
 	gB = mB * 1024
 	tB = gB * 1024
 )
-
-// GetMemory reads /proc/meminfo file and returns and returns the value in bytes for the
-// specific memory type. Returns an error if the value was not found, or if there is an issue
-// with reading the file or parsing the value.
-func GetMemory(memType string) (mem uint64, err error) {
-	meminfo, err := ReadAll("/proc/meminfo")
-	if err != nil {
-		return mem, fmt.Errorf("cannot read meminfo file: %s", err.Error())
-	}
-
-	var found bool
-	mem, found, err = ByteFromProcFileData(meminfo, memType)
-	if err != nil {
-		return mem, fmt.Errorf("cannot get the memory amount for %s: %s", memType, err.Error())
-	}
-
-	if !found {
-		return mem, fmt.Errorf("cannot get the memory amount for %s", memType)
-	}
-
-	return
-}
 
 // ReadAll reads all data from a file. Returns an error if there is an issue with reading the file or
 // writing the output.

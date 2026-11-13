@@ -1,30 +1,27 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
-require_once dirname(__FILE__).'/../common/testFormApiTokens.php';
-require_once dirname(__FILE__).'/../../include/helpers/CDataHelper.php';
+
+require_once __DIR__.'/../common/testFormApiTokens.php';
+require_once __DIR__.'/../../include/helpers/CDataHelper.php';
 
 /**
  * @backup token
  *
  * @onBefore prepareTokenData
+ * @dataSource LoginUsers
  */
 class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 
@@ -51,7 +48,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 			],
 			[
 				'name' => 'user-zabbix token',
-				'userid' => 5,
+				'userid' => 50,
 				'description' => 'Token that is generated for user',
 				'status' => '0',
 				'expires_at' => '1798754399'
@@ -84,7 +81,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'User' => 'Admin',
 						'Set expiration date and time' => false
 					],
-					'error_details' => 'Incorrect value for field "name": cannot be empty.'
+					'error' => ['Name' => 'This field cannot be empty.']
 				]
 			],
 			// Empty spaces used as name.
@@ -96,7 +93,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'User' => 'Admin',
 						'Set expiration date and time' => false
 					],
-					'error_details' => 'Incorrect value for field "name": cannot be empty.'
+					'error' => ['Name' => 'This field cannot be empty.']
 				]
 			],
 			// Empty User field.
@@ -108,7 +105,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'User' => '',
 						'Set expiration date and time' => false
 					],
-					'error_details' => 'Field "userid" is mandatory.'
+					'error' => ['User' => 'This field cannot be empty.']
 				]
 			],
 			// Empty "Expires at" field if "Set expiration date and time" is true.
@@ -121,7 +118,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => ''
 					],
-					'error_details' => 'Incorrect value for field "expires_at": a time is expected.'
+					'error' => ['id:expires_at' => 'This field cannot be empty.']
 				]
 			],
 			// Incorrect "Expires at" field format.
@@ -134,7 +131,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => '01-01-2021 00:00:00'
 					],
-					'error_details' => 'Incorrect value for field "expires_at": a time is expected.'
+					'error' => ['id:expires_at' => 'Invalid date.']
 				]
 			],
 			// "Expires at" field value too far in the future.
@@ -147,7 +144,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => '2050-01-01 00:00:00'
 					],
-					'error_details' => 'Invalid parameter "/1/expires_at": a number is too large.'
+					'error' => ['id:expires_at' => 'Value must be less than or equal to 2038-01-19 05:14:07.']
 				]
 			],
 			// "Expires at" field value too far in the past.
@@ -160,7 +157,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => '1021-01-01 00:00:00'
 					],
-					'error_details' => 'Invalid parameter "/1/expires_at": a number is too large.'
+					'error' => ['id:expires_at' => 'Invalid date.']
 				]
 			],
 			// Correct format but wrong numbers in the "Expires at" field.
@@ -173,7 +170,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => '2021-01-01 24:00:00'
 					],
-					'error_details' => 'Incorrect value for field "expires_at": a time is expected.'
+					'error' => ['id:expires_at' => 'Invalid date.']
 				]
 			],
 			// Correct format but wrong numbers in the "Expires at" field.
@@ -186,7 +183,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'Set expiration date and time' => true,
 						'Expires at' => '2021-01-01 24:00:00'
 					],
-					'error_details' => 'Incorrect value for field "expires_at": a time is expected.'
+					'error' => ['id:expires_at' => 'Invalid date.']
 				]
 			],
 			// API token with special symbols in name and without an expiry date.
@@ -210,7 +207,7 @@ class testFormApiTokensAdministrationGeneral extends testFormApiTokens {
 						'User' => 'Admin',
 						'Description' => 'Token that is already expired when created',
 						'Set expiration date and time' => true,
-						'Expires at' => '1970-01-01 00:00:00',
+						'Expires at' => '1970-01-02 00:00:00',
 						'Enabled' => true
 					],
 					'already_expired' => true,

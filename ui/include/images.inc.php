@@ -1,21 +1,16 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 
@@ -43,16 +38,9 @@ function get_image_by_imageid($imageid) {
 }
 
 /**
- * Resizes the given image resource to the specified size keeping the original
- * proportions of the image.
- *
- * @param resource $source
- * @param int $thumbWidth
- * @param int $thumbHeight
- *
- * @return resource
+ * Resizes the given image resource to the specified size keeping the original proportions of the image.
  */
-function imageThumb($source, $thumbWidth = 0, $thumbHeight = 0) {
+function imageThumb(GdImage $source, int $thumbWidth = 0, int $thumbHeight = 0): GdImage {
 	$srcWidth	= imagesx($source);
 	$srcHeight	= imagesy($source);
 
@@ -75,12 +63,10 @@ function imageThumb($source, $thumbWidth = 0, $thumbHeight = 0) {
 			}
 		}
 
-		if (function_exists('imagecreatetruecolor') && @imagecreatetruecolor(1, 1)) {
-			$thumb = imagecreatetruecolor($thumbWidth, $thumbHeight);
-		}
-		else {
-			$thumb = imagecreate($thumbWidth, $thumbHeight);
-		}
+		$thumbWidth = (int) round($thumbWidth);
+		$thumbHeight = (int) round($thumbHeight);
+
+		$thumb = imagecreatetruecolor($thumbWidth, $thumbHeight);
 
 		// preserve png transparency
 		imagealphablending($thumb, false);
@@ -91,11 +77,12 @@ function imageThumb($source, $thumbWidth = 0, $thumbHeight = 0) {
 			0, 0,
 			0, 0,
 			$thumbWidth, $thumbHeight,
-			$srcWidth, $srcHeight);
+			$srcWidth, $srcHeight
+		);
 
-		imagedestroy($source);
 		$source = $thumb;
 	}
+
 	return $source;
 }
 

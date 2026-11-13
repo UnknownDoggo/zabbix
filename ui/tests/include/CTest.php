@@ -1,46 +1,70 @@
 <?php
 /*
-** Zabbix
-** Copyright (C) 2001-2022 Zabbix SIA
+** Copyright (C) 2001-2026 Zabbix SIA
 **
-** This program is free software; you can redistribute it and/or modify
-** it under the terms of the GNU General Public License as published by
-** the Free Software Foundation; either version 2 of the License, or
-** (at your option) any later version.
+** This program is free software: you can redistribute it and/or modify it under the terms of
+** the GNU Affero General Public License as published by the Free Software Foundation, version 3.
 **
-** This program is distributed in the hope that it will be useful,
-** but WITHOUT ANY WARRANTY; without even the implied warranty of
-** MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-** GNU General Public License for more details.
+** This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY;
+** without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+** See the GNU Affero General Public License for more details.
 **
-** You should have received a copy of the GNU General Public License
-** along with this program; if not, write to the Free Software
-** Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+** You should have received a copy of the GNU Affero General Public License along with this program.
+** If not, see <https://www.gnu.org/licenses/>.
 **/
 
 require_once 'vendor/autoload.php';
 
-require_once dirname(__FILE__).'/../../include/defines.inc.php';
-require_once dirname(__FILE__).'/../../include/hosts.inc.php';
+require_once __DIR__.'/../../include/defines.inc.php';
+require_once __DIR__.'/../../include/hosts.inc.php';
 
-require_once dirname(__FILE__).'/helpers/CDBHelper.php';
-require_once dirname(__FILE__).'/helpers/CConfigHelper.php';
-require_once dirname(__FILE__).'/helpers/CAPIHelper.php';
-require_once dirname(__FILE__).'/helpers/CDataHelper.php';
-require_once dirname(__FILE__).'/helpers/CExceptionHelper.php';
-require_once dirname(__FILE__).'/helpers/CTestArrayHelper.php';
-require_once dirname(__FILE__).'/helpers/CDateTimeHelper.php';
+require_once __DIR__.'/helpers/CDBHelper.php';
+require_once __DIR__.'/helpers/CConfigHelper.php';
+require_once __DIR__.'/helpers/CAPIHelper.php';
+require_once __DIR__.'/helpers/CAPIScimHelper.php';
+require_once __DIR__.'/helpers/CDataHelper.php';
+require_once __DIR__.'/helpers/CExceptionHelper.php';
+require_once __DIR__.'/helpers/CTestArrayHelper.php';
+require_once __DIR__.'/helpers/CDateTimeHelper.php';
+require_once __DIR__.'/helpers/CTestDBSettingsHelper.php';
+require_once __DIR__.'/helpers/CMfaTotpHelper.php';
+
+define('TEST_GOOD', 0);
+define('TEST_BAD', 1);
+define('TEST_ERROR', 2);
+
+// Major version as shown in the frontend and documentation links (e.g. "8.2" for "8.2.0alpha1").
+define('ZABBIX_MAJOR_VERSION', implode('.', array_slice(explode('.', ZABBIX_VERSION), 0, 2)));
 
 define('USER_ACTION_ADD', 'add');
 define('USER_ACTION_UPDATE', 'update');
 define('USER_ACTION_REMOVE', 'remove');
+
+define('INT_255', str_repeat(1, 255));
+define('STRING_6000', str_repeat('long_string_', 500));
+define('STRING_2200', substr(STRING_6000, 0, 2200));
+define('STRING_2048', substr(STRING_6000, 0, 2048));
+define('STRING_2000', substr(STRING_6000, 0, 2000));
+define('STRING_1024', substr(STRING_6000, 0, 1024));
+define('STRING_512', substr(STRING_6000, 0, 512));
+define('STRING_255', substr(STRING_6000, 0, 255));
+define('STRING_128', substr(STRING_6000, 0, 128));
+define('STRING_64', substr(STRING_6000, 0, 64));
+define('STRING_32', substr(STRING_6000, 0, 32));
 
 /**
  * Base class of php unit tests.
  */
 use PHPUnit\Framework\TestCase;
 
+/**
+ * Php unit built-in exception class.
+ */
+use PHPUnit\Framework\Warning;
+
 class CTest extends TestCase {
+
+	protected static bool $trace_delays = false;
 
 	// Table that should be backed up at the test suite level.
 	protected static $suite_backup = null;
@@ -77,6 +101,10 @@ class CTest extends TestCase {
 	protected static $instances = 0;
 	// List of behaviors.
 	protected $behaviors = null;
+
+	static $last_test_case_name;
+	private static $backup_time_per_test_file = 0.0;
+	private static $backup_time_total = 0.0;
 
 	/**
 	 * Overridden constructor for collecting data on data sets from dataProvider annotations.
@@ -258,6 +286,11 @@ class CTest extends TestCase {
 	 * @before
 	 */
 	public function onBeforeTestCase() {
+		if (!CDBHelper::isValid()) {
+			self::markTestSkipped('Test case skipped because of the broken DB state.');
+			return;
+		}
+
 		global $DB;
 		static $suite = null;
 		$class_name = get_class($this);
@@ -278,7 +311,15 @@ class CTest extends TestCase {
 		if (self::$last_test_case !== $case_name) {
 			// Restore data from backup if test case changed.
 			if (self::$case_backup_once !== null) {
+				$start = microtime(true);
 				CDBHelper::restoreTables();
+
+				if (static::$trace_delays) {
+					$caseDuration = microtime(true) - $start;
+					self::$backup_time_per_test_file += $caseDuration;
+					self::$backup_time_total += $caseDuration;
+				}
+
 				self::$case_backup_once = null;
 			}
 
@@ -376,6 +417,11 @@ class CTest extends TestCase {
 	 * @after
 	 */
 	public function onAfterTestCase() {
+		self::$last_test_case_name = get_class($this);
+		if (!CDBHelper::isValid()) {
+			return;
+		}
+
 		$errors = @file_get_contents(PHPUNIT_ERROR_LOG);
 
 		if ($this->case_backup_config) {
@@ -383,8 +429,23 @@ class CTest extends TestCase {
 			$this->case_backup_config = false;
 		}
 
+		if (CDataHelper::getSessionId() !== null) {
+			foreach (CDBHelper::$backups as $backup) {
+				if (in_array('sessions', $backup)) {
+					CDataHelper::reset();
+				}
+			}
+		}
+
 		if ($this->case_backup !== null) {
+			$start = microtime(true);
 			CDBHelper::restoreTables();
+
+			if (static::$trace_delays) {
+				$caseDuration = microtime(true) - $start;
+				self::$backup_time_per_test_file += $caseDuration;
+				self::$backup_time_total += $caseDuration;
+			}
 		}
 
 		// Execute callbacks that should be executed after specific test case.
@@ -396,7 +457,7 @@ class CTest extends TestCase {
 		DBclose();
 
 		if (defined('PHPUNIT_REPORT_WARNINGS') && PHPUNIT_REPORT_WARNINGS && self::$warnings) {
-			throw new PHPUnit_Framework_Warning(implode("\n", self::$warnings));
+			throw new Warning(implode("\n", self::$warnings));
 		}
 
 		if ($errors !== '' && $errors !== false) {
@@ -420,6 +481,14 @@ class CTest extends TestCase {
 		if (self::$suite_backup === null && self::$case_backup_once === null && !self::$suite_callbacks['afterOnce']
 				&& !self::$suite_callbacks['after']) {
 
+			if (static::$trace_delays) {
+				fwrite(STDERR, sprintf("[%s] onAfterTestSuite backup restore took %.4fs [total: %.4fs]\n",
+					self::$last_test_case_name, self::$backup_time_per_test_file,
+					self::$backup_time_total));
+
+				self::$backup_time_per_test_file = 0;
+			}
+
 			// Nothing to do after test suite.
 			return;
 		}
@@ -428,14 +497,37 @@ class CTest extends TestCase {
 
 		// Restore case level backups.
 		if (self::$case_backup_once !== null) {
+			$start = microtime(true);
 			CDBHelper::restoreTables();
+
+			if (static::$trace_delays) {
+				$caseDuration = microtime(true) - $start;
+				self::$backup_time_per_test_file += $caseDuration;
+				self::$backup_time_total += $caseDuration;
+			}
+
 			self::$case_backup_once = null;
 		}
 
 		// Restore suite level backups.
 		if (self::$suite_backup !== null) {
+			$start = microtime(true);
 			CDBHelper::restoreTables();
+
+			if (static::$trace_delays) {
+				$caseDuration = microtime(true) - $start;
+				self::$backup_time_per_test_file += $caseDuration;
+				self::$backup_time_total += $caseDuration;
+			}
+
 			self::$suite_backup = null;
+		}
+
+		if (static::$trace_delays) {
+			fwrite(STDERR, sprintf("[%s] onAfterTestSuite backup restore took %.4fs [total %.4fs]\n",
+				self::$last_test_case_name, self::$backup_time_per_test_file,
+				self::$backup_time_total));
+			self::$backup_time_per_test_file = 0;
 		}
 
 		$context = get_called_class();
